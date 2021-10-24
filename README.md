@@ -20,3 +20,12 @@ Through this project, we are analyzing and improving performance issues.
 An improved NES Emulator written in Rust on STM32 application.
 It is expected to have better performance than the [original project](https://github.com/kamiyaowl/rust-nes-emulator#embedded-for-stm32f769) ...
 
+
+
+# Links:
+
+https://www.nesdev.com/NESDoc.pdf
+https://github.com/starrhorne/nes-rust
+https://github.com/AndreaOrru/LaiNES
+https://github.com/fogleman/nes
+https://wiki.nesdev.org/w/index.php/Emulator_tests

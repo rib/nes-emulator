@@ -340,7 +340,7 @@ impl Ppu {
         let is_write_bg = system.read_ppu_is_write_bg();
         let is_monochrome = system.read_is_monochrome();
         let master_bg_color = Color::from(system.video.read_u8(
-            &mut system.cassette,
+            system.cartridge.as_mut(),
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
@@ -389,7 +389,7 @@ impl Ppu {
                 attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
             // attribute読み出し, BGパレット選択に使う。4*4の位置で使うパレット情報を変える
-            let raw_attribute = system.video.read_u8(&mut system.cassette, attribute_addr);
+            let raw_attribute = system.video.read_u8(system.cartridge.as_mut(), attribute_addr);
             let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
                 (true, true) => (raw_attribute >> 0) & 0x03,  // top left
                 (false, true) => (raw_attribute >> 2) & 0x03, // top right
@@ -399,7 +399,7 @@ impl Ppu {
 
             // Nametableからtile_id読み出し->pattern tableからデータ構築
             let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-            let bg_tile_id = u16::from(system.video.read_u8(&mut system.cassette, nametable_addr));
+            let bg_tile_id = u16::from(system.video.read_u8(system.cartridge.as_mut(), nametable_addr));
 
             // pattern_table 1entryは16byte, 0行目だったら0,8番目のデータを使えば良い
             let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
@@ -407,10 +407,10 @@ impl Ppu {
             let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
             let bg_data_lower = system
                 .video
-                .read_u8(&mut system.cassette, bg_pattern_table_addr_lower);
+                .read_u8(system.cartridge.as_mut(), bg_pattern_table_addr_lower);
             let bg_data_upper = system
                 .video
-                .read_u8(&mut system.cassette, bg_pattern_table_addr_upper);
+                .read_u8(system.cartridge.as_mut(), bg_pattern_table_addr_upper);
 
             // bgの描画色を作る
             let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
@@ -426,7 +426,7 @@ impl Ppu {
             {
                 None
             } else {
-                Some(system.video.read_u8(&mut system.cassette, bg_palette_addr))
+                Some(system.video.read_u8(system.cartridge.as_mut(), bg_palette_addr))
             };
 
             // 透明色
@@ -576,10 +576,10 @@ impl Ppu {
                     let sprite_pattern_table_addr_upper = sprite_pattern_table_addr_lower + 8;
                     let sprite_data_lower = system
                         .video
-                        .read_u8(&mut system.cassette, sprite_pattern_table_addr_lower);
+                        .read_u8(system.cartridge.as_mut(), sprite_pattern_table_addr_lower);
                     let sprite_data_upper = system
                         .video
-                        .read_u8(&mut system.cassette, sprite_pattern_table_addr_upper);
+                        .read_u8(system.cartridge.as_mut(), sprite_pattern_table_addr_upper);
                     // 該当するx位置のpixel patternを作る
                     let sprite_palette_offset =
                         (((sprite_data_upper >> (7 - tile_offset_x)) & 0x01) << 1)
@@ -594,7 +594,7 @@ impl Ppu {
                         // パレットを読み出し
                         let sprite_palette_data = system
                             .video
-                            .read_u8(&mut system.cassette, sprite_palette_addr);
+                            .read_u8(system.cartridge.as_mut(), sprite_palette_addr);
                         // 表裏の優先度がattrにあるので、該当する方に書き込み
                         if sprite.attr.is_draw_front {
                             sprite_palette_data_front = Some(sprite_palette_data);
@@ -738,11 +738,11 @@ impl Ppu {
         if is_write_ppu_req {
             system
                 .video
-                .write_u8(&mut system.cassette, ppu_addr, ppu_data);
+                .write_u8(system.cartridge.as_mut(), ppu_addr, ppu_data);
             system.increment_ppu_addr();
         }
         if is_read_ppu_req {
-            let data = system.video.read_u8(&mut system.cassette, ppu_addr);
+            let data = system.video.read_u8(system.cartridge.as_mut(), ppu_addr);
             system.write_ppu_data(data);
             system.increment_ppu_addr();
         }

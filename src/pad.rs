@@ -62,7 +62,10 @@ impl Pad {
         }
         data
     }
+
     /// 押されたボタンをシフトレジスタに記録します。この関数はエミュの外側から呼ぶことを想定しています
+    /// The pressed button is recorded in the shift register.
+    /// This function is supposed to be called from outside the emulation
     pub fn push_button(&mut self, button: PadButton) {
         match button {
             PadButton::A => self.button_reg = self.button_reg | 0x01u8,

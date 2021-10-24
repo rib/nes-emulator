@@ -18,3 +18,14 @@ lto = true
 [lib]
 path = "src/lib.rs"
 name = "rust_nes_emulator"
+
+[dependencies]
+log = "0.4"
+env_logger = "0.9"
+#bevy = { git = "https://github.com/bevyengine/bevy" }
+egui = { path = "../egui/egui" }
+egui_glow = { path = "../egui/egui_glow" }
+glow = "0.11"
+glutin = "0.27"
+pretty_env_logger = { git = "https://github.com/project-anni/pretty-env-logger.git" }
+image = "0.23"

@@ -1,4 +1,6 @@
-use super::cassette::*;
+use crate::cartridge;
+
+use super::cartridge::*;
 use super::interface::*;
 
 pub const PATTERN_TABLE_BASE_ADDR: u16 = 0x0000;
@@ -21,7 +23,7 @@ pub const PALETTE_SPRITE_OFFSET: u16 = 0x10;
 pub struct VideoSystem {
     // 0x0000 - 0x1fff
     // pattern table 0/1
-    // cassetteのCHR-RAMを読む
+    // cartridgeのCHR-RAMを読む
     /// 0x2000-0x2fff
     /// name table 0/1/2/3 (0x400が4面)
     /// 実際には2面しか持っていないのでカセットのミラーリング設定を引用
@@ -99,18 +101,33 @@ impl VideoSystem {
         };
         (table_index, offset)
     }
-    pub fn read_u8(&self, cassette: &mut Cassette, addr: u16) -> u8 {
+
+    pub fn read_u8(&self, cartridge: Option<&mut Cartridge>, addr: u16) -> u8 {
         debug_assert!(addr < VIDEO_ADDRESS_SIZE);
 
         if addr < NAME_TABLE_BASE_ADDR {
-            cassette.read_video_u8(addr)
+            if let Some(cartridge) = cartridge {
+                cartridge.read_video_u8(addr)
+            } else {
+                0
+            }
         } else if addr < NAME_TABLE_MIRROR_BASE_ADDR {
-            let (index, offset) = self.convert_name_table_addr(cassette.nametable_mirror, addr);
+            let mirror_mode = if let Some(cartridge) = cartridge {
+                cartridge.nametable_mirror
+            } else {
+                NameTableMirror::Horizontal
+            };
+            let (index, offset) = self.convert_name_table_addr(mirror_mode, addr);
             self.nametables[index][offset]
         } else if addr < PALETTE_TABLE_BASE_ADDR {
+            let mirror_mode = if let Some(cartridge) = cartridge {
+                cartridge.nametable_mirror
+            } else {
+                NameTableMirror::Horizontal
+            };
             // 0x3000 -> 0x2000にミラーする
             let (index, offset) =
-                self.convert_name_table_addr(cassette.nametable_mirror, addr - 0x1000);
+                self.convert_name_table_addr(mirror_mode, addr - 0x1000);
             self.nametables[index][offset]
         } else {
             // Palette with mirroring
@@ -125,18 +142,30 @@ impl VideoSystem {
             }
         }
     }
-    pub fn write_u8(&mut self, cassette: &mut Cassette, addr: u16, data: u8) {
+    pub fn write_u8(&mut self, cartridge: Option<&mut Cartridge>, addr: u16, data: u8) {
         debug_assert!(addr < VIDEO_ADDRESS_SIZE);
 
         if addr < NAME_TABLE_BASE_ADDR {
-            cassette.write_video_u8(addr, data);
+            if let Some(cartridge) = cartridge {
+                cartridge.write_video_u8(addr, data);
+            }
         } else if addr < NAME_TABLE_MIRROR_BASE_ADDR {
-            let (index, offset) = self.convert_name_table_addr(cassette.nametable_mirror, addr);
+            let mirror_mode = if let Some(cartridge) = cartridge {
+                cartridge.nametable_mirror
+            } else {
+                NameTableMirror::Horizontal
+            };
+            let (index, offset) = self.convert_name_table_addr(mirror_mode, addr);
             self.nametables[index][offset] = data;
         } else if addr < PALETTE_TABLE_BASE_ADDR {
+            let mirror_mode = if let Some(cartridge) = cartridge {
+                cartridge.nametable_mirror
+            } else {
+                NameTableMirror::Horizontal
+            };
             // 0x3000 -> 0x2000にミラーする
             let (index, offset) =
-                self.convert_name_table_addr(cassette.nametable_mirror, addr - 0x1000);
+                self.convert_name_table_addr(mirror_mode, addr - 0x1000);
             self.nametables[index][offset] = data;
         } else {
             // Palette with mirroring

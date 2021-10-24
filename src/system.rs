@@ -1,4 +1,6 @@
-use super::cassette::*;
+use crate::cartridge;
+
+use super::cartridge::*;
 use super::interface::*;
 use super::pad::*;
 use super::video_system::*;
@@ -16,7 +18,7 @@ pub const APU_IO_REG_BASE_ADDR: u16 = 0x4000;
 pub const CASSETTE_BASE_ADDR: u16 = 0x4020;
 
 /// Memory Access Dispatcher
-#[derive(Clone)]
+//#[derive(Clone)]
 pub struct System {
     /// 0x0000 - 0x07ff: WRAM
     /// 0x0800 - 0x1f7ff: WRAM  Mirror x3
@@ -33,7 +35,7 @@ pub struct System {
     ///  0x6000 - 0x7FFF: Extended RAM
     ///  0x8000 - 0xbfff: PRG-ROM switchable
     ///  0xc000 - 0xffff: PRG-ROM fixed to the last bank or switchable
-    pub cassette: Cassette,
+    pub cartridge: Option<Cartridge>,
 
     /// PPUが描画に使うメモリ空間
     pub video: VideoSystem,
@@ -66,7 +68,7 @@ impl Default for System {
             ppu_reg: [0; PPU_REG_SIZE],
             io_reg: [0; APU_IO_REG_SIZE],
 
-            cassette: Default::default(),
+            cartridge: None,
             video: Default::default(),
             pad1: Default::default(),
             pad2: Default::default(),
@@ -122,8 +124,9 @@ impl SystemBus for System {
             debug_assert!(index < 0x9);
             match index {
                 // PPU_STATUS 2度書きレジスタの状態をリセット, VBLANKフラグをクリア
+                // PPU_STATUS Resets the write register status twice, clears the VBLANK flag
                 0x02 => {
-                    let data = self.ppu_reg[index]; // 先にフェッチしないとあかんやんけ
+                    let data = self.ppu_reg[index]; // 先にフェッチしないとあかんやんけ - if you don't fetch it first
                     if !is_nondestructive {
                         self.ppu_is_second_write = false;
                         self.write_ppu_is_vblank(false);
@@ -131,6 +134,7 @@ impl SystemBus for System {
                     data
                 }
                 // OAM_DATAの読み出しフラグ
+                // OAM_DATA read flag
                 0x04 => {
                     if !is_nondestructive {
                         self.read_oam_data = true;
@@ -139,6 +143,8 @@ impl SystemBus for System {
                 }
                 // PPU_DATA update/address incrementのためにフラグを立てる
                 // バッファが入るので1step遅れで結果が入る
+                // Since there is a buffer that sets a flag for PPU_DATA update / address increment,
+                // the result will be entered with a delay of 1 step
                 0x07 => {
                     if !is_nondestructive {
                         self.read_ppu_data = true;
@@ -161,7 +167,12 @@ impl SystemBus for System {
                 arr_read!(self.io_reg, index)
             }
         } else {
-            self.cassette.read_u8(addr, is_nondestructive)
+            if let Some(cartridge) = &mut self.cartridge {
+                cartridge.read_u8(addr, is_nondestructive)
+            } else {
+                //trace!("No cartridge to read from");
+                0
+            }
         }
     }
     fn write_u8(&mut self, addr: u16, data: u8, is_nondestructive: bool) {
@@ -238,7 +249,11 @@ impl SystemBus for System {
             }
             arr_write!(self.io_reg, index, data);
         } else {
-            self.cassette.write_u8(addr, data, is_nondestructive);
+            if let Some(cartridge) = &mut self.cartridge {
+                cartridge.write_u8(addr, data, is_nondestructive);
+            } else {
+                // trace!("No cartridge to write to");
+            }
         }
     }
 }
