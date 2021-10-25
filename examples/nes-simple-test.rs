@@ -1,26 +1,10 @@
-use std::slice;
 use std::str;
-use rust_nes_emulator::prelude::*;
 use std::fs::File;
 use std::io::prelude::*;
 use egui_glow;
 use glutin::event::VirtualKeyCode;
 
-pub const EMBEDDED_EMULATOR_VISIBLE_SCREEN_WIDTH: usize = 256;
-pub const EMBEDDED_EMULATOR_VISIBLE_SCREEN_HEIGHT: usize = 240;
-
-pub const EMBEDDED_EMULATOR_PLAYER_0: u32 = 0;
-pub const EMBEDDED_EMULATOR_PLAYER_1: u32 = 1;
-
-#[derive(PartialEq, Eq)]
-#[repr(u8)]
-pub enum CpuInterrupt {
-    NMI,
-    RESET,
-    IRQ,
-    BRK,
-    NONE,
-}
+use rust_nes_emulator::prelude::*;
 
 fn get_file_as_byte_vec(filename: &str) -> Vec<u8> {
     println!("Loading {}", filename);
@@ -69,6 +53,11 @@ fn create_display(
     (gl_window, gl)
 }
 
+unsafe fn u8_slice_as_color32_slice(u8_data: &[u8]) -> &[egui::Color32] {
+    debug_assert!(u8_data.len() % 4 == 0);
+    std::slice::from_raw_parts::<egui::Color32>(u8_data.as_ptr() as *const egui::Color32, u8_data.len() / 4)
+}
+
 fn main() {
     env_logger::builder().filter_level(log::LevelFilter::Warn) // Default Log Level
                          .parse_default_env()
@@ -82,82 +71,64 @@ fn main() {
     let mut egui = egui_glow::EguiGlow::new(&gl_window, &gl);
 
     let rom = get_file_as_byte_vec(&std::env::args().nth(1).expect("Expected path to .nes ROM"));
-    
-    let scale = 2;
-    let screen_width = EMBEDDED_EMULATOR_VISIBLE_SCREEN_WIDTH;
-    let screen_height = EMBEDDED_EMULATOR_VISIBLE_SCREEN_HEIGHT;
-    let fb_size = screen_width * screen_height * 4;
-    println!("FB size = {}", fb_size);
-
-    let mut fb_buf = vec![0u8; fb_size];
-    let mut cpu = Cpu::default();
-    let mut system = System::default();
-    let mut ppu = Ppu::default();
-    ppu.draw_option.fb_width = screen_width as u32;
-    ppu.draw_option.fb_height = screen_height as u32;
-    ppu.draw_option.offset_x = 0;
-    ppu.draw_option.offset_y = 0;
-    ppu.draw_option.scale = 1;
-    ppu.draw_option.pixel_format = PixelFormat::RGBA8888;
+   
+    let mut nes = Nes::new(PixelFormat::RGBA8888);
 
     let cartridge = Cartridge::from_ines_binary(|addr: usize| rom[addr]);
-    system.cartridge = cartridge;
+    nes.insert_cartridge(cartridge);
 
-    cpu.reset();
-    system.reset();
-    ppu.reset();
-    cpu.interrupt(&mut system, Interrupt::RESET);
+    nes.reset();
+    
+    // XXX: we only need a single framebuffer considering that egui will synchronously copy
+    // the data anyway
+    let mut framebuffer = nes.allocate_framebuffer();
+    let fb_width = framebuffer.width();
+    let fb_height = framebuffer.height();
 
-    let mut frame_no = 0;
-    let mut buffers = vec![];
+    let mut textures = vec![];
+    let mut current_texture = 0;
     
     {
         let painter = egui.painter_mut();
 
         for _i in 0..2 {
             let tex = painter.alloc_user_texture();
-            buffers.push(tex);
-            println!("uploading tex, w={}, h = {}", screen_width, screen_height);
-            let red_buf: Vec<egui::Color32> = vec![egui::Color32::RED; screen_width * screen_height];
-            painter.set_user_texture(tex, (screen_width, screen_height), &red_buf);
+            textures.push(tex);
+
+            {
+                let rental = framebuffer.rent_data().unwrap();
+                let pixels = unsafe { u8_slice_as_color32_slice(&rental.data) };
+                painter.set_user_texture(tex, (fb_width, fb_height), pixels);
+            }
         }
     }
-    let mut buffer_pos = 0;
 
+    let mut frame_no = 0;
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
             egui.begin_frame(gl_window.window());
 
-            let cyc_per_frame = CYCLE_PER_DRAW_FRAME;
-
-            println!("Frame {}", frame_no);
-            let mut i = 0;
-            while i < cyc_per_frame {
-                let cyc = cpu.step(&mut system);
-                i += cyc as usize;
-
-                let irq = ppu.step(cyc.into(), &mut system, fb_buf.as_mut_ptr());
-                
-                if let Some(irq) = irq {
-                    cpu.interrupt(&mut system, irq);
-                }
-            }
-            let tex = buffers[buffer_pos];
+            nes.tick_frame(framebuffer.clone());
+            
+            let tex = textures[current_texture];
             {
-                let fb_as_color_slice= unsafe { std::slice::from_raw_parts::<egui::Color32>(fb_buf.as_ptr() as *const egui::Color32, fb_buf.len() / 4) };
+                let rental = framebuffer.rent_data().unwrap();
+                let fb_color_slice = unsafe { u8_slice_as_color32_slice(&rental.data) };
                 let painter = egui.painter_mut();
-                painter.set_user_texture(tex, (screen_width, screen_height), fb_as_color_slice);
+                painter.set_user_texture(tex, (fb_width, fb_height), fb_color_slice);
             }
 
-            buffer_pos += 1;
-            if buffer_pos >= buffers.len() {
-                buffer_pos = 0;
+            current_texture += 1;
+            if current_texture >= textures.len() {
+                current_texture = 0;
             }
             frame_no += 1;
 
             if frame_no == 50 {
-                let stride = screen_width * 4;
-                let mut imgbuf = image::ImageBuffer::new(screen_width as u32, screen_height as u32);
+                let rental = framebuffer.rent_data().unwrap();
+                let fb_buf = &rental.data;
+                let stride = fb_width * 4;
+                let mut imgbuf = image::ImageBuffer::new(fb_width as u32, fb_height as u32);
                 for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
                     let x = x as usize;
                     let y = y as usize;
@@ -178,10 +149,10 @@ fn main() {
                 }
             });
             egui::CentralPanel::default().show(egui.ctx(), |ui| {
-                ui.add(egui::Image::new(tex, egui::Vec2::new((screen_width * 2) as f32, (screen_height * 2) as f32)));
+                ui.add(egui::Image::new(tex, egui::Vec2::new((fb_width * 2) as f32, (fb_height * 2) as f32)));
             });
 
-            let (needs_repaint, shapes) = egui.end_frame(gl_window.window());
+            let (_needs_repaint, shapes) = egui.end_frame(gl_window.window());
 
             *control_flow = if quit {
                 glutin::event_loop::ControlFlow::Exit
@@ -224,7 +195,7 @@ fn main() {
 
             glutin::event::Event::WindowEvent { event, .. } => {
                 match event {
-                    glutin::event::WindowEvent::KeyboardInput { device_id, input, .. } => {
+                    glutin::event::WindowEvent::KeyboardInput { input, .. } => {
                         if let Some(keycode) = input.virtual_keycode {
                             let button = match keycode {
                                 VirtualKeyCode::Return => { Some(PadButton::Start) }
@@ -238,6 +209,7 @@ fn main() {
                                 _ => None
                             };
                             if let Some(button) = button {
+                                let system = nes.system_mut();
                                 if input.state == glutin::event::ElementState::Pressed {
                                     system.pad1.push_button(button);
                                 } else {

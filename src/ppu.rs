@@ -180,7 +180,7 @@ impl LineStatus {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum PixelFormat {
     RGBA8888,
     BGRA8888,
