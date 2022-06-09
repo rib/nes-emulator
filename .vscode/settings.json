@@ -4,5 +4,8 @@
         "utility": "cpp",
         "tuple": "cpp",
         "ostream": "cpp"
-    }
+    },
+    "rust-analyzer.cargo.features": [
+        "trace"
+    ]
 }
