@@ -1,7 +1,9 @@
 use std::str;
 use std::fs::File;
 use std::io::prelude::*;
+use egui::{ColorImage, Color32, ImageData, epaint::ImageDelta};
 use egui_glow;
+use glow::HasContext;
 use glutin::event::VirtualKeyCode;
 
 use rust_nes_emulator::prelude::*;
@@ -15,7 +17,6 @@ fn get_file_as_byte_vec(filename: &str) -> Vec<u8> {
 
     buffer
 }
-
 
 fn create_display(
     event_loop: &glutin::event_loop::EventLoop<()>,
@@ -45,11 +46,6 @@ fn create_display(
 
     let gl = unsafe { glow::Context::from_loader_function(|s| gl_window.get_proc_address(s)) };
 
-    unsafe {
-        use glow::HasContext as _;
-        gl.enable(glow::FRAMEBUFFER_SRGB);
-    }
-
     (gl_window, gl)
 }
 
@@ -67,61 +63,56 @@ fn main() {
 
     let event_loop = glutin::event_loop::EventLoop::with_user_event();
     let (gl_window, gl) = create_display(&event_loop);
+    let gl = std::sync::Arc::new(gl);
 
-    let mut egui = egui_glow::EguiGlow::new(&gl_window, &gl);
+    let mut egui_glow = egui_glow::EguiGlow::new(&event_loop, gl.clone());
 
     let rom = get_file_as_byte_vec(&std::env::args().nth(1).expect("Expected path to .nes ROM"));
-   
+
     let mut nes = Nes::new(PixelFormat::RGBA8888);
 
     let cartridge = Cartridge::from_ines_binary(|addr: usize| rom[addr]);
     nes.insert_cartridge(cartridge);
 
     nes.reset();
-    
+
     // XXX: we only need a single framebuffer considering that egui will synchronously copy
     // the data anyway
     let mut framebuffer = nes.allocate_framebuffer();
     let fb_width = framebuffer.width();
     let fb_height = framebuffer.height();
 
-    let mut textures = vec![];
-    let mut current_texture = 0;
-    
-    {
-        let painter = egui.painter_mut();
-
-        for _i in 0..2 {
-            let tex = painter.alloc_user_texture();
-            textures.push(tex);
-
-            {
-                let rental = framebuffer.rent_data().unwrap();
-                let pixels = unsafe { u8_slice_as_color32_slice(&rental.data) };
-                painter.set_user_texture(tex, (fb_width, fb_height), pixels);
-            }
-        }
-    }
+    let framebuffer_texture = {
+        let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
+        let blank = ColorImage {
+            size: [fb_width as _, fb_height as _],
+            pixels: vec![Color32::default(); fb_width * fb_height],
+        };
+        let blank = ImageData::Color(blank);
+        let tex = egui_glow.egui_ctx.load_texture("framebuffer", blank, egui::TextureFilter::Nearest);
+        tex
+    };
 
     let mut frame_no = 0;
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
-            egui.begin_frame(gl_window.window());
 
             nes.tick_frame(framebuffer.clone());
-            
-            let tex = textures[current_texture];
+
             {
                 let rental = framebuffer.rent_data().unwrap();
-                let fb_color_slice = unsafe { u8_slice_as_color32_slice(&rental.data) };
-                let painter = egui.painter_mut();
-                painter.set_user_texture(tex, (fb_width, fb_height), fb_color_slice);
+
+                // hmmm, redundant copy, grumble grumble...
+                let copy = ImageDelta::full(ImageData::Color(ColorImage {
+                    size: [fb_width as _, fb_height as _],
+                    pixels: rental.data.chunks_exact(4)
+                        .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
+                        .collect(),
+                }), egui::TextureFilter::Nearest);
+
+                egui_glow.egui_ctx.tex_manager().write().set(framebuffer_texture.id(), copy);
             }
 
-            current_texture += 1;
-            if current_texture >= textures.len() {
-                current_texture = 0;
-            }
             frame_no += 1;
 
             if frame_no == 50 {
@@ -143,16 +134,18 @@ fn main() {
             }
             let mut quit = false;
 
-            egui::SidePanel::left("my_side_panel").show(egui.ctx(), |ui| {
-                if ui.button("Quit").clicked() {
-                    quit = true;
-                }
-            });
-            egui::CentralPanel::default().show(egui.ctx(), |ui| {
-                ui.add(egui::Image::new(tex, egui::Vec2::new((fb_width * 2) as f32, (fb_height * 2) as f32)));
-            });
 
-            let (_needs_repaint, shapes) = egui.end_frame(gl_window.window());
+            let needs_repaint = egui_glow.run(gl_window.window(), |egui_ctx| {
+
+                egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
+                    if ui.button("Quit").clicked() {
+                        quit = true;
+                    }
+                });
+                egui::CentralPanel::default().show(egui_ctx, |ui| {
+                    ui.add(egui::Image::new(framebuffer_texture.id(), egui::Vec2::new((fb_width * 2) as f32, (fb_height * 2) as f32)));
+                });
+            });
 
             *control_flow = if quit {
                 glutin::event_loop::ControlFlow::Exit
@@ -178,7 +171,7 @@ fn main() {
 
                 // draw things behind egui here
 
-                egui.paint(&gl_window, &gl, shapes);
+                egui_glow.paint(gl_window.window());
 
                 // draw things on top of egui here
 
@@ -194,8 +187,10 @@ fn main() {
             glutin::event::Event::RedrawRequested(_) if !cfg!(windows) => redraw(),
 
             glutin::event::Event::WindowEvent { event, .. } => {
+                use glutin::event::WindowEvent;
+
                 match event {
-                    glutin::event::WindowEvent::KeyboardInput { input, .. } => {
+                    WindowEvent::KeyboardInput { input, .. } => {
                         if let Some(keycode) = input.virtual_keycode {
                             let button = match keycode {
                                 VirtualKeyCode::Return => { Some(PadButton::Start) }
@@ -220,7 +215,8 @@ fn main() {
                     }
                     _ => {}
                 }
-                if egui.is_quit_event(&event) {
+
+                if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
                     *control_flow = glutin::event_loop::ControlFlow::Exit;
                 }
 
@@ -228,12 +224,12 @@ fn main() {
                     gl_window.resize(physical_size);
                 }
 
-                egui.on_event(&event);
+                egui_glow.on_event(&event);
 
                 gl_window.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
             glutin::event::Event::LoopDestroyed => {
-                egui.destroy(&gl);
+                egui_glow.destroy();
             }
             _ => (),
         }
