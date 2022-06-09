@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = [ "unsafe-opt" ]
 unsafe-opt = []
+trace = []
 
 [profile.dev]
 opt-level = 0
@@ -22,10 +23,21 @@ name = "rust_nes_emulator"
 [dependencies]
 log = "0.4"
 env_logger = "0.9"
+bytemuck = "1.9"
 #bevy = { git = "https://github.com/bevyengine/bevy" }
-egui = { path = "../egui/egui" }
-egui_glow = { path = "../egui/egui_glow" }
+
+egui = "0.18"
+egui_glow = { version = "0.18", features = [ "winit" ] }
+egui-winit = "0.18"
 glow = "0.11"
-glutin = "0.27"
+glutin = "0.28"
 pretty_env_logger = { git = "https://github.com/project-anni/pretty-env-logger.git" }
 image = "0.23"
+
+
+[patch.crates-io]
+winit = { git = "https://github.com/rib/winit", branch = "agdk-game-activity" }
+egui = { git = "https://github.com/emilk/egui" }
+#egui-wgpu = { git = "https://github.com/emilk/egui" }
+egui-winit = { git = "https://github.com/emilk/egui" }
+egui_glow = { git = "https://github.com/emilk/egui" }
