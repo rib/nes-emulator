@@ -108,311 +108,310 @@ enum AddressingMode {
     IndirectY,
 }
 #[derive(Copy, Clone)]
-/// (data, cyc)
-struct Operand(u16, u8);
+struct Operand { data: u16, cyc: u8 }
 
 #[derive(Copy, Clone, Debug)]
-struct Instruction(Opcode, AddressingMode);
+struct Instruction { op: Opcode, mode: AddressingMode }
 
 impl Instruction {
     /// romのコードを命令に変換します
     pub fn from(inst_code: u8) -> Instruction {
         match inst_code {
             /* *************** binary op ***************  */
-            0x69 => Instruction(Opcode::ADC, AddressingMode::Immediate),
-            0x65 => Instruction(Opcode::ADC, AddressingMode::ZeroPage),
-            0x75 => Instruction(Opcode::ADC, AddressingMode::ZeroPageX),
-            0x6d => Instruction(Opcode::ADC, AddressingMode::Absolute),
-            0x7d => Instruction(Opcode::ADC, AddressingMode::AbsoluteX),
-            0x79 => Instruction(Opcode::ADC, AddressingMode::AbsoluteY),
-            0x61 => Instruction(Opcode::ADC, AddressingMode::IndirectX),
-            0x71 => Instruction(Opcode::ADC, AddressingMode::IndirectY),
+            0x69 => Instruction { op: Opcode::ADC, mode: AddressingMode::Immediate },
+            0x65 => Instruction { op: Opcode::ADC, mode: AddressingMode::ZeroPage },
+            0x75 => Instruction { op: Opcode::ADC, mode: AddressingMode::ZeroPageX },
+            0x6d => Instruction { op: Opcode::ADC, mode: AddressingMode::Absolute },
+            0x7d => Instruction { op: Opcode::ADC, mode: AddressingMode::AbsoluteX },
+            0x79 => Instruction { op: Opcode::ADC, mode: AddressingMode::AbsoluteY },
+            0x61 => Instruction { op: Opcode::ADC, mode: AddressingMode::IndirectX },
+            0x71 => Instruction { op: Opcode::ADC, mode: AddressingMode::IndirectY },
 
-            0xe9 => Instruction(Opcode::SBC, AddressingMode::Immediate),
-            0xe5 => Instruction(Opcode::SBC, AddressingMode::ZeroPage),
-            0xf5 => Instruction(Opcode::SBC, AddressingMode::ZeroPageX),
-            0xed => Instruction(Opcode::SBC, AddressingMode::Absolute),
-            0xfd => Instruction(Opcode::SBC, AddressingMode::AbsoluteX),
-            0xf9 => Instruction(Opcode::SBC, AddressingMode::AbsoluteY),
-            0xe1 => Instruction(Opcode::SBC, AddressingMode::IndirectX),
-            0xf1 => Instruction(Opcode::SBC, AddressingMode::IndirectY),
+            0xe9 => Instruction { op: Opcode::SBC, mode: AddressingMode::Immediate },
+            0xe5 => Instruction { op: Opcode::SBC, mode: AddressingMode::ZeroPage },
+            0xf5 => Instruction { op: Opcode::SBC, mode: AddressingMode::ZeroPageX },
+            0xed => Instruction { op: Opcode::SBC, mode: AddressingMode::Absolute },
+            0xfd => Instruction { op: Opcode::SBC, mode: AddressingMode::AbsoluteX },
+            0xf9 => Instruction { op: Opcode::SBC, mode: AddressingMode::AbsoluteY },
+            0xe1 => Instruction { op: Opcode::SBC, mode: AddressingMode::IndirectX },
+            0xf1 => Instruction { op: Opcode::SBC, mode: AddressingMode::IndirectY },
 
-            0x29 => Instruction(Opcode::AND, AddressingMode::Immediate),
-            0x25 => Instruction(Opcode::AND, AddressingMode::ZeroPage),
-            0x35 => Instruction(Opcode::AND, AddressingMode::ZeroPageX),
-            0x2d => Instruction(Opcode::AND, AddressingMode::Absolute),
-            0x3d => Instruction(Opcode::AND, AddressingMode::AbsoluteX),
-            0x39 => Instruction(Opcode::AND, AddressingMode::AbsoluteY),
-            0x21 => Instruction(Opcode::AND, AddressingMode::IndirectX),
-            0x31 => Instruction(Opcode::AND, AddressingMode::IndirectY),
+            0x29 => Instruction { op: Opcode::AND, mode: AddressingMode::Immediate },
+            0x25 => Instruction { op: Opcode::AND, mode: AddressingMode::ZeroPage },
+            0x35 => Instruction { op: Opcode::AND, mode: AddressingMode::ZeroPageX },
+            0x2d => Instruction { op: Opcode::AND, mode: AddressingMode::Absolute },
+            0x3d => Instruction { op: Opcode::AND, mode: AddressingMode::AbsoluteX },
+            0x39 => Instruction { op: Opcode::AND, mode: AddressingMode::AbsoluteY },
+            0x21 => Instruction { op: Opcode::AND, mode: AddressingMode::IndirectX },
+            0x31 => Instruction { op: Opcode::AND, mode: AddressingMode::IndirectY },
 
-            0x49 => Instruction(Opcode::EOR, AddressingMode::Immediate),
-            0x45 => Instruction(Opcode::EOR, AddressingMode::ZeroPage),
-            0x55 => Instruction(Opcode::EOR, AddressingMode::ZeroPageX),
-            0x4d => Instruction(Opcode::EOR, AddressingMode::Absolute),
-            0x5d => Instruction(Opcode::EOR, AddressingMode::AbsoluteX),
-            0x59 => Instruction(Opcode::EOR, AddressingMode::AbsoluteY),
-            0x41 => Instruction(Opcode::EOR, AddressingMode::IndirectX),
-            0x51 => Instruction(Opcode::EOR, AddressingMode::IndirectY),
+            0x49 => Instruction { op: Opcode::EOR, mode: AddressingMode::Immediate },
+            0x45 => Instruction { op: Opcode::EOR, mode: AddressingMode::ZeroPage },
+            0x55 => Instruction { op: Opcode::EOR, mode: AddressingMode::ZeroPageX },
+            0x4d => Instruction { op: Opcode::EOR, mode: AddressingMode::Absolute },
+            0x5d => Instruction { op: Opcode::EOR, mode: AddressingMode::AbsoluteX },
+            0x59 => Instruction { op: Opcode::EOR, mode: AddressingMode::AbsoluteY },
+            0x41 => Instruction { op: Opcode::EOR, mode: AddressingMode::IndirectX },
+            0x51 => Instruction { op: Opcode::EOR, mode: AddressingMode::IndirectY },
 
-            0x09 => Instruction(Opcode::ORA, AddressingMode::Immediate),
-            0x05 => Instruction(Opcode::ORA, AddressingMode::ZeroPage),
-            0x15 => Instruction(Opcode::ORA, AddressingMode::ZeroPageX),
-            0x0d => Instruction(Opcode::ORA, AddressingMode::Absolute),
-            0x1d => Instruction(Opcode::ORA, AddressingMode::AbsoluteX),
-            0x19 => Instruction(Opcode::ORA, AddressingMode::AbsoluteY),
-            0x01 => Instruction(Opcode::ORA, AddressingMode::IndirectX),
-            0x11 => Instruction(Opcode::ORA, AddressingMode::IndirectY),
+            0x09 => Instruction { op: Opcode::ORA, mode: AddressingMode::Immediate },
+            0x05 => Instruction { op: Opcode::ORA, mode: AddressingMode::ZeroPage },
+            0x15 => Instruction { op: Opcode::ORA, mode: AddressingMode::ZeroPageX },
+            0x0d => Instruction { op: Opcode::ORA, mode: AddressingMode::Absolute },
+            0x1d => Instruction { op: Opcode::ORA, mode: AddressingMode::AbsoluteX },
+            0x19 => Instruction { op: Opcode::ORA, mode: AddressingMode::AbsoluteY },
+            0x01 => Instruction { op: Opcode::ORA, mode: AddressingMode::IndirectX },
+            0x11 => Instruction { op: Opcode::ORA, mode: AddressingMode::IndirectY },
 
             /* *************** shift/rotate op ***************  */
-            0x0a => Instruction(Opcode::ASL, AddressingMode::Accumulator),
-            0x06 => Instruction(Opcode::ASL, AddressingMode::ZeroPage),
-            0x16 => Instruction(Opcode::ASL, AddressingMode::ZeroPageX),
-            0x0e => Instruction(Opcode::ASL, AddressingMode::Absolute),
-            0x1e => Instruction(Opcode::ASL, AddressingMode::AbsoluteX),
+            0x0a => Instruction { op: Opcode::ASL, mode: AddressingMode::Accumulator },
+            0x06 => Instruction { op: Opcode::ASL, mode: AddressingMode::ZeroPage },
+            0x16 => Instruction { op: Opcode::ASL, mode: AddressingMode::ZeroPageX },
+            0x0e => Instruction { op: Opcode::ASL, mode: AddressingMode::Absolute },
+            0x1e => Instruction { op: Opcode::ASL, mode: AddressingMode::AbsoluteX },
 
-            0x4a => Instruction(Opcode::LSR, AddressingMode::Accumulator),
-            0x46 => Instruction(Opcode::LSR, AddressingMode::ZeroPage),
-            0x56 => Instruction(Opcode::LSR, AddressingMode::ZeroPageX),
-            0x4e => Instruction(Opcode::LSR, AddressingMode::Absolute),
-            0x5e => Instruction(Opcode::LSR, AddressingMode::AbsoluteX),
+            0x4a => Instruction { op: Opcode::LSR, mode: AddressingMode::Accumulator },
+            0x46 => Instruction { op: Opcode::LSR, mode: AddressingMode::ZeroPage },
+            0x56 => Instruction { op: Opcode::LSR, mode: AddressingMode::ZeroPageX },
+            0x4e => Instruction { op: Opcode::LSR, mode: AddressingMode::Absolute },
+            0x5e => Instruction { op: Opcode::LSR, mode: AddressingMode::AbsoluteX },
 
-            0x2a => Instruction(Opcode::ROL, AddressingMode::Accumulator),
-            0x26 => Instruction(Opcode::ROL, AddressingMode::ZeroPage),
-            0x36 => Instruction(Opcode::ROL, AddressingMode::ZeroPageX),
-            0x2e => Instruction(Opcode::ROL, AddressingMode::Absolute),
-            0x3e => Instruction(Opcode::ROL, AddressingMode::AbsoluteX),
+            0x2a => Instruction { op: Opcode::ROL, mode: AddressingMode::Accumulator },
+            0x26 => Instruction { op: Opcode::ROL, mode: AddressingMode::ZeroPage },
+            0x36 => Instruction { op: Opcode::ROL, mode: AddressingMode::ZeroPageX },
+            0x2e => Instruction { op: Opcode::ROL, mode: AddressingMode::Absolute },
+            0x3e => Instruction { op: Opcode::ROL, mode: AddressingMode::AbsoluteX },
 
-            0x6a => Instruction(Opcode::ROR, AddressingMode::Accumulator),
-            0x66 => Instruction(Opcode::ROR, AddressingMode::ZeroPage),
-            0x76 => Instruction(Opcode::ROR, AddressingMode::ZeroPageX),
-            0x6e => Instruction(Opcode::ROR, AddressingMode::Absolute),
-            0x7e => Instruction(Opcode::ROR, AddressingMode::AbsoluteX),
+            0x6a => Instruction { op: Opcode::ROR, mode: AddressingMode::Accumulator },
+            0x66 => Instruction { op: Opcode::ROR, mode: AddressingMode::ZeroPage },
+            0x76 => Instruction { op: Opcode::ROR, mode: AddressingMode::ZeroPageX },
+            0x6e => Instruction { op: Opcode::ROR, mode: AddressingMode::Absolute },
+            0x7e => Instruction { op: Opcode::ROR, mode: AddressingMode::AbsoluteX },
 
             /* *************** inc/dec op ***************  */
-            0xe6 => Instruction(Opcode::INC, AddressingMode::ZeroPage),
-            0xf6 => Instruction(Opcode::INC, AddressingMode::ZeroPageX),
-            0xee => Instruction(Opcode::INC, AddressingMode::Absolute),
-            0xfe => Instruction(Opcode::INC, AddressingMode::AbsoluteX),
+            0xe6 => Instruction { op: Opcode::INC, mode: AddressingMode::ZeroPage },
+            0xf6 => Instruction { op: Opcode::INC, mode: AddressingMode::ZeroPageX },
+            0xee => Instruction { op: Opcode::INC, mode: AddressingMode::Absolute },
+            0xfe => Instruction { op: Opcode::INC, mode: AddressingMode::AbsoluteX },
 
-            0xe8 => Instruction(Opcode::INX, AddressingMode::Implied),
-            0xc8 => Instruction(Opcode::INY, AddressingMode::Implied),
+            0xe8 => Instruction { op: Opcode::INX, mode: AddressingMode::Implied },
+            0xc8 => Instruction { op: Opcode::INY, mode: AddressingMode::Implied },
 
-            0xc6 => Instruction(Opcode::DEC, AddressingMode::ZeroPage),
-            0xd6 => Instruction(Opcode::DEC, AddressingMode::ZeroPageX),
-            0xce => Instruction(Opcode::DEC, AddressingMode::Absolute),
-            0xde => Instruction(Opcode::DEC, AddressingMode::AbsoluteX),
+            0xc6 => Instruction { op: Opcode::DEC, mode: AddressingMode::ZeroPage },
+            0xd6 => Instruction { op: Opcode::DEC, mode: AddressingMode::ZeroPageX },
+            0xce => Instruction { op: Opcode::DEC, mode: AddressingMode::Absolute },
+            0xde => Instruction { op: Opcode::DEC, mode: AddressingMode::AbsoluteX },
 
-            0xca => Instruction(Opcode::DEX, AddressingMode::Implied),
-            0x88 => Instruction(Opcode::DEY, AddressingMode::Implied),
+            0xca => Instruction { op: Opcode::DEX, mode: AddressingMode::Implied },
+            0x88 => Instruction { op: Opcode::DEY, mode: AddressingMode::Implied },
 
             /* *************** load/store op ***************  */
-            0xa9 => Instruction(Opcode::LDA, AddressingMode::Immediate),
-            0xa5 => Instruction(Opcode::LDA, AddressingMode::ZeroPage),
-            0xb5 => Instruction(Opcode::LDA, AddressingMode::ZeroPageX),
-            0xad => Instruction(Opcode::LDA, AddressingMode::Absolute),
-            0xbd => Instruction(Opcode::LDA, AddressingMode::AbsoluteX),
-            0xb9 => Instruction(Opcode::LDA, AddressingMode::AbsoluteY),
-            0xa1 => Instruction(Opcode::LDA, AddressingMode::IndirectX),
-            0xb1 => Instruction(Opcode::LDA, AddressingMode::IndirectY),
+            0xa9 => Instruction { op: Opcode::LDA, mode: AddressingMode::Immediate },
+            0xa5 => Instruction { op: Opcode::LDA, mode: AddressingMode::ZeroPage },
+            0xb5 => Instruction { op: Opcode::LDA, mode: AddressingMode::ZeroPageX },
+            0xad => Instruction { op: Opcode::LDA, mode: AddressingMode::Absolute },
+            0xbd => Instruction { op: Opcode::LDA, mode: AddressingMode::AbsoluteX },
+            0xb9 => Instruction { op: Opcode::LDA, mode: AddressingMode::AbsoluteY },
+            0xa1 => Instruction { op: Opcode::LDA, mode: AddressingMode::IndirectX },
+            0xb1 => Instruction { op: Opcode::LDA, mode: AddressingMode::IndirectY },
 
-            0xa2 => Instruction(Opcode::LDX, AddressingMode::Immediate),
-            0xa6 => Instruction(Opcode::LDX, AddressingMode::ZeroPage),
-            0xb6 => Instruction(Opcode::LDX, AddressingMode::ZeroPageY),
-            0xae => Instruction(Opcode::LDX, AddressingMode::Absolute),
-            0xbe => Instruction(Opcode::LDX, AddressingMode::AbsoluteY),
+            0xa2 => Instruction { op: Opcode::LDX, mode: AddressingMode::Immediate },
+            0xa6 => Instruction { op: Opcode::LDX, mode: AddressingMode::ZeroPage },
+            0xb6 => Instruction { op: Opcode::LDX, mode: AddressingMode::ZeroPageY },
+            0xae => Instruction { op: Opcode::LDX, mode: AddressingMode::Absolute },
+            0xbe => Instruction { op: Opcode::LDX, mode: AddressingMode::AbsoluteY },
 
-            0xa0 => Instruction(Opcode::LDY, AddressingMode::Immediate),
-            0xa4 => Instruction(Opcode::LDY, AddressingMode::ZeroPage),
-            0xb4 => Instruction(Opcode::LDY, AddressingMode::ZeroPageX),
-            0xac => Instruction(Opcode::LDY, AddressingMode::Absolute),
-            0xbc => Instruction(Opcode::LDY, AddressingMode::AbsoluteX),
+            0xa0 => Instruction { op: Opcode::LDY, mode: AddressingMode::Immediate },
+            0xa4 => Instruction { op: Opcode::LDY, mode: AddressingMode::ZeroPage },
+            0xb4 => Instruction { op: Opcode::LDY, mode: AddressingMode::ZeroPageX },
+            0xac => Instruction { op: Opcode::LDY, mode: AddressingMode::Absolute },
+            0xbc => Instruction { op: Opcode::LDY, mode: AddressingMode::AbsoluteX },
 
-            0x85 => Instruction(Opcode::STA, AddressingMode::ZeroPage),
-            0x95 => Instruction(Opcode::STA, AddressingMode::ZeroPageX),
-            0x8d => Instruction(Opcode::STA, AddressingMode::Absolute),
-            0x9d => Instruction(Opcode::STA, AddressingMode::AbsoluteX),
-            0x99 => Instruction(Opcode::STA, AddressingMode::AbsoluteY),
-            0x81 => Instruction(Opcode::STA, AddressingMode::IndirectX),
-            0x91 => Instruction(Opcode::STA, AddressingMode::IndirectY),
+            0x85 => Instruction { op: Opcode::STA, mode: AddressingMode::ZeroPage },
+            0x95 => Instruction { op: Opcode::STA, mode: AddressingMode::ZeroPageX },
+            0x8d => Instruction { op: Opcode::STA, mode: AddressingMode::Absolute },
+            0x9d => Instruction { op: Opcode::STA, mode: AddressingMode::AbsoluteX },
+            0x99 => Instruction { op: Opcode::STA, mode: AddressingMode::AbsoluteY },
+            0x81 => Instruction { op: Opcode::STA, mode: AddressingMode::IndirectX },
+            0x91 => Instruction { op: Opcode::STA, mode: AddressingMode::IndirectY },
 
-            0x86 => Instruction(Opcode::STX, AddressingMode::ZeroPage),
-            0x96 => Instruction(Opcode::STX, AddressingMode::ZeroPageY),
-            0x8e => Instruction(Opcode::STX, AddressingMode::Absolute),
+            0x86 => Instruction { op: Opcode::STX, mode: AddressingMode::ZeroPage },
+            0x96 => Instruction { op: Opcode::STX, mode: AddressingMode::ZeroPageY },
+            0x8e => Instruction { op: Opcode::STX, mode: AddressingMode::Absolute },
 
-            0x84 => Instruction(Opcode::STY, AddressingMode::ZeroPage),
-            0x94 => Instruction(Opcode::STY, AddressingMode::ZeroPageX),
-            0x8c => Instruction(Opcode::STY, AddressingMode::Absolute),
+            0x84 => Instruction { op: Opcode::STY, mode: AddressingMode::ZeroPage },
+            0x94 => Instruction { op: Opcode::STY, mode: AddressingMode::ZeroPageX },
+            0x8c => Instruction { op: Opcode::STY, mode: AddressingMode::Absolute },
 
             /* *************** set/clear flag ***************  */
-            0x38 => Instruction(Opcode::SEC, AddressingMode::Implied),
-            0xf8 => Instruction(Opcode::SED, AddressingMode::Implied),
-            0x78 => Instruction(Opcode::SEI, AddressingMode::Implied),
-            0x18 => Instruction(Opcode::CLC, AddressingMode::Implied),
-            0xd8 => Instruction(Opcode::CLD, AddressingMode::Implied),
-            0x58 => Instruction(Opcode::CLI, AddressingMode::Implied),
-            0xb8 => Instruction(Opcode::CLV, AddressingMode::Implied),
+            0x38 => Instruction { op: Opcode::SEC, mode: AddressingMode::Implied },
+            0xf8 => Instruction { op: Opcode::SED, mode: AddressingMode::Implied },
+            0x78 => Instruction { op: Opcode::SEI, mode: AddressingMode::Implied },
+            0x18 => Instruction { op: Opcode::CLC, mode: AddressingMode::Implied },
+            0xd8 => Instruction { op: Opcode::CLD, mode: AddressingMode::Implied },
+            0x58 => Instruction { op: Opcode::CLI, mode: AddressingMode::Implied },
+            0xb8 => Instruction { op: Opcode::CLV, mode: AddressingMode::Implied },
 
             /* *************** compare ***************  */
-            0xc9 => Instruction(Opcode::CMP, AddressingMode::Immediate),
-            0xc5 => Instruction(Opcode::CMP, AddressingMode::ZeroPage),
-            0xd5 => Instruction(Opcode::CMP, AddressingMode::ZeroPageX),
-            0xcd => Instruction(Opcode::CMP, AddressingMode::Absolute),
-            0xdd => Instruction(Opcode::CMP, AddressingMode::AbsoluteX),
-            0xd9 => Instruction(Opcode::CMP, AddressingMode::AbsoluteY),
-            0xc1 => Instruction(Opcode::CMP, AddressingMode::IndirectX),
-            0xd1 => Instruction(Opcode::CMP, AddressingMode::IndirectY),
+            0xc9 => Instruction { op: Opcode::CMP, mode: AddressingMode::Immediate },
+            0xc5 => Instruction { op: Opcode::CMP, mode: AddressingMode::ZeroPage },
+            0xd5 => Instruction { op: Opcode::CMP, mode: AddressingMode::ZeroPageX },
+            0xcd => Instruction { op: Opcode::CMP, mode: AddressingMode::Absolute },
+            0xdd => Instruction { op: Opcode::CMP, mode: AddressingMode::AbsoluteX },
+            0xd9 => Instruction { op: Opcode::CMP, mode: AddressingMode::AbsoluteY },
+            0xc1 => Instruction { op: Opcode::CMP, mode: AddressingMode::IndirectX },
+            0xd1 => Instruction { op: Opcode::CMP, mode: AddressingMode::IndirectY },
 
-            0xe0 => Instruction(Opcode::CPX, AddressingMode::Immediate),
-            0xe4 => Instruction(Opcode::CPX, AddressingMode::ZeroPage),
-            0xec => Instruction(Opcode::CPX, AddressingMode::Absolute),
+            0xe0 => Instruction { op: Opcode::CPX, mode: AddressingMode::Immediate },
+            0xe4 => Instruction { op: Opcode::CPX, mode: AddressingMode::ZeroPage },
+            0xec => Instruction { op: Opcode::CPX, mode: AddressingMode::Absolute },
 
-            0xc0 => Instruction(Opcode::CPY, AddressingMode::Immediate),
-            0xc4 => Instruction(Opcode::CPY, AddressingMode::ZeroPage),
-            0xcc => Instruction(Opcode::CPY, AddressingMode::Absolute),
+            0xc0 => Instruction { op: Opcode::CPY, mode: AddressingMode::Immediate },
+            0xc4 => Instruction { op: Opcode::CPY, mode: AddressingMode::ZeroPage },
+            0xcc => Instruction { op: Opcode::CPY, mode: AddressingMode::Absolute },
 
             /* *************** jump/return ***************  */
-            0x4c => Instruction(Opcode::JMP, AddressingMode::Absolute),
-            0x6c => Instruction(Opcode::JMP, AddressingMode::Indirect),
+            0x4c => Instruction { op: Opcode::JMP, mode: AddressingMode::Absolute },
+            0x6c => Instruction { op: Opcode::JMP, mode: AddressingMode::Indirect },
 
-            0x20 => Instruction(Opcode::JSR, AddressingMode::Absolute),
+            0x20 => Instruction { op: Opcode::JSR, mode: AddressingMode::Absolute },
 
-            0x40 => Instruction(Opcode::RTI, AddressingMode::Implied),
-            0x60 => Instruction(Opcode::RTS, AddressingMode::Implied),
+            0x40 => Instruction { op: Opcode::RTI, mode: AddressingMode::Implied },
+            0x60 => Instruction { op: Opcode::RTS, mode: AddressingMode::Implied },
 
             /* *************** branch ***************  */
-            0x90 => Instruction(Opcode::BCC, AddressingMode::Relative),
-            0xb0 => Instruction(Opcode::BCS, AddressingMode::Relative),
-            0xf0 => Instruction(Opcode::BEQ, AddressingMode::Relative),
-            0xd0 => Instruction(Opcode::BNE, AddressingMode::Relative),
-            0x30 => Instruction(Opcode::BMI, AddressingMode::Relative),
-            0x10 => Instruction(Opcode::BPL, AddressingMode::Relative),
-            0x50 => Instruction(Opcode::BVC, AddressingMode::Relative),
-            0x70 => Instruction(Opcode::BVS, AddressingMode::Relative),
+            0x90 => Instruction { op: Opcode::BCC, mode: AddressingMode::Relative },
+            0xb0 => Instruction { op: Opcode::BCS, mode: AddressingMode::Relative },
+            0xf0 => Instruction { op: Opcode::BEQ, mode: AddressingMode::Relative },
+            0xd0 => Instruction { op: Opcode::BNE, mode: AddressingMode::Relative },
+            0x30 => Instruction { op: Opcode::BMI, mode: AddressingMode::Relative },
+            0x10 => Instruction { op: Opcode::BPL, mode: AddressingMode::Relative },
+            0x50 => Instruction { op: Opcode::BVC, mode: AddressingMode::Relative },
+            0x70 => Instruction { op: Opcode::BVS, mode: AddressingMode::Relative },
 
             /* *************** push/pop ***************  */
-            0x48 => Instruction(Opcode::PHA, AddressingMode::Implied),
-            0x08 => Instruction(Opcode::PHP, AddressingMode::Implied),
-            0x68 => Instruction(Opcode::PLA, AddressingMode::Implied),
-            0x28 => Instruction(Opcode::PLP, AddressingMode::Implied),
+            0x48 => Instruction { op: Opcode::PHA, mode: AddressingMode::Implied },
+            0x08 => Instruction { op: Opcode::PHP, mode: AddressingMode::Implied },
+            0x68 => Instruction { op: Opcode::PLA, mode: AddressingMode::Implied },
+            0x28 => Instruction { op: Opcode::PLP, mode: AddressingMode::Implied },
 
             /* *************** transfer ***************  */
-            0xaa => Instruction(Opcode::TAX, AddressingMode::Implied),
-            0xa8 => Instruction(Opcode::TAY, AddressingMode::Implied),
-            0xba => Instruction(Opcode::TSX, AddressingMode::Implied),
-            0x8a => Instruction(Opcode::TXA, AddressingMode::Implied),
-            0x9a => Instruction(Opcode::TXS, AddressingMode::Implied),
-            0x98 => Instruction(Opcode::TYA, AddressingMode::Implied),
+            0xaa => Instruction { op: Opcode::TAX, mode: AddressingMode::Implied },
+            0xa8 => Instruction { op: Opcode::TAY, mode: AddressingMode::Implied },
+            0xba => Instruction { op: Opcode::TSX, mode: AddressingMode::Implied },
+            0x8a => Instruction { op: Opcode::TXA, mode: AddressingMode::Implied },
+            0x9a => Instruction { op: Opcode::TXS, mode: AddressingMode::Implied },
+            0x98 => Instruction { op: Opcode::TYA, mode: AddressingMode::Implied },
 
             /* *************** other ***************  */
-            0x00 => Instruction(Opcode::BRK, AddressingMode::Implied),
+            0x00 => Instruction { op: Opcode::BRK, mode: AddressingMode::Implied },
 
-            0x24 => Instruction(Opcode::BIT, AddressingMode::ZeroPage),
-            0x2c => Instruction(Opcode::BIT, AddressingMode::Absolute),
+            0x24 => Instruction { op: Opcode::BIT, mode: AddressingMode::ZeroPage },
+            0x2c => Instruction { op: Opcode::BIT, mode: AddressingMode::Absolute },
 
-            0xea => Instruction(Opcode::NOP, AddressingMode::Implied),
+            0xea => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
 
             /* *************** unofficial1 ***************  */
-            0x4b => Instruction(Opcode::ALR, AddressingMode::Immediate),
-            0x0b => Instruction(Opcode::ANC, AddressingMode::Immediate),
-            0x6b => Instruction(Opcode::ARR, AddressingMode::Immediate),
-            0xcb => Instruction(Opcode::AXS, AddressingMode::Immediate),
+            0x4b => Instruction { op: Opcode::ALR, mode: AddressingMode::Immediate },
+            0x0b => Instruction { op: Opcode::ANC, mode: AddressingMode::Immediate },
+            0x6b => Instruction { op: Opcode::ARR, mode: AddressingMode::Immediate },
+            0xcb => Instruction { op: Opcode::AXS, mode: AddressingMode::Immediate },
 
-            0xa3 => Instruction(Opcode::LAX, AddressingMode::IndirectX),
-            0xa7 => Instruction(Opcode::LAX, AddressingMode::ZeroPage),
-            0xaf => Instruction(Opcode::LAX, AddressingMode::Absolute),
-            0xb3 => Instruction(Opcode::LAX, AddressingMode::IndirectY),
-            0xb7 => Instruction(Opcode::LAX, AddressingMode::ZeroPageY),
-            0xbf => Instruction(Opcode::LAX, AddressingMode::AbsoluteY),
+            0xa3 => Instruction { op: Opcode::LAX, mode: AddressingMode::IndirectX },
+            0xa7 => Instruction { op: Opcode::LAX, mode: AddressingMode::ZeroPage },
+            0xaf => Instruction { op: Opcode::LAX, mode: AddressingMode::Absolute },
+            0xb3 => Instruction { op: Opcode::LAX, mode: AddressingMode::IndirectY },
+            0xb7 => Instruction { op: Opcode::LAX, mode: AddressingMode::ZeroPageY },
+            0xbf => Instruction { op: Opcode::LAX, mode: AddressingMode::AbsoluteY },
 
-            0x83 => Instruction(Opcode::SAX, AddressingMode::IndirectX),
-            0x87 => Instruction(Opcode::SAX, AddressingMode::ZeroPage),
-            0x8f => Instruction(Opcode::SAX, AddressingMode::Absolute),
-            0x97 => Instruction(Opcode::SAX, AddressingMode::ZeroPageY),
+            0x83 => Instruction { op: Opcode::SAX, mode: AddressingMode::IndirectX },
+            0x87 => Instruction { op: Opcode::SAX, mode: AddressingMode::ZeroPage },
+            0x8f => Instruction { op: Opcode::SAX, mode: AddressingMode::Absolute },
+            0x97 => Instruction { op: Opcode::SAX, mode: AddressingMode::ZeroPageY },
 
-            0xc3 => Instruction(Opcode::DCP, AddressingMode::IndirectX),
-            0xc7 => Instruction(Opcode::DCP, AddressingMode::ZeroPage),
-            0xcf => Instruction(Opcode::DCP, AddressingMode::Absolute),
-            0xd3 => Instruction(Opcode::DCP, AddressingMode::IndirectY),
-            0xd7 => Instruction(Opcode::DCP, AddressingMode::ZeroPageX),
-            0xdb => Instruction(Opcode::DCP, AddressingMode::AbsoluteY),
-            0xdf => Instruction(Opcode::DCP, AddressingMode::AbsoluteX),
+            0xc3 => Instruction { op: Opcode::DCP, mode: AddressingMode::IndirectX },
+            0xc7 => Instruction { op: Opcode::DCP, mode: AddressingMode::ZeroPage },
+            0xcf => Instruction { op: Opcode::DCP, mode: AddressingMode::Absolute },
+            0xd3 => Instruction { op: Opcode::DCP, mode: AddressingMode::IndirectY },
+            0xd7 => Instruction { op: Opcode::DCP, mode: AddressingMode::ZeroPageX },
+            0xdb => Instruction { op: Opcode::DCP, mode: AddressingMode::AbsoluteY },
+            0xdf => Instruction { op: Opcode::DCP, mode: AddressingMode::AbsoluteX },
 
-            0xe3 => Instruction(Opcode::ISC, AddressingMode::IndirectX),
-            0xe7 => Instruction(Opcode::ISC, AddressingMode::ZeroPage),
-            0xef => Instruction(Opcode::ISC, AddressingMode::Absolute),
-            0xf3 => Instruction(Opcode::ISC, AddressingMode::IndirectY),
-            0xf7 => Instruction(Opcode::ISC, AddressingMode::ZeroPageX),
-            0xfb => Instruction(Opcode::ISC, AddressingMode::AbsoluteY),
-            0xff => Instruction(Opcode::ISC, AddressingMode::AbsoluteX),
+            0xe3 => Instruction { op: Opcode::ISC, mode: AddressingMode::IndirectX },
+            0xe7 => Instruction { op: Opcode::ISC, mode: AddressingMode::ZeroPage },
+            0xef => Instruction { op: Opcode::ISC, mode: AddressingMode::Absolute },
+            0xf3 => Instruction { op: Opcode::ISC, mode: AddressingMode::IndirectY },
+            0xf7 => Instruction { op: Opcode::ISC, mode: AddressingMode::ZeroPageX },
+            0xfb => Instruction { op: Opcode::ISC, mode: AddressingMode::AbsoluteY },
+            0xff => Instruction { op: Opcode::ISC, mode: AddressingMode::AbsoluteX },
 
-            0x23 => Instruction(Opcode::RLA, AddressingMode::IndirectX),
-            0x27 => Instruction(Opcode::RLA, AddressingMode::ZeroPage),
-            0x2f => Instruction(Opcode::RLA, AddressingMode::Absolute),
-            0x33 => Instruction(Opcode::RLA, AddressingMode::IndirectY),
-            0x37 => Instruction(Opcode::RLA, AddressingMode::ZeroPageX),
-            0x3b => Instruction(Opcode::RLA, AddressingMode::AbsoluteY),
-            0x3f => Instruction(Opcode::RLA, AddressingMode::AbsoluteX),
+            0x23 => Instruction { op: Opcode::RLA, mode: AddressingMode::IndirectX },
+            0x27 => Instruction { op: Opcode::RLA, mode: AddressingMode::ZeroPage },
+            0x2f => Instruction { op: Opcode::RLA, mode: AddressingMode::Absolute },
+            0x33 => Instruction { op: Opcode::RLA, mode: AddressingMode::IndirectY },
+            0x37 => Instruction { op: Opcode::RLA, mode: AddressingMode::ZeroPageX },
+            0x3b => Instruction { op: Opcode::RLA, mode: AddressingMode::AbsoluteY },
+            0x3f => Instruction { op: Opcode::RLA, mode: AddressingMode::AbsoluteX },
 
-            0x63 => Instruction(Opcode::RRA, AddressingMode::IndirectX),
-            0x67 => Instruction(Opcode::RRA, AddressingMode::ZeroPage),
-            0x6f => Instruction(Opcode::RRA, AddressingMode::Absolute),
-            0x73 => Instruction(Opcode::RRA, AddressingMode::IndirectY),
-            0x77 => Instruction(Opcode::RRA, AddressingMode::ZeroPageX),
-            0x7b => Instruction(Opcode::RRA, AddressingMode::AbsoluteY),
-            0x7f => Instruction(Opcode::RRA, AddressingMode::AbsoluteX),
+            0x63 => Instruction { op: Opcode::RRA, mode: AddressingMode::IndirectX },
+            0x67 => Instruction { op: Opcode::RRA, mode: AddressingMode::ZeroPage },
+            0x6f => Instruction { op: Opcode::RRA, mode: AddressingMode::Absolute },
+            0x73 => Instruction { op: Opcode::RRA, mode: AddressingMode::IndirectY },
+            0x77 => Instruction { op: Opcode::RRA, mode: AddressingMode::ZeroPageX },
+            0x7b => Instruction { op: Opcode::RRA, mode: AddressingMode::AbsoluteY },
+            0x7f => Instruction { op: Opcode::RRA, mode: AddressingMode::AbsoluteX },
 
-            0x03 => Instruction(Opcode::SLO, AddressingMode::IndirectX),
-            0x07 => Instruction(Opcode::SLO, AddressingMode::ZeroPage),
-            0x0f => Instruction(Opcode::SLO, AddressingMode::Absolute),
-            0x13 => Instruction(Opcode::SLO, AddressingMode::IndirectY),
-            0x17 => Instruction(Opcode::SLO, AddressingMode::ZeroPageX),
-            0x1b => Instruction(Opcode::SLO, AddressingMode::AbsoluteY),
-            0x1f => Instruction(Opcode::SLO, AddressingMode::AbsoluteX),
+            0x03 => Instruction { op: Opcode::SLO, mode: AddressingMode::IndirectX },
+            0x07 => Instruction { op: Opcode::SLO, mode: AddressingMode::ZeroPage },
+            0x0f => Instruction { op: Opcode::SLO, mode: AddressingMode::Absolute },
+            0x13 => Instruction { op: Opcode::SLO, mode: AddressingMode::IndirectY },
+            0x17 => Instruction { op: Opcode::SLO, mode: AddressingMode::ZeroPageX },
+            0x1b => Instruction { op: Opcode::SLO, mode: AddressingMode::AbsoluteY },
+            0x1f => Instruction { op: Opcode::SLO, mode: AddressingMode::AbsoluteX },
 
-            0x43 => Instruction(Opcode::SRE, AddressingMode::IndirectX),
-            0x47 => Instruction(Opcode::SRE, AddressingMode::ZeroPage),
-            0x4f => Instruction(Opcode::SRE, AddressingMode::Absolute),
-            0x53 => Instruction(Opcode::SRE, AddressingMode::IndirectY),
-            0x57 => Instruction(Opcode::SRE, AddressingMode::ZeroPageX),
-            0x5b => Instruction(Opcode::SRE, AddressingMode::AbsoluteY),
-            0x5f => Instruction(Opcode::SRE, AddressingMode::AbsoluteX),
+            0x43 => Instruction { op: Opcode::SRE, mode: AddressingMode::IndirectX },
+            0x47 => Instruction { op: Opcode::SRE, mode: AddressingMode::ZeroPage },
+            0x4f => Instruction { op: Opcode::SRE, mode: AddressingMode::Absolute },
+            0x53 => Instruction { op: Opcode::SRE, mode: AddressingMode::IndirectY },
+            0x57 => Instruction { op: Opcode::SRE, mode: AddressingMode::ZeroPageX },
+            0x5b => Instruction { op: Opcode::SRE, mode: AddressingMode::AbsoluteY },
+            0x5f => Instruction { op: Opcode::SRE, mode: AddressingMode::AbsoluteX },
 
-            0x80 => Instruction(Opcode::SKB, AddressingMode::Immediate),
-            0x82 => Instruction(Opcode::SKB, AddressingMode::Immediate),
-            0x89 => Instruction(Opcode::SKB, AddressingMode::Immediate),
-            0xc2 => Instruction(Opcode::SKB, AddressingMode::Immediate),
-            0xe2 => Instruction(Opcode::SKB, AddressingMode::Immediate),
+            0x80 => Instruction { op: Opcode::SKB, mode: AddressingMode::Immediate },
+            0x82 => Instruction { op: Opcode::SKB, mode: AddressingMode::Immediate },
+            0x89 => Instruction { op: Opcode::SKB, mode: AddressingMode::Immediate },
+            0xc2 => Instruction { op: Opcode::SKB, mode: AddressingMode::Immediate },
+            0xe2 => Instruction { op: Opcode::SKB, mode: AddressingMode::Immediate },
 
-            0x0c => Instruction(Opcode::IGN, AddressingMode::Absolute),
+            0x0c => Instruction { op: Opcode::IGN, mode: AddressingMode::Absolute },
 
-            0x1c => Instruction(Opcode::IGN, AddressingMode::AbsoluteX),
-            0x3c => Instruction(Opcode::IGN, AddressingMode::AbsoluteX),
-            0x5c => Instruction(Opcode::IGN, AddressingMode::AbsoluteX),
-            0x7c => Instruction(Opcode::IGN, AddressingMode::AbsoluteX),
-            0xdc => Instruction(Opcode::IGN, AddressingMode::AbsoluteX),
-            0xfc => Instruction(Opcode::IGN, AddressingMode::AbsoluteX),
+            0x1c => Instruction { op: Opcode::IGN, mode: AddressingMode::AbsoluteX },
+            0x3c => Instruction { op: Opcode::IGN, mode: AddressingMode::AbsoluteX },
+            0x5c => Instruction { op: Opcode::IGN, mode: AddressingMode::AbsoluteX },
+            0x7c => Instruction { op: Opcode::IGN, mode: AddressingMode::AbsoluteX },
+            0xdc => Instruction { op: Opcode::IGN, mode: AddressingMode::AbsoluteX },
+            0xfc => Instruction { op: Opcode::IGN, mode: AddressingMode::AbsoluteX },
 
-            0x04 => Instruction(Opcode::IGN, AddressingMode::ZeroPage),
-            0x44 => Instruction(Opcode::IGN, AddressingMode::ZeroPage),
-            0x64 => Instruction(Opcode::IGN, AddressingMode::ZeroPage),
+            0x04 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPage },
+            0x44 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPage },
+            0x64 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPage },
 
-            0x14 => Instruction(Opcode::IGN, AddressingMode::ZeroPageX),
-            0x34 => Instruction(Opcode::IGN, AddressingMode::ZeroPageX),
-            0x54 => Instruction(Opcode::IGN, AddressingMode::ZeroPageX),
-            0x74 => Instruction(Opcode::IGN, AddressingMode::ZeroPageX),
-            0xd4 => Instruction(Opcode::IGN, AddressingMode::ZeroPageX),
-            0xf4 => Instruction(Opcode::IGN, AddressingMode::ZeroPageX),
+            0x14 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPageX },
+            0x34 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPageX },
+            0x54 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPageX },
+            0x74 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPageX },
+            0xd4 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPageX },
+            0xf4 => Instruction { op: Opcode::IGN, mode: AddressingMode::ZeroPageX },
 
             /* *************** unofficial2(既存の命令) ***************  */
-            0xeb => Instruction(Opcode::SBC, AddressingMode::Immediate),
+            0xeb => Instruction { op: Opcode::SBC, mode: AddressingMode::Immediate },
 
-            0x1a => Instruction(Opcode::NOP, AddressingMode::Implied),
-            0x3a => Instruction(Opcode::NOP, AddressingMode::Implied),
-            0x5a => Instruction(Opcode::NOP, AddressingMode::Implied),
-            0x7a => Instruction(Opcode::NOP, AddressingMode::Implied),
-            0xda => Instruction(Opcode::NOP, AddressingMode::Implied),
-            0xfa => Instruction(Opcode::NOP, AddressingMode::Implied),
+            0x1a => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
+            0x3a => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
+            0x5a => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
+            0x7a => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
+            0xda => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
+            0xfa => Instruction { op: Opcode::NOP, mode: AddressingMode::Implied },
 
             _ => panic!("Invalid inst_code:{:08x}", inst_code),
         }
@@ -420,35 +419,36 @@ impl Instruction {
 }
 
 impl Cpu {
-    /// PCから1byteフェッチします
-    /// フェッチした後、PCを一つ進めます
+    /// Fetch 1 byte from PC and after fetching, advance the PC by one
     fn fetch_u8(&mut self, system: &mut System) -> u8 {
         let data = system.read_u8(self.pc, false);
         self.pc = self.pc + 1;
         data
     }
-    /// PCから2byteフェッチします
-    /// フェッチした後、PCを一つ進めます
+
+    /// Fetch 2 bytes from PC and increment PC by two
     fn fetch_u16(&mut self, system: &mut System) -> u16 {
         let lower = self.fetch_u8(system);
         let upper = self.fetch_u8(system);
         let data = u16::from(lower) | (u16::from(upper) << 8);
         data
     }
-    /// operandをフェッチします。AddressingモードによってはPCも進みます
-    /// 実装するときは命令直後のオペランドを読み取るときはCpu::fetch, それ以外はSystem::read
+
+    /// Fetch the operand.
+    /// Depending on the Addressing mode, the PC also advances.
+    /// When implementing, Cpu::fetch when reading the operand immediately after the instruction, otherwise System::read
     fn fetch_operand(&mut self, system: &mut System, mode: AddressingMode) -> Operand {
         match mode {
-            AddressingMode::Implied => Operand(0, 0),
-            AddressingMode::Accumulator => Operand(0, 1),
-            AddressingMode::Immediate => Operand(u16::from(self.fetch_u8(system)), 1),
-            AddressingMode::Absolute => Operand(self.fetch_u16(system), 3),
-            AddressingMode::ZeroPage => Operand(u16::from(self.fetch_u8(system)), 2),
+            AddressingMode::Implied => Operand { data: 0, cyc: 0 },
+            AddressingMode::Accumulator => Operand { data: 0, cyc: 1 },
+            AddressingMode::Immediate => Operand { data: u16::from(self.fetch_u8(system)), cyc: 1 },
+            AddressingMode::Absolute => Operand { data: self.fetch_u16(system), cyc: 3 },
+            AddressingMode::ZeroPage => Operand { data: u16::from(self.fetch_u8(system)), cyc: 2 },
             AddressingMode::ZeroPageX => {
-                Operand(u16::from(self.fetch_u8(system).wrapping_add(self.x)), 3)
+                Operand { data: u16::from(self.fetch_u8(system).wrapping_add(self.x)), cyc: 3 }
             }
             AddressingMode::ZeroPageY => {
-                Operand(u16::from(self.fetch_u8(system).wrapping_add(self.y)), 3)
+                Operand { data: u16::from(self.fetch_u8(system).wrapping_add(self.y)), cyc: 3 }
             }
             AddressingMode::AbsoluteX => {
                 let data = self.fetch_u16(system).wrapping_add(u16::from(self.x));
@@ -458,7 +458,7 @@ impl Cpu {
                     } else {
                         0
                     };
-                Operand(data, 3 + additional_cyc)
+                Operand { data: data, cyc: 3 + additional_cyc }
             }
             AddressingMode::AbsoluteY => {
                 let data = self.fetch_u16(system).wrapping_add(u16::from(self.y));
@@ -468,7 +468,7 @@ impl Cpu {
                     } else {
                         0
                     };
-                Operand(data, 3 + additional_cyc)
+                Operand { data: data, cyc: 3 + additional_cyc }
             }
             AddressingMode::Relative => {
                 let src_addr = self.fetch_u8(system);
@@ -483,7 +483,7 @@ impl Cpu {
                     0
                 };
 
-                Operand(data, 1 + additional_cyc)
+                Operand { data: data, cyc: 1 + additional_cyc }
             }
             AddressingMode::Indirect => {
                 let src_addr_lower = self.fetch_u8(system);
@@ -498,7 +498,7 @@ impl Cpu {
 
                 let data = dst_data_lower | (dst_data_upper << 8);
 
-                Operand(data, 5)
+                Operand { data: data, cyc: 5 }
             }
             AddressingMode::IndirectX => {
                 let src_addr = self.fetch_u8(system);
@@ -509,7 +509,7 @@ impl Cpu {
                     u16::from(system.read_u8(u16::from(dst_addr.wrapping_add(1)), false));
 
                 let data = data_lower | (data_upper << 8);
-                Operand(data, 5)
+                Operand { data: data, cyc: 5 }
             }
             AddressingMode::IndirectY => {
                 let src_addr = self.fetch_u8(system);
@@ -526,48 +526,49 @@ impl Cpu {
                     0
                 };
 
-                Operand(data, 4 + additional_cyc)
-            }
-        }
-    }
-    /// addressだけでなくデータまで一発で引きたい場合
-    /// ret: (Operand(引いだ即値もしくはアドレス, clock数), データ)
-    fn fetch_args(&mut self, system: &mut System, mode: AddressingMode) -> (Operand, u8) {
-        match mode {
-            // 使わないはず
-            AddressingMode::Implied => (self.fetch_operand(system, mode), 0),
-            // aレジスタの値を使う
-            AddressingMode::Accumulator => (self.fetch_operand(system, mode), self.a),
-            // 即値はopcodeの直後のデータ1byteをそのまま使う
-            AddressingMode::Immediate => {
-                let Operand(data, cyc) = self.fetch_operand(system, mode);
-                debug_assert!(data < 0x100u16);
-                (Operand(data, cyc), data as u8)
-            }
-            // 他は帰ってきたアドレスからデータを引きなおす。使わない場合もある
-            _ => {
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
-                let data = system.read_u8(addr, false);
-                (Operand(addr, cyc), data)
+                Operand { data: data, cyc: 4 + additional_cyc }
             }
         }
     }
 
-    /// 命令を実行します
-    /// ret: cycle数
-    /// http://obelisk.me.uk/6502/reference.html
+    /// If you want to pull not only the address but also the data in one shot
+    /// returns (Operand { data: subtracted immediate value or address, number of clocks), data)
+    fn fetch_args(&mut self, system: &mut System, mode: AddressingMode) -> (Operand, u8) {
+        match mode {
+            // (Dummy data should not be used)
+            AddressingMode::Implied => (self.fetch_operand(system, mode), 0),
+            // Use the value of the a register
+            AddressingMode::Accumulator => (self.fetch_operand(system, mode), self.a),
+            // Immediate value uses 1 byte of data immediately after opcode as it is
+            AddressingMode::Immediate => {
+                let Operand { data, cyc } = self.fetch_operand(system, mode);
+                debug_assert!(data < 0x100u16);
+                (Operand { data, cyc }, data as u8)
+            }
+            // Others pull back the data from the returned address. May not be used
+            _ => {
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
+                let data = system.read_u8(addr, false);
+                (Operand { data: addr, cyc }, data)
+            }
+        }
+    }
+
+    /// Execute the instruction
+    /// returns: number of cycles
+    /// https://www.nesdev.org/obelisk-6502-guide/reference.html
     pub fn step(&mut self, system: &mut System) -> u8 {
-        // 命令がおいてあるところのaddress
+        // Address where the instruction is placed
         let inst_pc = self.pc;
         let inst_code = self.fetch_u8(system);
 
-        let Instruction(opcode, mode) = Instruction::from(inst_code);
+        let Instruction { op: opcode, mode }  = Instruction::from(inst_code);
 
         match opcode {
             /* *************** binary op ***************  */
-            // 結果はaレジスタに格納するので、operandのアドレスは使わない
+            // The result is stored in the a register, so the address of the operand is not used
             Opcode::ADC => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let tmp = u16::from(self.a)
                     + u16::from(arg)
@@ -587,7 +588,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::SBC => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let (data1, is_carry1) = self.a.overflowing_sub(arg);
                 let (result, is_carry2) =
@@ -607,7 +608,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::AND => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = self.a & arg;
                 let is_zero = result == 0;
@@ -619,7 +620,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::EOR => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = self.a ^ arg;
 
@@ -632,7 +633,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::ORA => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = self.a | arg;
 
@@ -647,7 +648,7 @@ impl Cpu {
             /* *************** shift/rotate op ***************  */
             // aレジスタを操作する場合があるので注意
             Opcode::ASL => {
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = arg.wrapping_shl(1);
 
@@ -669,7 +670,7 @@ impl Cpu {
                 }
             }
             Opcode::LSR => {
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = arg.wrapping_shr(1);
 
@@ -691,7 +692,7 @@ impl Cpu {
                 }
             }
             Opcode::ROL => {
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result =
                     arg.wrapping_shl(1) | (if self.read_carry_flag() { 0x01 } else { 0x00 });
@@ -714,7 +715,7 @@ impl Cpu {
                 }
             }
             Opcode::ROR => {
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result =
                     arg.wrapping_shr(1) | (if self.read_carry_flag() { 0x80 } else { 0x00 });
@@ -739,7 +740,7 @@ impl Cpu {
             /* *************** inc/dec op ***************  */
             // accumulatorは使わない, x,yレジスタを使うバージョンはImplied
             Opcode::INC => {
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = arg.wrapping_add(1);
 
@@ -774,7 +775,7 @@ impl Cpu {
                 2
             }
             Opcode::DEC => {
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = arg.wrapping_sub(1);
 
@@ -813,7 +814,7 @@ impl Cpu {
             // Accumualtorはなし
             // store系はargはいらない, Immediateなし
             Opcode::LDA => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let is_zero = arg == 0;
                 let is_negative = (arg & 0x80) == 0x80;
@@ -824,7 +825,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::LDX => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let is_zero = arg == 0;
                 let is_negative = (arg & 0x80) == 0x80;
@@ -835,7 +836,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::LDY => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let is_zero = arg == 0;
                 let is_negative = (arg & 0x80) == 0x80;
@@ -846,19 +847,19 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::STA => {
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
 
                 system.write_u8(addr, self.a, false);
                 1 + cyc
             }
             Opcode::STX => {
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
 
                 system.write_u8(addr, self.x, false);
                 1 + cyc
             }
             Opcode::STY => {
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
 
                 system.write_u8(addr, self.y, false);
                 1 + cyc
@@ -898,7 +899,7 @@ impl Cpu {
             /* *************** compare ***************  */
             // Accumulatorなし
             Opcode::CMP => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let (result, _) = self.a.overflowing_sub(arg);
 
@@ -912,7 +913,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::CPX => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let (result, _) = self.x.overflowing_sub(arg);
 
@@ -926,7 +927,7 @@ impl Cpu {
                 1 + cyc
             }
             Opcode::CPY => {
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let (result, _) = self.y.overflowing_sub(arg);
 
@@ -943,12 +944,12 @@ impl Cpu {
             /* *************** jump/return ***************  */
             // JMP: Absolute or Indirect, JSR: Absolute, RTI,RTS: Implied
             Opcode::JMP => {
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 self.pc = addr;
                 cyc
             }
             Opcode::JSR => {
-                let Operand(addr, _) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc: _ } = self.fetch_operand(system, mode);
                 // opcodeがあったアドレスを取得する(opcode, operand fetchで3進んでる)
                 let opcode_addr = inst_pc;
 
@@ -977,7 +978,7 @@ impl Cpu {
             // Relativeのみ
             Opcode::BCC => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if !self.read_carry_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -987,7 +988,7 @@ impl Cpu {
             }
             Opcode::BCS => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if self.read_carry_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -997,7 +998,7 @@ impl Cpu {
             }
             Opcode::BEQ => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if self.read_zero_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -1007,7 +1008,7 @@ impl Cpu {
             }
             Opcode::BNE => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if !self.read_zero_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -1017,7 +1018,7 @@ impl Cpu {
             }
             Opcode::BMI => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if self.read_negative_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -1027,7 +1028,7 @@ impl Cpu {
             }
             Opcode::BPL => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if !self.read_negative_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -1037,7 +1038,7 @@ impl Cpu {
             }
             Opcode::BVC => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if !self.read_overflow_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -1047,7 +1048,7 @@ impl Cpu {
             }
             Opcode::BVS => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 if self.read_overflow_flag() {
                     self.pc = addr;
                     1 + cyc + 1
@@ -1148,7 +1149,7 @@ impl Cpu {
             Opcode::BIT => {
                 // ZeroPage or Absolute
                 // 非破壊読み出しが必要, fetch_args使わずに自分で読むか...
-                let Operand(addr, cyc) = self.fetch_operand(system, mode);
+                let Operand { data: addr, cyc } = self.fetch_operand(system, mode);
                 let arg = system.read_u8(addr, true); // 非破壊読み出し
 
                 let is_negative = (arg & 0x80) == 0x80;
@@ -1168,7 +1169,7 @@ impl Cpu {
             Opcode::ALR => {
                 // Immediateのみ、(A & #Imm) >> 1
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let src = self.a & arg;
                 let result = src.wrapping_shr(1);
@@ -1187,7 +1188,7 @@ impl Cpu {
             Opcode::ANC => {
                 // Immediateのみ、A=A & #IMM, Carryは前回状態のNegativeをコピー
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let result = self.a & arg;
                 let is_zero = result == 0;
@@ -1203,7 +1204,7 @@ impl Cpu {
             Opcode::ARR => {
                 // Immediateのみ、Carry=bit6, V=bit6 xor bit5
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let src = self.a & arg;
                 let result =
@@ -1226,7 +1227,7 @@ impl Cpu {
                 // Immediateのみ、X = (A & X) - #IMM, NZCを更新
                 // without borrowとのことなので、減算時cフラグも無視
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let src = self.a & arg;
 
@@ -1243,7 +1244,7 @@ impl Cpu {
             }
             Opcode::LAX => {
                 // A = X = argsっぽい
-                let (Operand(_, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, arg) = self.fetch_args(system, mode);
 
                 let is_zero = arg == 0;
                 let is_negative = (arg & 0x80) == 0x80;
@@ -1256,7 +1257,7 @@ impl Cpu {
             }
             Opcode::SAX => {
                 // memory = A & X, flag操作はなし
-                let (Operand(addr, cyc), _arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, _arg) = self.fetch_args(system, mode);
 
                 let result = self.a & self.x;
 
@@ -1265,7 +1266,7 @@ impl Cpu {
             }
             Opcode::DCP => {
                 // DEC->CMPっぽい
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 // DEC
                 let dec_result = arg.wrapping_sub(1);
@@ -1285,7 +1286,7 @@ impl Cpu {
             }
             Opcode::ISC => {
                 // INC->SBC
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 // INC
                 let inc_result = arg.wrapping_add(1);
@@ -1311,7 +1312,7 @@ impl Cpu {
             }
             Opcode::RLA => {
                 // ROL -> AND
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 // ROL
                 let result_rol =
@@ -1337,7 +1338,7 @@ impl Cpu {
             }
             Opcode::RRA => {
                 // ROR -> ADC
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 // ROR
                 let result_ror =
@@ -1370,7 +1371,7 @@ impl Cpu {
             }
             Opcode::SLO => {
                 // ASL -> ORA
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 // ASL
                 let result_asl = arg.wrapping_shl(1);
@@ -1394,7 +1395,7 @@ impl Cpu {
             }
             Opcode::SRE => {
                 // LSR -> EOR
-                let (Operand(addr, cyc), arg) = self.fetch_args(system, mode);
+                let (Operand { data: addr, cyc }, arg) = self.fetch_args(system, mode);
 
                 // LSR
                 let result_lsr = arg.wrapping_shr(1);
@@ -1417,15 +1418,15 @@ impl Cpu {
                 3 + cyc
             }
             Opcode::SKB => {
-                // Immediateをフェッチするけど、なにもしない
+                // Fetch Immediate but do nothing
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (Operand(_addr, cyc), _arg) = self.fetch_args(system, mode);
+                let (Operand { data: _, cyc }, _arg) = self.fetch_args(system, mode);
 
                 1 + cyc
             }
             Opcode::IGN => {
-                // フェッチするけど、なにもしない
-                let (Operand(_addr, cyc), _arg) = self.fetch_args(system, mode);
+                // Fetch but do nothing
+                let (Operand { data: _, cyc }, _arg) = self.fetch_args(system, mode);
 
                 1 + cyc
             }
