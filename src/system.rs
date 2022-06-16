@@ -4,7 +4,7 @@ use crate::cpu::Interrupt;
 use crate::ppu::OAM_DMA_COPY_SIZE_PER_PPU_STEP;
 use crate::ppu::OAM_SIZE;
 use crate::ppu::Ppu;
-use crate::system_ppu_reg::APU_IO_OAM_DMA_OFFSET;
+use crate::ppu_registers::APU_IO_OAM_DMA_OFFSET;
 
 use super::cartridge::*;
 use super::interface::*;

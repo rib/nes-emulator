@@ -1,3 +1,7 @@
+use crate::ppu_registers;
+use crate::ppu_registers::Control1Flags;
+use crate::ppu_registers::Control2Flags;
+use crate::ppu_registers::StatusFlags;
 use crate::prelude::Cartridge;
 
 use super::cpu::*;
@@ -224,6 +228,12 @@ pub struct Ppu {
     //  0x2008 - 0x3fff: PPU I/O Mirror x1023
     pub ppu_reg: [u8; PPU_REG_SIZE],
 
+    pub io_latch_value: u8,
+
+    pub status: StatusFlags,
+    pub control1: Control1Flags,
+    pub control2: Control2Flags,
+
     // PPUDATA reads go via a buffer (except for special behaviour for pallet reads)
     pub ppu_data_buffer: u8,
 
@@ -267,8 +277,14 @@ pub struct Ppu {
 impl Default for Ppu {
     fn default() -> Self {
         Self {
+            io_latch_value: 0,
+
             ppu_reg: [0; PPU_REG_SIZE],
             ppu_data_buffer: 0,
+
+            status: StatusFlags::empty(),
+            control1: Control1Flags::empty(),
+            control2: Control2Flags::empty(),
 
             video: Default::default(),
 
@@ -305,6 +321,9 @@ impl EmulateControl for Ppu {
         self.video.poweron();
 
         self.ppu_reg = [0; PPU_REG_SIZE];
+        self.status = StatusFlags::empty();
+        self.control1 = Control1Flags::empty();
+        self.control2 = Control2Flags::empty();
 
         self.written_oam_data = false;
         self.written_ppu_scroll = false;
@@ -332,78 +351,110 @@ impl EmulateControl for Ppu {
 
 impl Ppu {
 
+    // TODO: decay the latch value over time
+    pub fn read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
+        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
+        self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
+        read
+    }
+
     pub fn read_u8(&mut self, addr: u16) -> u8 {
         // mirror support
-        let index = usize::from(addr - PPU_REG_BASE_ADDR) % self.ppu_reg.len();
-        debug_assert!(index < 0x9);
-        match index {
+        let addr = ((addr - 0x2000) % 8) + 0x2000;
+        let (value, undefined_bits) = match addr {
+            0x2000 => { // Control 1 (Write-only)
+                (0, 0xff)
+            }
+            0x2001 => {  // Control 2 (Write-only)
+                (0, 0xff)
+            }
             // PPU_STATUS (read-only) Resets double-write register status, clears VBLANK flag
-            0x02 => {
-                let data = self.ppu_reg[index]; // If you don't fetch it first
+            0x2002 => { // Status (Read-only)
+                let data = self.status.bits();
                 self.ppu_is_second_write = false;
-                self.ppu_status_set_is_vblank(false);
-                data
+                self.status.set(StatusFlags::IN_VBLANK, false);
+                (data, StatusFlags::UNDEFINED_BITS.bits())
+            }
+            0x2003 => { // SPR-RAM Address Register (Write-only)
+                (0, 0xff)
             }
             // OAM_DATAの読み出しフラグ
             // OAM_DATA read flag
-            0x04 => {
+            0x2004 => { // SPR-RAM I/O Register (Read/Write)
                 self.read_oam_data = true;
-                arr_read!(self.ppu_reg, index)
+                (arr_read!(self.ppu_reg, 4), 0)
+            }
+            0x2005 => { // VRAM Address Register 1 (Write-only)
+                (0, 0xff)
+            }
+            0x2006 => { // VRAM Address Register 2 (Write-only)
+                (0, 0xff)
             }
             // Since there is a buffer that sets a flag for PPU_DATA update / address increment,
             // the result will be entered with a delay of 1 step
-            0x07 => { // PPUDATA
+            0x2007 => { // PPUDATA (Read/Write)
                 self.read_ppu_data = true;
-                arr_read!(self.ppu_reg, index)
+                (arr_read!(self.ppu_reg, 7), 0)
             }
-            // default
-            _ => arr_read!(self.ppu_reg, index),
-        }
+            _ => unreachable!()
+        };
+
+        self.read_with_latch(value, undefined_bits)
     }
 
     pub fn write_u8(&mut self, addr: u16, data: u8) {
         // mirror support
-        let index = usize::from(addr - 0x2000) % self.ppu_reg.len();
-        match index {
+        let addr = ((addr - 0x2000) % 8) + 0x2000;
+        self.io_latch_value = data;
+        match addr {
+            0x2000 => { // Control 1
+                self.control1 = Control1Flags::from_bits_truncate(data)
+            }
+            0x2001 => {  // Control 2
+                self.control2 = Control2Flags::from_bits_truncate(data)
+            }
+            0x2002 => { // Status
+                // Read Only
+            }
+            0x2003 => { // SPR-RAM Address Register
+                arr_write!(self.ppu_reg, 3, data);
+            }
             // $2004 If you write it in OAM_DATA, set a write flag (though you will not use it)
-            0x04 => {
+            0x2004 => {
                 self.written_oam_data = true;
-                arr_write!(self.ppu_reg, index, data);
+                arr_write!(self.ppu_reg, 4, data);
             }
             // $2005 PPU_SCROLL Written twice
-            0x05 => {
+            0x2005 => {
                 if self.ppu_is_second_write {
                     self.ppu_scroll_y_reg = data;
                     self.ppu_is_second_write = false;
                     // PPUに通知
                     self.written_ppu_scroll = true;
                 } else {
-                    arr_write!(self.ppu_reg, index, data);
+                    arr_write!(self.ppu_reg, 5, data);
                     self.ppu_is_second_write = true;
                 }
             }
             // $2006 PPU_ADDR Written twice
-            0x06 => {
+            0x2006 => {
                 if self.ppu_is_second_write {
                     self.ppu_addr_lower_reg = data;
                     self.ppu_is_second_write = false;
                     // PPUに通知
                     self.written_ppu_addr = true;
                 } else {
-                    arr_write!(self.ppu_reg, index, data);
+                    arr_write!(self.ppu_reg, 6, data);
                     self.ppu_is_second_write = true;
                 }
             }
             // $2007 PPU_DATA addr autoincrement
-            0x07 => {
-                arr_write!(self.ppu_reg, index, data);
+            0x2007 => {
+                arr_write!(self.ppu_reg, 7, data);
                 // PPUに書いてもらおう
                 self.written_ppu_data = true;
             }
-            // default
-            _ => {
-                arr_write!(self.ppu_reg, index, data);
-            }
+            _ => unreachable!()
         };
     }
 
@@ -415,11 +466,11 @@ impl Ppu {
     /// scrollなしなら上記はすべて一致するはず
     fn draw_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
         // ループ内で何度も呼び出すとパフォーマンスが下がる
-        let nametable_base_addr = self.read_ppu_name_table_base_addr();
-        let pattern_table_addr = self.read_ppu_bg_pattern_table_addr();
-        let is_clip_bg_leftend = self.read_ppu_is_clip_bg_leftend();
-        let is_write_bg = self.read_ppu_is_write_bg();
-        let is_monochrome = self.read_is_monochrome();
+        let nametable_base_addr = self.name_table_base_addr();
+        let pattern_table_addr = self.bg_pattern_table_addr();
+        let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
+        let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
+        let is_monochrome = self.control2.contains(Control2Flags::MONOCHROME);
         let master_bg_color = Color::from(self.video.read_u8(
             cartridge,
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
@@ -593,7 +644,7 @@ impl Ppu {
         pixel_y: usize,
     ) -> (Option<u8>, Option<u8>) {
         // Sprite描画無効化されていたら即終了
-        if !self.read_ppu_is_write_sprite() {
+        if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
             return (None, None);
         }
         // Spriteを探索する (y位置的に描画しなければならないSpriteは事前に読み込み済)
@@ -605,7 +656,7 @@ impl Ppu {
                 let sprite_x = usize::from(sprite.x);
                 let sprite_y = usize::from(sprite.y);
                 // 左端sprite clippingが有効な場合表示しない
-                let is_sprite_clipping = self.read_ppu_is_clip_sprite_leftend() && (pixel_x < 8);
+                let is_sprite_clipping = self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW) == false && (pixel_x < 8);
                 // X位置が描画範囲の場合
                 if !is_sprite_clipping
                     && (sprite_x <= pixel_x)
@@ -615,12 +666,12 @@ impl Ppu {
                     let sprite_offset_x: usize = pixel_x - sprite_x; // 0-7
                     let sprite_offset_y: usize = pixel_y - sprite_y - 1; // 0-7 or 0-15 (largeの場合, tile参照前に0-7に詰める)
                     debug_assert!(sprite_offset_x < SPRITE_WIDTH);
-                    debug_assert!(sprite_offset_y < usize::from(self.read_ppu_sprite_height()));
+                    debug_assert!(sprite_offset_y < usize::from(self.sprite_height()));
                     // pattern table addrと、tile idはサイズで決まる
                     let (sprite_pattern_table_addr, sprite_tile_id): (u16, u8) = match sprite
                         .tile_id
                     {
-                        TileId::Normal { id } => (self.read_ppu_sprite_pattern_table_addr(), id),
+                        TileId::Normal { id } => (self.sprites_pattern_table_addr(), id),
                         // 8*16 spriteなので上下でidが別れている
                         TileId::Large {
                             pattern_table_addr,
@@ -697,12 +748,12 @@ impl Ppu {
     /// 8個を超えるとOverflowフラグを立てる
     fn fetch_sprite(&mut self) {
         // sprite描画無効化
-        if !self.read_ppu_is_write_sprite() {
+        if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
             return;
         }
         // スプライトのサイズを事前計算
         let sprite_begin_y = self.current_line;
-        let sprite_height = u16::from(self.read_ppu_sprite_height());
+        let sprite_height = u16::from(self.sprite_height());
         let is_large = sprite_height == 16;
         // とりあえず全部クリアしておく
         self.sprite_temps = [None; SPRITE_TEMP_SIZE];
@@ -718,11 +769,11 @@ impl Ppu {
                 // sprite 0 hitフラグ(1lineごとに処理しているので先に立ててしまう)
                 let is_zero_hit_delay = sprite_begin_y > (sprite_end_y - 3); //1lineずつ処理だとマリオ等早く検知しすぎるので TODO: #40
                 if sprite_index == 0 && is_zero_hit_delay {
-                    self.ppu_status_set_is_hit_sprite0(true);
+                    self.status.set(StatusFlags::SPRITE0_HIT, true);
                 }
                 // sprite overflow
                 if tmp_index >= SPRITE_TEMP_SIZE {
-                    self.ppu_status_set_sprite_overflow(true);
+                    self.status.set(StatusFlags::SPRITE_OVERFLOW, true);
                     break 'search_sprite;
                 } else {
                     debug_assert!(tmp_index < SPRITE_TEMP_SIZE);
@@ -747,8 +798,8 @@ impl Ppu {
         self.current_scroll_x = self.fetch_scroll_x;
         self.current_scroll_y = self.fetch_scroll_y;
 
-        self.ppu_status_set_is_hit_sprite0(false);
-        self.ppu_status_set_sprite_overflow(false);
+        self.status.set(StatusFlags::SPRITE0_HIT, false);
+        self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
 
         match LineStatus::from(self.current_line) {
             LineStatus::Visible => {
@@ -767,9 +818,9 @@ impl Ppu {
             LineStatus::VerticalBlanking(is_first) => {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
                 if is_first {
-                    self.ppu_status_set_is_vblank(true);
+                    self.status.set(StatusFlags::IN_VBLANK, true);
                 }
-                if self.read_ppu_nmi_enable() && self.ppu_status_is_vblank() {
+                if self.control1.contains(Control1Flags::NMI_ENABLE) && self.status.contains(StatusFlags::IN_VBLANK) {
                     Some(Interrupt::NMI)
                 } else {
                     None
@@ -777,7 +828,7 @@ impl Ppu {
             }
             LineStatus::PreRender => {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
-                self.ppu_status_set_is_vblank(false);
+                self.status.set(StatusFlags::IN_VBLANK, false);
 
                 None
             }
