@@ -20,7 +20,7 @@ pub const PALETTE_BG_OFFSET: u16 = 0x00;
 pub const PALETTE_SPRITE_OFFSET: u16 = 0x10;
 
 #[derive(Clone)]
-pub struct VideoSystem {
+pub struct VRam {
     // 0x0000 - 0x1fff
     // pattern table 0/1
     // cartridgeのCHR-RAMを読む
@@ -36,7 +36,7 @@ pub struct VideoSystem {
     pub palette: [u8; PALETTE_SIZE],
 }
 
-impl Default for VideoSystem {
+impl Default for VRam {
     fn default() -> Self {
         Self {
             nametables: [[0; NAME_TABLE_SIZE]; NUM_OF_NAME_TABLE],
@@ -45,14 +45,14 @@ impl Default for VideoSystem {
     }
 }
 
-impl EmulateControl for VideoSystem {
+impl EmulateControl for VRam {
     fn poweron(&mut self) {
         self.nametables = [[0; NAME_TABLE_SIZE]; NUM_OF_NAME_TABLE];
         self.palette = [0; PALETTE_SIZE];
     }
 }
 
-impl VideoSystem {
+impl VRam {
     /// NameTable Mirrorのアドレス変換をします
     /// 戻り値: (table_index[0,1,2,3のどれか], offset[中身のindex])
     ///

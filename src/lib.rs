@@ -18,4 +18,4 @@ pub mod prelude;
 pub mod system;
 pub mod system_apu_reg;
 pub mod ppu_registers;
-pub mod video_system;
+pub mod vram;

@@ -7,7 +7,7 @@ use crate::prelude::Cartridge;
 use super::cpu::*;
 use super::interface::*;
 use super::system::*;
-use super::video_system::*;
+use super::vram::*;
 
 /// 1lineあたりかかるCPUサイクル
 pub const CPU_CYCLE_PER_LINE: usize = 341 / 3; // ppu cyc -> cpu cyc
@@ -252,7 +252,7 @@ pub struct Ppu {
     pub ppu_addr_lower_reg: u8, // $2006
 
     /// PPUが描画に使うメモリ空間
-    pub video: VideoSystem,
+    pub video: VRam,
 
     /// Object Attribute Memoryの実態
     pub oam: [u8; OAM_SIZE],

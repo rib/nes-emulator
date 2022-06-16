@@ -9,7 +9,7 @@ use crate::ppu_registers::APU_IO_OAM_DMA_OFFSET;
 use super::cartridge::*;
 use super::interface::*;
 use super::pad::*;
-use super::video_system::*;
+use super::vram::*;
 
 pub const WRAM_SIZE: usize = 0x0800;
 pub const PPU_REG_SIZE: usize = 0x0008;
