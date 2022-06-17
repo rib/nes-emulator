@@ -134,20 +134,16 @@ impl SpriteAttr {
 
 #[derive(Copy, Clone)]
 pub struct Sprite {
-    ///  y座標
-    /// 実際は+1した場所に表示する
+    /// Actually, it is displayed in the place where +1 is added
     y: u8,
-    /// tile ID指定
     tile_id: TileId,
-    /// 属性とか
     attr: SpriteAttr,
-    /// x座標
     x: u8,
 }
 
 impl Sprite {
-    /// SpriteをOAMの情報から生成します。
-    /// `is_large` -スプライトサイズが8*16ならtrue、8*8ならfalse
+    /// Generate Sprite from OAM information
+    /// `is_large` -true if sprite size is 8 * 16, false if 8 * 8
     pub fn from(is_large: bool, byte0: u8, byte1: u8, byte2: u8, byte3: u8) -> Sprite {
         Sprite {
             y: byte0,
@@ -226,47 +222,41 @@ impl Default for DrawOption {
 pub struct Ppu {
     //  0x2000 - 0x2007: PPU I/O
     //  0x2008 - 0x3fff: PPU I/O Mirror x1023
-    pub ppu_reg: [u8; PPU_REG_SIZE],
+    //pub ppu_reg: [u8; PPU_REG_SIZE],
+
+    pub palette: [u8; PALETTE_SIZE],
 
     pub io_latch_value: u8,
+
+    pub read_buffer: u8,
 
     pub status: StatusFlags,
     pub control1: Control1Flags,
     pub control2: Control2Flags,
 
-    // PPUDATA reads go via a buffer (except for special behaviour for pallet reads)
-    pub ppu_data_buffer: u8,
+    pub write_toggle: bool, // Latch for PPU_SCROLL and PPU_ADDR
+    pub shared_temp: u16, // Shared temp for PPU_SCROLL and PPU_ADDR
+    // Either configured directly via PPU_ADDR, or indirectly via PPU_SCROLL
+    pub shared_vram_addr: u16,
 
-    // Request trigger for PPU address space
-    pub written_oam_data: bool,   // OAM_DATAがかかれた
-    pub written_ppu_scroll: bool, // PPU_SCROLLが2回書かれた
-    pub written_ppu_addr: bool,   // PPU_ADDRが2回書かれた
-    pub written_ppu_data: bool,   // PPU_DATAがかかれた
-    pub read_oam_data: bool,      // OAM_DATAが読まれた
-    pub read_ppu_data: bool,      // PPU_DATAが読まれた
+    pub scroll_x_fine3: u8,
 
-    /* 2回海ができるPPU register対応 */
-    /// $2005, $2006は状態を共有する、$2002を読み出すと、どっちを書くかはリセットされる
-    pub ppu_is_second_write: bool, // 初期値falseで, 2回目の書き込みが分岐するようにtrueにする
-    pub ppu_scroll_y_reg: u8,   // $2005
-    pub ppu_addr_lower_reg: u8, // $2006
-
-    /// PPUが描画に使うメモリ空間
-    pub video: VRam,
+    pub vram: VRam,
 
     /// Object Attribute Memoryの実態
     pub oam: [u8; OAM_SIZE],
+    pub oam_offset: u8,
+
     /// 次の描画で使うスプライトを格納する
     pub sprite_temps: [Option<Sprite>; SPRITE_TEMP_SIZE],
 
-    /// 積もり積もったcpu cycle, 341を超えたらクリアして1行処理しよう
     pub cumulative_cpu_cyc: usize,
     /// 次処理するy_index
     pub current_line: u16,
 
     // scrollレジスタは1lineごとに更新
-    pub fetch_scroll_x: u8,
-    pub fetch_scroll_y: u8,
+    //pub fetch_scroll_x: u8,
+    //pub fetch_scroll_y: u8,
     pub current_scroll_x: u8,
     pub current_scroll_y: u8,
 
@@ -279,34 +269,28 @@ impl Default for Ppu {
         Self {
             io_latch_value: 0,
 
-            ppu_reg: [0; PPU_REG_SIZE],
-            ppu_data_buffer: 0,
+            palette: [0; PALETTE_SIZE],
+
+            read_buffer: 0,
 
             status: StatusFlags::empty(),
             control1: Control1Flags::empty(),
             control2: Control2Flags::empty(),
 
-            video: Default::default(),
+            write_toggle: false,
+            shared_temp: 0,
+            shared_vram_addr: 0,
+            scroll_x_fine3: 0,
 
-            written_oam_data: false,
-            written_ppu_scroll: false,
-            written_ppu_addr: false,
-            written_ppu_data: false,
-            read_oam_data: false,
-            read_ppu_data: false,
-
-            ppu_is_second_write: false,
-            ppu_scroll_y_reg: 0,
-            ppu_addr_lower_reg: 0,
+            vram: Default::default(),
 
             oam: [0; OAM_SIZE],
+            oam_offset: 0,
             sprite_temps: [None; SPRITE_TEMP_SIZE],
 
             cumulative_cpu_cyc: 0,
             current_line: 241,
 
-            fetch_scroll_x: 0,
-            fetch_scroll_y: 0,
             current_scroll_x: 0,
             current_scroll_y: 0,
 
@@ -318,23 +302,18 @@ impl Default for Ppu {
 impl EmulateControl for Ppu {
     fn poweron(&mut self) {
 
-        self.video.poweron();
+        self.vram.poweron();
 
-        self.ppu_reg = [0; PPU_REG_SIZE];
+        self.palette = [0; PALETTE_SIZE];
+
         self.status = StatusFlags::empty();
         self.control1 = Control1Flags::empty();
         self.control2 = Control2Flags::empty();
 
-        self.written_oam_data = false;
-        self.written_ppu_scroll = false;
-        self.written_ppu_addr = false;
-        self.written_ppu_data = false;
-        self.read_oam_data = false;
-        self.read_ppu_data = false;
-
-        self.ppu_is_second_write = false;
-        self.ppu_scroll_y_reg = 0;
-        self.ppu_addr_lower_reg = 0;
+        self.write_toggle = false;
+        self.shared_temp = 0;
+        self.shared_vram_addr = 0;
+        self.scroll_x_fine3 = 0;
 
         self.oam = [0; OAM_SIZE];
         self.sprite_temps = [None; SPRITE_TEMP_SIZE];
@@ -342,8 +321,6 @@ impl EmulateControl for Ppu {
         self.current_line = 241;
         self.cumulative_cpu_cyc = 0;
 
-        self.fetch_scroll_x = 0;
-        self.fetch_scroll_y = 0;
         self.current_scroll_x = 0;
         self.current_scroll_y = 0;
     }
@@ -358,7 +335,70 @@ impl Ppu {
         read
     }
 
-    pub fn read_u8(&mut self, addr: u16) -> u8 {
+    pub fn pallet_read_u8(&self, addr: u16) -> u8 {
+        let index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
+        match index {
+            0x10 => self.palette[0x00],
+            0x14 => self.palette[0x04],
+            0x18 => self.palette[0x08],
+            0x1c => self.palette[0x0c],
+            _ => arr_read!(self.palette, index),
+        }
+    }
+
+    pub fn pallet_write_u8(&mut self, addr: u16, data: u8) {
+        // Palette with mirroring
+        let index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
+        match index {
+            0x10 => self.palette[0x00] = data,
+            0x14 => self.palette[0x04] = data,
+            0x18 => self.palette[0x08] = data,
+            0x1c => self.palette[0x0c] = data,
+            _ => arr_write!(self.palette, index, data),
+        };
+    }
+
+    /// Returns (value, undefined_bit_mask)
+    pub fn data_read_u8(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+        if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
+            self.read_buffer = self.vram.read_u8(cartridge, addr);
+            (self.pallet_read_u8(addr), 0xc0)
+        } else {
+            let buffered = self.read_buffer;
+            self.read_buffer = self.vram.read_u8(cartridge, addr);
+            (buffered, 0)
+        }
+    }
+
+    pub fn data_write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+        if let 0x3f00..=0x3fff = addr {
+            //println!("palette write: addr={addr:x}, data={data:x}");
+            self.pallet_write_u8(addr, data);
+        } else {
+            //println!("data write: addr={addr:x}, data={data:x}");
+            self.vram.write_u8(cartridge, addr, data);
+        }
+    }
+
+    pub fn increment_data_addr(&mut self) {
+        // FIXME: handle these details when rendering...
+        //
+        // Outside of rendering, reads from or writes to $2007 will add either
+        // 1 or 32 to v depending on the VRAM increment bit set via $2000.
+        // During rendering (on the pre-render line and the visible lines
+        // 0-239, provided either background or sprite rendering is enabled),
+        // it will update v in an odd way, triggering a coarse X increment and
+        // a Y increment simultaneously (with normal wrapping behavior).
+        //
+        // Internally, this is caused by the carry inputs to various sections
+        // of v being set up for rendering, and the $2007 access triggering a
+        // "load next value" signal for all of v (when not rendering, the carry
+        // inputs are set up to linearly increment v by either 1 or 32)
+
+        self.shared_vram_addr = self.shared_vram_addr.wrapping_add(self.address_increment());
+    }
+
+    pub fn read_u8(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         // mirror support
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         let (value, undefined_bits) = match addr {
@@ -371,30 +411,27 @@ impl Ppu {
             // PPU_STATUS (read-only) Resets double-write register status, clears VBLANK flag
             0x2002 => { // Status (Read-only)
                 let data = self.status.bits();
-                self.ppu_is_second_write = false;
+                self.write_toggle = false;
+                //self.ppu_is_second_write = false;
                 self.status.set(StatusFlags::IN_VBLANK, false);
                 (data, StatusFlags::UNDEFINED_BITS.bits())
             }
-            0x2003 => { // SPR-RAM Address Register (Write-only)
+            0x2003 => { // OAMADDR (Write-only)
                 (0, 0xff)
             }
-            // OAM_DATAの読み出しフラグ
-            // OAM_DATA read flag
-            0x2004 => { // SPR-RAM I/O Register (Read/Write)
-                self.read_oam_data = true;
-                (arr_read!(self.ppu_reg, 4), 0)
+            0x2004 => { // OAMDATA (Read/Write)
+                (self.oam[self.oam_offset as usize], 0xff)
             }
-            0x2005 => { // VRAM Address Register 1 (Write-only)
+            0x2005 => { // PPU_SCROLL (Write-only)
                 (0, 0xff)
             }
-            0x2006 => { // VRAM Address Register 2 (Write-only)
+            0x2006 => { // PPU_ADDR (Write-only)
                 (0, 0xff)
             }
-            // Since there is a buffer that sets a flag for PPU_DATA update / address increment,
-            // the result will be entered with a delay of 1 step
-            0x2007 => { // PPUDATA (Read/Write)
-                self.read_ppu_data = true;
-                (arr_read!(self.ppu_reg, 7), 0)
+            0x2007 => { // PPU_DATA (Read/Write)
+                let (data, undefined_mask) = self.data_read_u8(cartridge, self.shared_vram_addr);
+                self.increment_data_addr();
+                (data, undefined_mask)
             }
             _ => unreachable!()
         };
@@ -402,87 +439,126 @@ impl Ppu {
         self.read_with_latch(value, undefined_bits)
     }
 
-    pub fn write_u8(&mut self, addr: u16, data: u8) {
+    pub fn write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         // mirror support
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         self.io_latch_value = data;
         match addr {
             0x2000 => { // Control 1
-                self.control1 = Control1Flags::from_bits_truncate(data)
+                self.control1 = Control1Flags::from_bits_truncate(data);
+                // The lower nametable bits become 10-11 of the shared (15 bit) temp register that's
+                // used by PPU_SCROLL and PPU_ADDR
+                self.shared_temp = (self.shared_temp & 0b0111_0011_1111_1111) | ((data as u16 & 0b11) << 10);
             }
             0x2001 => {  // Control 2
-                self.control2 = Control2Flags::from_bits_truncate(data)
+                self.control2 = Control2Flags::from_bits_truncate(data);
             }
             0x2002 => { // Status
                 // Read Only
             }
-            0x2003 => { // SPR-RAM Address Register
-                arr_write!(self.ppu_reg, 3, data);
+            0x2003 => { // OAMADDR
+                /* TODO: also corrupts OAM data...
+                   https://forums.nesdev.org/viewtopic.php?t=10189
+
+                    * Take old value from $2003 and AND it with $F8
+                    * Read 8 bytes from OAM starting at this masked value
+                    * Write them starting at $XX in OAM, where $XX is the high byte of the PPU register written to ($20-$3F) masked with $F8
+                    * Use new value written to $2003 as OAM address
+
+                    But this is just for the "preferred" CPU-PPU alignment. For another,
+                    I get totally different corruptions at portions of OAM related to the
+                    new value written. It's probably using a different value to write the
+                    8-byte chunk to OAM
+
+                    Seems like this has been more an issue for people writing tests, and
+                    hopefully no games depend on this
+                 */
+                self.oam_offset = data;
             }
-            // $2004 If you write it in OAM_DATA, set a write flag (though you will not use it)
             0x2004 => {
-                self.written_oam_data = true;
-                arr_write!(self.ppu_reg, 4, data);
+                //self.written_oam_data = true;
+                //arr_write!(self.ppu_reg, 4, data);
+                self.oam[self.oam_offset as usize] = data;
+                self.oam_offset = self.oam_offset.wrapping_add(1);
             }
-            // $2005 PPU_SCROLL Written twice
-            0x2005 => {
-                if self.ppu_is_second_write {
-                    self.ppu_scroll_y_reg = data;
-                    self.ppu_is_second_write = false;
-                    // PPUに通知
-                    self.written_ppu_scroll = true;
+            0x2005 => { // PPU_SCROLL
+                // NB: This is the layout of the (15bit) shared temp register when used
+                // for rendering / scrolling:
+                // yyy NN YYYYY XXXXX
+                // ||| || ||||| +++++-- coarse X scroll
+                // ||| || +++++-------- coarse Y scroll
+                // ||| ++-------------- nametable select
+                // +++----------------- fine Y scroll
+                if self.write_toggle {
+                    let fine3_y = (data & 0b111) as u16;
+                    let coarse5_y = ((data & 0b1111_1000) >> 3) as u16;
+                    self.shared_temp = (self.shared_temp & 0b0000_1100_0001_1111) | (fine3_y << 12) | (coarse5_y << 5);
+
+                    // FIXME this should be updated in PreRender...
+                    let (scroll_x, scroll_y) = self.decode_scroll_xy();
+                    self.current_scroll_x = scroll_x;
+                    self.current_scroll_y = scroll_y;
                 } else {
-                    arr_write!(self.ppu_reg, 5, data);
-                    self.ppu_is_second_write = true;
+                    self.scroll_x_fine3 = data & 0b111;
+                    self.shared_temp = (self.shared_temp & 0b0111_1111_1110_0000) | (((data >> 3) as u16) & 0b1_1111);
                 }
+                self.write_toggle = !self.write_toggle;
             }
-            // $2006 PPU_ADDR Written twice
-            0x2006 => {
-                if self.ppu_is_second_write {
-                    self.ppu_addr_lower_reg = data;
-                    self.ppu_is_second_write = false;
-                    // PPUに通知
-                    self.written_ppu_addr = true;
+            0x2006 => { // PPU_ADDR
+                if self.write_toggle {
+                    let lsb = data;
+                    self.shared_temp = (self.shared_temp & 0xff00) | (lsb as u16);
+                    self.shared_vram_addr = self.shared_temp;
                 } else {
-                    arr_write!(self.ppu_reg, 6, data);
-                    self.ppu_is_second_write = true;
+                    // NB: shared_temp (t) is a 15 bit register that's shared between
+                    // PPU_ADDR and PPU_SCROLL. Also note the PPU only has a 14bit address
+                    // space for vram and the first write to $2006 will set the upper
+                    // bits of the shared_temp address except with the top bit of the
+                    // address cleared (so we clear the top two bits since we're storing
+                    // as a 16 bit value)
+                    //
+                    let msb = data & 0b0011_1111;
+                    self.shared_temp = ((msb as u16) << 8) | (self.shared_temp & 0xff);
                 }
+                self.write_toggle = !self.write_toggle;
             }
-            // $2007 PPU_DATA addr autoincrement
-            0x2007 => {
-                arr_write!(self.ppu_reg, 7, data);
+            0x2007 => { // PPU_DATA
+                //println!("data_write_u8: {:x}, {data:x}", self.shared_vram_addr);
+                self.data_write_u8(cartridge, self.shared_vram_addr, data);
+
+                //arr_write!(self.ppu_reg, 7, data);
                 // PPUに書いてもらおう
-                self.written_ppu_data = true;
+                //self.written_ppu_data = true;
+                self.increment_data_addr();
             }
             _ => unreachable!()
         };
     }
 
-    /// 1行書きます
+    /// Draw one line
     ///
-    /// `tile_base`   - スクロールオフセット加算なしの現在のタイル位置
-    /// `tile_global` - スクロールオフセット換算した、4面含めた上でのタイル位置
-    /// `tile_local`  - `tile_global`を1Namespace上のタイルでの位置に変換したもの
-    /// scrollなしなら上記はすべて一致するはず
+    /// `tile_base`   - Current tile position without scroll offset addition
+    /// `tile_global` - Tile position on 4 sides including scroll offset
+    /// `tile_local`  - Converted `tile_global` to the position on the tile on 1Namespace
+    /// All of the above should match without scroll
     fn draw_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
-        // ループ内で何度も呼び出すとパフォーマンスが下がる
         let nametable_base_addr = self.name_table_base_addr();
         let pattern_table_addr = self.bg_pattern_table_addr();
+        //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
         let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
         let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
         let is_monochrome = self.control2.contains(Control2Flags::MONOCHROME);
-        let master_bg_color = Color::from(self.video.read_u8(
-            cartridge,
+        let master_bg_color = Color::from(self.pallet_read_u8(
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
         let raw_y = self.current_line + u16::from(self.current_scroll_y);
-        let offset_y = raw_y & 0x07; // tile換算でのy位置から、実pixelのズレ(0~7)
-        let tile_base_y = raw_y >> 3; // オフセットなしのtile換算での現在位置
-                                      // scroll regはtile換算でずらす
-        let tile_global_y = tile_base_y % (SCREEN_TILE_HEIGHT * 2); // tile換算でのy絶対座標
-        let tile_local_y = tile_global_y % SCREEN_TILE_HEIGHT; // 1 tile内での絶対座標
-                                                               // 4面ある内、下側に差し掛かっていたらfalse
+        let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
+        let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
+                                      // scroll reg shifts in tile conversion
+        let tile_global_y = tile_base_y % (SCREEN_TILE_HEIGHT * 2); // y absolute coordinates in tile conversion
+        let tile_local_y = tile_global_y % SCREEN_TILE_HEIGHT; // Absolute coordinates within 1 tile
+                                                               // Of the 4 sides, if it is approaching the lower side, it is false
         let is_nametable_position_top = tile_global_y < SCREEN_TILE_HEIGHT;
 
         // pixel formatの決定
@@ -492,36 +568,39 @@ impl Ppu {
             PixelFormat::ARGB8888 => (1, 2, 3, 0),
         };
 
-        // 描画座標系でループさせる
+        //println!("scroll_x = {}, y = {}", self.current_scroll_x, self.current_scroll_y);
+        // Loop in the drawing coordinate system
         let pixel_y = usize::from(self.current_line);
         for pixel_x in 0..VISIBLE_SCREEN_WIDTH {
-            // Sprite: 探索したテンポラリレジスタから描画するデータを取得する
+            // Sprite: Get the data to draw from the searched temporary register
             let (sprite_palette_data_back, sprite_palette_data_front) =
                 self.get_sprite_draw_data(cartridge, pixel_x, pixel_y);
 
-            // BG(Nametable): 座標に該当するNametableと属性テーブルからデータを取得する
+            // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
             let offset_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) & 0x07;
             let tile_base_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) >> 3;
-            // scroll regはtile換算でずらす
-            let tile_global_x = tile_base_x % (SCREEN_TILE_WIDTH * 2); // 4tile換算でのx絶対座標
-            let tile_local_x = tile_global_x % SCREEN_TILE_WIDTH; // 1 tile内での絶対座標
-            let is_nametable_position_left = tile_global_x < SCREEN_TILE_WIDTH; // 4面ある内、右側にある場合false
+            // scroll reg shifts in tile conversion
+            let tile_global_x = tile_base_x % (SCREEN_TILE_WIDTH * 2); // X absolute coordinates in 4tile conversion
+            let tile_local_x = tile_global_x % SCREEN_TILE_WIDTH; // Absolute coordinates within 1 tile
+            let is_nametable_position_left = tile_global_x < SCREEN_TILE_WIDTH; // False if it is on the right side of the 4 sides
 
-            // 4面あるうちのどれかがわかるので、該当する面のベースアドレスを返します
+            // Since we know which of the four faces, we will return the base address of that face
             let target_nametable_base_addr = nametable_base_addr +
-                (if is_nametable_position_left { 0x0000 } else { 0x0400 }) + // 左右面の広域offset
-                (if is_nametable_position_top  { 0x0000 } else { 0x0800 }); // 上下面の広域offset
+                (if is_nametable_position_left { 0x0000 } else { 0x0400 }) + // Wide area offset on the left and right sides
+                (if is_nametable_position_top  { 0x0000 } else { 0x0800 }); // Wide area offset on top and bottom
 
-            // attribute tableはNametableの後32byteにいるのでアドレス計算して読み出す。縦横4*4tileで1attrになっている
-            // scroll対応のためにoffset計算はglobal位置を使っている（もしかしたら1Nametableでクリッピングがいるかも)
+            // Since the attribute table is 32 bytes after the nametable, the address is calculated and read.
+            // It is 1 attr with 4 * 4 tiles in height and width.
+            // Offset calculation uses global position for scroll support (maybe 1Nametable with clipping)
             let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET; // 23c0, 27c0, 2bc0, 2fc0のどれか
             let attribute_x_offset = (tile_global_x >> 2) & 0x7;
             let attribute_y_offset = tile_global_y >> 2;
             let attribute_addr =
                 attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
-            // attribute読み出し, BGパレット選択に使う。4*4の位置で使うパレット情報を変える
-            let raw_attribute = self.video.read_u8(cartridge, attribute_addr);
+            // Used for attribute reading and BG palette selection.
+            // Change the palette information used at the 4 * 4 position
+            let raw_attribute = self.vram.read_u8(cartridge, attribute_addr);
             let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
                 (true, true) => (raw_attribute >> 0) & 0x03,  // top left
                 (false, true) => (raw_attribute >> 2) & 0x03, // top right
@@ -529,48 +608,48 @@ impl Ppu {
                 (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
             };
 
-            // Nametableからtile_id読み出し->pattern tableからデータ構築
+            // Read tile_id from Name table-> Build data from pattern table
             let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-            let bg_tile_id = u16::from(self.video.read_u8(cartridge, nametable_addr));
+            let bg_tile_id = u16::from(self.vram.read_u8(cartridge, nametable_addr));
 
-            // pattern_table 1entryは16byte, 0行目だったら0,8番目のデータを使えば良い
+
+            // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
             let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
             let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
             let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
             let bg_data_lower = self
-                .video
+                .vram
                 .read_u8(cartridge, bg_pattern_table_addr_lower);
             let bg_data_upper = self
-                .video
+                .vram
                 .read_u8(cartridge, bg_pattern_table_addr_upper);
 
-            // bgの描画色を作る
+
+            // Make the drawing color of bg
             let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
                 | ((bg_data_lower >> (7 - offset_x)) & 0x01);
             let bg_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET) +   // 0x3f00
-                (u16::from(bg_palette_id) << 2) + // attributeでBG Palette0~3選択
-                u16::from(bg_palette_offset); // palette内の色選択
+                (u16::from(bg_palette_id) << 2) + // Select BG Palette 0 ~ 3 in attribute
+                u16::from(bg_palette_offset); // Color selection in palette
 
-            // BG左端8pixel clipも考慮してBGデータ作る
+            // Create BG data considering the 8 pixel clip at the left end of BG
             let is_bg_clipping = is_clip_bg_leftend && (pixel_x < 8);
-            let is_bg_tranparent = (bg_palette_addr & 0x03) == 0x00; // 背景色が選択された場合はここで処理してしまう
+            let is_bg_tranparent = (bg_palette_addr & 0x03) == 0x00; // If the background color is selected, it will be processed here
             let bg_palette_data: Option<u8> = if is_bg_clipping || !is_write_bg || is_bg_tranparent
             {
                 None
             } else {
-                Some(self.video.read_u8(cartridge, bg_palette_addr))
+                Some(self.pallet_read_u8(bg_palette_addr))
             };
 
-            // 透明色
+            // transparent
             let mut draw_color = master_bg_color;
 
-            // 前後関係考慮して書き込む
             'select_color: for palette_data in &[
                 sprite_palette_data_front,
                 bg_palette_data,
                 sprite_palette_data_back,
             ] {
-                // 透明色判定をしていたら事前にNoneされている
                 if let Some(color_index) = palette_data {
                     let c = Color::from(*color_index);
                     draw_color = c;
@@ -578,32 +657,26 @@ impl Ppu {
                 }
             }
 
-            // 毎回計算する必要のないものを事前計算
             let draw_base_y =
                 self.draw_option.offset_y + (pixel_y as i32) * (self.draw_option.scale as i32);
             let draw_base_x =
                 self.draw_option.offset_x + (pixel_x as i32) * (self.draw_option.scale as i32);
-            // 座標計算, 1dotをscale**2 pixelに反映する必要がある
+            // Coordinate calculation, 1 dot needs to be reflected in scale ** 2 pixel
             for scale_y in 0..self.draw_option.scale {
-                // Y座標を計算
                 let draw_y = draw_base_y + (scale_y as i32);
-
-                // Y座標がFrameBuffer範囲外
                 if (draw_y < 0) || ((self.draw_option.fb_height as i32) <= draw_y) {
                     continue;
                 }
 
                 for scale_x in 0..self.draw_option.scale {
-                    // X位置を求める
                     let draw_x = draw_base_x + (scale_x as i32);
-
-                    // X座標がFrameBuffer範囲外
                     if (draw_x < 0) || ((self.draw_option.fb_width as i32) <= draw_x) {
                         continue;
                     }
 
-                    // FrameBufferのサイズから、相当する座標を計算
-                    // Y位置に相当するindex計算時の幅は256ではなくFrameBufferの幅を使う
+                    // Calculate the corresponding coordinates from the size of FrameBuffer
+                    // Use the width of FrameBuffer instead of 256 for the width when
+                    // calculating the index corresponding to the Y position.
                     let base_index = ((draw_y as isize) * (self.draw_option.fb_width as isize)
                         + (draw_x as isize))
                         * (NUM_OF_COLOR as isize);
@@ -611,13 +684,12 @@ impl Ppu {
                     unsafe {
                         let base_ptr = fb.offset(base_index);
 
-                        // データをFBに反映
                         *base_ptr.offset(pixel_indexes.0) = draw_color.0; // R
                         *base_ptr.offset(pixel_indexes.1) = draw_color.1; // G
                         *base_ptr.offset(pixel_indexes.2) = draw_color.2; // B
                         *base_ptr.offset(pixel_indexes.3) = 0xff; // alpha blending
 
-                        // モノクロ出力対応(とりあえず総加平均...)
+                        // Supports monochrome output (total average for the time being)
                         if is_monochrome {
                             let data = ((u16::from(*base_ptr.offset(pixel_indexes.0))
                                 + u16::from(*base_ptr.offset(pixel_indexes.1))
@@ -633,63 +705,61 @@ impl Ppu {
         }
     }
 
-    /// 指定されたpixelにあるスプライトを描画します
-    /// `pixel_x` - 描画対象の表示するリーンにおけるx座標
-    /// `pixel_y` - 描画対象の表示するリーンにおけるy座標
-    /// retval - (bgよりも後ろに描画するデータ, bgより前に描画するデータ)
+    /// Draws a sprite on the specified pixel
+    /// Returns: (Data drawn after bg, data drawn before bg)
     fn get_sprite_draw_data(
         &mut self,
         cartridge: &mut Cartridge,
         pixel_x: usize,
         pixel_y: usize,
     ) -> (Option<u8>, Option<u8>) {
-        // Sprite描画無効化されていたら即終了
         if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
             return (None, None);
         }
-        // Spriteを探索する (y位置的に描画しなければならないSpriteは事前に読み込み済)
-        let mut sprite_palette_data_back: Option<u8> = None; // 背面
-        let mut sprite_palette_data_front: Option<u8> = None; // 全面
+
+        // Search for Sprite (Sprite that must be drawn in y position is preloaded)
+        let mut sprite_palette_data_back: Option<u8> = None;
+        let mut sprite_palette_data_front: Option<u8> = None;
         'draw_sprite: for &s in self.sprite_temps.iter() {
             if let Some(sprite) = s {
-                // めんどいのでusizeにしておく
                 let sprite_x = usize::from(sprite.x);
                 let sprite_y = usize::from(sprite.y);
-                // 左端sprite clippingが有効な場合表示しない
+                // Left edge Not displayed when sprite clipping is enabled
                 let is_sprite_clipping = self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW) == false && (pixel_x < 8);
-                // X位置が描画範囲の場合
                 if !is_sprite_clipping
                     && (sprite_x <= pixel_x)
                     && (pixel_x < usize::from(sprite_x + SPRITE_WIDTH))
                 {
-                    // sprite上での相対座標
+                    // Relative coordinates of sprite
                     let sprite_offset_x: usize = pixel_x - sprite_x; // 0-7
                     let sprite_offset_y: usize = pixel_y - sprite_y - 1; // 0-7 or 0-15 (largeの場合, tile参照前に0-7に詰める)
                     debug_assert!(sprite_offset_x < SPRITE_WIDTH);
                     debug_assert!(sprite_offset_y < usize::from(self.sprite_height()));
-                    // pattern table addrと、tile idはサイズで決まる
+
+                    // pattern table addr and tile id are determined by size
                     let (sprite_pattern_table_addr, sprite_tile_id): (u16, u8) = match sprite
                         .tile_id
                     {
                         TileId::Normal { id } => (self.sprites_pattern_table_addr(), id),
-                        // 8*16 spriteなので上下でidが別れている
+                        // Since it is 8 * 16 sprite, the id is separated at the top and bottom.
                         TileId::Large {
                             pattern_table_addr,
                             upper_tile_id,
                             lower_tile_id,
                         } => {
-                            let is_upper = sprite_offset_y < SPRITE_NORMAL_HEIGHT; // 上8pixelの座標?
-                            let is_vflip = sprite.attr.is_vert_flip; // 上下反転してる?
+                            let is_upper = sprite_offset_y < SPRITE_NORMAL_HEIGHT;
+                            let is_vflip = sprite.attr.is_vert_flip;
                             let id = match (is_upper, is_vflip) {
-                                (true, false) => upper_tile_id,  // 描画座標は上8pixel、Flipなし
-                                (false, false) => lower_tile_id, // 描画座標は下8pixel、Flipなし
-                                (true, true) => lower_tile_id,   // 描画座標は上8pixel、Flipあり
-                                (false, true) => upper_tile_id,  // 描画座標は下8pixel、Flipあり
+                                (true, false) => upper_tile_id,  // Drawing coordinates are 8 pixels above, no Flip
+                                (false, false) => lower_tile_id, // Drawing coordinates are 8 pixels below, no Flip
+                                (true, true) => lower_tile_id,   // Drawing coordinates are 8 pixels above, with Flip
+                                (false, true) => upper_tile_id,  // Drawing coordinates are 8 pixels below, with Flip
                             };
                             (pattern_table_addr, id)
                         }
                     };
-                    // x,y flipを考慮してtile上のデータ位置を決定する
+
+                    // Determine the data position on the tile considering x, y flip
                     let tile_offset_x: usize = if !sprite.attr.is_hor_flip {
                         sprite_offset_x
                     } else {
@@ -700,34 +770,31 @@ impl Ppu {
                     } else {
                         SPRITE_NORMAL_HEIGHT - 1 - (sprite_offset_y % SPRITE_NORMAL_HEIGHT)
                     };
-                    // tile addrを計算する
+                    // Calculate tile addr
                     let sprite_pattern_table_base_addr = u16::from(sprite_pattern_table_addr)
                         + (u16::from(sprite_tile_id) * PATTERN_TABLE_ENTRY_BYTE);
                     let sprite_pattern_table_addr_lower =
                         sprite_pattern_table_base_addr + (tile_offset_y as u16);
                     let sprite_pattern_table_addr_upper = sprite_pattern_table_addr_lower + 8;
                     let sprite_data_lower = self
-                        .video
+                        .vram
                         .read_u8(cartridge, sprite_pattern_table_addr_lower);
                     let sprite_data_upper = self
-                        .video
+                        .vram
                         .read_u8(cartridge, sprite_pattern_table_addr_upper);
-                    // 該当するx位置のpixel patternを作る
+                    // Create a pixel pattern at the corresponding x position
                     let sprite_palette_offset =
                         (((sprite_data_upper >> (7 - tile_offset_x)) & 0x01) << 1)
                             | ((sprite_data_lower >> (7 - tile_offset_x)) & 0x01);
-                    // paletteのアドレスを計算する
+                    // Calculate the address of the palette
                     let sprite_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_SPRITE_OFFSET) +        // 0x3f10
-                        (u16::from(sprite.attr.palette_id) * PALETTE_ENTRY_SIZE) + // attributeでSprite Palette0~3選択
-                        u16::from(sprite_palette_offset); // palette内の色選択
-                                                          // パレットが透明色の場合はこのpixelは描画しない
-                    let is_tranparent = (sprite_palette_addr & 0x03) == 0x00; // 背景色が選択された
+                        (u16::from(sprite.attr.palette_id) * PALETTE_ENTRY_SIZE) + // Select Sprite Palette 0 ~ 3 in attribute
+                        u16::from(sprite_palette_offset); // Color selection in palette
+                                                          // If the palette is transparent, this pixel will not be drawn
+                    let is_tranparent = (sprite_palette_addr & 0x03) == 0x00; // Background color selected
                     if !is_tranparent {
-                        // パレットを読み出し
                         let sprite_palette_data = self
-                            .video
-                            .read_u8(cartridge, sprite_palette_addr);
-                        // 表裏の優先度がattrにあるので、該当する方に書き込み
+                            .pallet_read_u8(sprite_palette_addr);
                         if sprite.attr.is_draw_front {
                             sprite_palette_data_front = Some(sprite_palette_data);
                         } else {
@@ -736,38 +803,39 @@ impl Ppu {
                     }
                 }
             } else {
-                // sprite tempsは前詰めなのでもう処理はいらない
+                // sprite temps are pre-packed so no processing is needed anymore
                 break 'draw_sprite;
             }
         }
-        // 描画するデータを返す
         (sprite_palette_data_back, sprite_palette_data_front)
     }
 
-    /// OAMを探索して次の描画で使うスプライトをレジスタにフェッチします
-    /// 8個を超えるとOverflowフラグを立てる
+    /// Search the OAM and fetch the sprite used for the next drawing into the register
+    /// If it exceeds 8, the Overflow flag will be set
     fn fetch_sprite(&mut self) {
-        // sprite描画無効化
         if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
             return;
         }
-        // スプライトのサイズを事前計算
+
+        // Pre-calculate sprite size
         let sprite_begin_y = self.current_line;
         let sprite_height = u16::from(self.sprite_height());
         let is_large = sprite_height == 16;
-        // とりあえず全部クリアしておく
+
+        // Clear all for the time being
         self.sprite_temps = [None; SPRITE_TEMP_SIZE];
-        // current_line + 1がyと一致するやつを順番に集める(条件分がよりでかいにしてある)
+        // Collect the ones whose current_line + 1 matches y in order (the condition is made bigger)
         let mut tmp_index = 0;
         'search_sprite: for sprite_index in 0..NUM_OF_SPRITE {
-            let target_oam_addr = sprite_index << 2;
-            // yの値と等しい
+            let target_oam_addr = sprite_index * 4;
+            // Equal to the value of y
             let sprite_y = u16::from(self.oam[target_oam_addr]);
+            //println!("sprite y = {sprite_y}");
             let sprite_end_y = sprite_y + sprite_height;
-            // 描画範囲内(y+1)~(y+1+ 8or16)
+            // Within the drawing range (y + 1) ~ (y + 1 + 8 or 16)
             if (sprite_y < sprite_begin_y) && (sprite_begin_y <= sprite_end_y) {
-                // sprite 0 hitフラグ(1lineごとに処理しているので先に立ててしまう)
-                let is_zero_hit_delay = sprite_begin_y > (sprite_end_y - 3); //1lineずつ処理だとマリオ等早く検知しすぎるので TODO: #40
+                // sprite 0 hit flag (Since it is processed for each line, it will be set first)
+                let is_zero_hit_delay = sprite_begin_y > (sprite_end_y - 3); // If it is processed one line at a time, Mario etc. will be detected too quickly, so FIXME
                 if sprite_index == 0 && is_zero_hit_delay {
                     self.status.set(StatusFlags::SPRITE0_HIT, true);
                 }
@@ -777,7 +845,6 @@ impl Ppu {
                     break 'search_sprite;
                 } else {
                     debug_assert!(tmp_index < SPRITE_TEMP_SIZE);
-                    // tmp regに格納する
                     self.sprite_temps[tmp_index] = Some(Sprite::from(
                         is_large,
                         self.oam[target_oam_addr],
@@ -792,17 +859,30 @@ impl Ppu {
     }
 
 
-    /// 1行ごとに色々更新する処理です
-    /// 341cyc溜まったときに呼び出されることを期待
     fn update_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> Option<Interrupt> {
-        self.current_scroll_x = self.fetch_scroll_x;
-        self.current_scroll_y = self.fetch_scroll_y;
 
         self.status.set(StatusFlags::SPRITE0_HIT, false);
         self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
 
+        /*
+        match self.current_line {
+            0..=239 => { // Visible
+
+            },
+            240 => { // PostRender
+
+            },
+            241..=260 => { // VBlank
+
+            }
+            261 => { // PreRender
+
+            }
+        }*/
+        //println!("line = {}", self.current_line);
         match LineStatus::from(self.current_line) {
             LineStatus::Visible => {
+                self.oam_offset = 0;
                 self.fetch_sprite();
                 // Draw one line
                 self.draw_line(cartridge, fb);
@@ -830,51 +910,44 @@ impl Ppu {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
                 self.status.set(StatusFlags::IN_VBLANK, false);
 
+                // During dots 280 to 304 of the pre-render scanline (end of vblank)
+                //
+                // If rendering is enabled, at the end of vblank, shortly after
+                // the horizontal bits are copied from t to v at dot 257, the
+                // PPU will repeatedly copy the vertical bits from t to v from
+                // dots 280 to 304, completing the full initialization of v
+                // from t:
+                //
+                // FIXME: don'y copy _all_ bits: v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
+
+                // FIXME
+                //self.shared_vram_addr = self.shared_temp;
+                //let (scroll_x, scroll_y) = self.decode_scroll_xy();
+
+                self.oam_offset = 0;
+
                 None
             }
         }
     }
 
-    /// Proceed with PPU processing (it takes 341 cpu cycle to advance 1 line)
-    /// `cpu_cyc` - Number of cpu clock cycles elapsed for last step of cpu.
-    /// `cpu` - Interruptの要求が必要
-    /// `system` - レジスタ読み書きする
-    /// `video_system` - レジスタ読み書きする
-    /// `videoout_func` - pixelごとのデータが決まるごとに呼ぶ(NESは出力ダブルバッファとかない)
+    pub fn decode_scroll_xy(&self) -> (u8, u8) {
+        let coarse_x = ((self.shared_temp & 0b11111) << 3) as u8;
+        let fine_x = self.scroll_x_fine3 & 0b111;
+        let scroll_x = coarse_x | fine_x;
+        let coarse_y = ((self.shared_temp & 0b11_1110_0000) >> 2) as u8;
+        let fine_y = ((self.shared_temp & 0b0111_0000_0000_0000) >> 12) as u8;
+        let scroll_y  = coarse_y | fine_y;
+
+        println!("scroll_x = {}, scroll_y = {}", self.current_scroll_x, self.current_scroll_y);
+        (scroll_x, scroll_y)
+    }
+
     pub fn step(&mut self, cpu_cyc: usize, cartridge: &mut Cartridge, fb: *mut u8) -> Option<Interrupt> {
-        // PPU_SCROLL書き込み
-        let (_, scroll_x, scroll_y) = self.read_ppu_scroll();
-        self.fetch_scroll_x = scroll_x;
-        self.fetch_scroll_y = scroll_y;
 
-        // PPU_ADDR, PPU_DATA読み書きに答えてあげる
-        let (_, ppu_addr) = self.read_ppu_addr();
-        let (is_read_ppu_req, is_write_ppu_req, ppu_data) = self.read_ppu_data();
+        // TODO: rework this to update based on a PPU clock step that will be driven by the nes/system
+        // according to the cpu clocks elapsed (instead of batching up scanline processing)
 
-        if is_write_ppu_req {
-            self
-                .video
-                .write_u8(cartridge, ppu_addr, ppu_data);
-            self.increment_ppu_addr();
-        }
-        if is_read_ppu_req {
-            let data = self.video.read_u8(cartridge, ppu_addr);
-            self.write_ppu_data(data);
-            self.increment_ppu_addr();
-        }
-
-        // OAM R/W (It seems that it will not be used because it can be done by DMA)
-        let oam_addr = self.read_ppu_oam_addr();
-        let (is_read_oam_req, is_write_oam_req, oam_data) = self.read_oam_data();
-        if is_write_oam_req {
-            self.oam[usize::from(oam_addr)] = oam_data;
-        }
-        if is_read_oam_req {
-            let data = self.oam[usize::from(oam_addr)];
-            self.write_oam_data(data);
-        }
-
-        // clock cycle Judgment and row update
         let total_cyc = self.cumulative_cpu_cyc + cpu_cyc;
         if total_cyc >= CPU_CYCLE_PER_LINE {
             self.cumulative_cpu_cyc = total_cyc - CPU_CYCLE_PER_LINE;

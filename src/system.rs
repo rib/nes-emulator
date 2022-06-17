@@ -61,34 +61,6 @@ pub struct System {
     pub pad1: Pad,
     pub pad2: Pad,
 }
-/*
-impl Default for System {
-    fn default() -> Self {
-        Self {
-            wram: [0; WRAM_SIZE],
-            ppu_reg: [0; PPU_REG_SIZE],
-            io_reg: [0; APU_IO_REG_SIZE],
-            ppu_data_buffer: 0,
-
-            cartridge: None,
-            video: Default::default(),
-            pad1: Default::default(),
-            pad2: Default::default(),
-
-            written_oam_data: false,
-            written_ppu_scroll: false,
-            written_ppu_addr: false,
-            written_ppu_data: false,
-            written_oam_dma: false,
-            read_oam_data: false,
-            read_ppu_data: false,
-
-            ppu_is_second_write: false,
-            ppu_scroll_y_reg: 0,
-            ppu_addr_lower_reg: 0,
-        }
-    }
-}*/
 
 impl EmulateControl for System {
     fn poweron(&mut self) {
@@ -116,7 +88,7 @@ impl SystemBus for System {
                 arr_read!(self.wram, index)
             }
             0x2000..=0x3fff => { // PPU I/O
-                self.ppu.read_u8(addr)
+                self.ppu.read_u8(&mut self.cartridge, addr)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
@@ -142,13 +114,14 @@ impl SystemBus for System {
                 arr_write!(self.wram, index, data);
             }
             0x2000..=0x3fff => { // PPU I/O
-                self.ppu.write_u8(addr, data);
+                self.ppu.write_u8(&mut self.cartridge, addr, data);
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
                 match index {
                     // TODO: APU
                     0x14 => {
+                        //println!("start OAM DMA");
                         // Start OAM DMA
                         self.written_oam_dma = true; // OAM DMA
                     }
@@ -202,6 +175,7 @@ impl System {
     /// Perform DMA transfer (in two steps)
     /// `is_pre_transfer` --true for transfer immediately after receipt, false after ppu 1step
     fn run_dma(&mut self, is_pre_transfer: bool) {
+        //println!("run dma");
         debug_assert!(
             (!self.is_dma_running && is_pre_transfer) || (self.is_dma_running && !is_pre_transfer)
         );
@@ -228,6 +202,7 @@ impl System {
             let oam_addr = usize::from(oam_start_addr.wrapping_add(offset as u8));
 
             let cpu_data = self.read_u8(cpu_addr);
+            //println!("oam {cpu_data}");
             self.ppu.oam[oam_addr] = cpu_data;
         }
 
@@ -245,7 +220,7 @@ impl System {
         if is_dma_req {
             // Set and execute a new DMA descriptor
             self.dma_cpu_src_addr = dma_cpu_src_addr;
-            self.dma_oam_dst_addr = self.ppu.read_ppu_oam_addr();
+            self.dma_oam_dst_addr = self.ppu.oam_offset;
             self.run_dma(true);
         }
 

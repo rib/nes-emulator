@@ -63,6 +63,9 @@ impl Nes {
     pub fn system_ppu(&mut self) -> &mut Ppu {
         &mut self.system.ppu
     }
+    pub fn debug_read_ppu(&mut self, addr: u16) -> u8 {
+        self.system.ppu.read_u8(&mut self.system.cartridge, addr)
+    }
 
     pub fn allocate_framebuffer(&self) -> Framebuffer {
         Framebuffer::new(FRAMEBUFFER_WIDTH, FRAMEBUFFER_HEIGHT, self.pixel_format)

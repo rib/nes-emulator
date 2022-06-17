@@ -93,11 +93,18 @@ fn main() {
         tex
     };
 
+    let mut paused = false;
+    let mut single_step = false;
+
+
     let mut frame_no = 0;
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {
 
-            nes.tick_frame(framebuffer.clone());
+            if paused == false || single_step == true {
+                nes.tick_frame(framebuffer.clone());
+                single_step = false;
+            }
 
             {
                 let rental = framebuffer.rent_data().unwrap();
@@ -135,7 +142,7 @@ fn main() {
             let mut quit = false;
 
 
-            let needs_repaint = egui_glow.run(gl_window.window(), |egui_ctx| {
+            let mut needs_repaint = egui_glow.run(gl_window.window(), |egui_ctx| {
 
                 egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
                     if ui.button("Quit").clicked() {
@@ -144,24 +151,40 @@ fn main() {
                     if ui.button("Reset").clicked() {
                         nes.reset();
                     }
+                    if !paused {
+                        if ui.button("Break").clicked() {
+                            paused = true;
+                        }
+                    } else {
+                        if ui.button("Step").clicked() {
+                            single_step = true;
+                        }
+                        if ui.button("Continue").clicked() {
+                            paused = false;
+                        }
+
+                        let ppu = nes.system_ppu();
+                        let debug_val = nes.debug_read_ppu(0x2000);
+                        println!("PPU debug = {debug_val:x}");
+                    }
                 });
                 egui::CentralPanel::default().show(egui_ctx, |ui| {
                     ui.add(egui::Image::new(framebuffer_texture.id(), egui::Vec2::new((fb_width * 2) as f32, (fb_height * 2) as f32)));
                 });
             });
 
+            if paused == false || single_step {
+                needs_repaint = true;
+            }
+
             *control_flow = if quit {
                 glutin::event_loop::ControlFlow::Exit
-            } else {
-                gl_window.window().request_redraw();
-                glutin::event_loop::ControlFlow::Poll
-            };
-            /*else if needs_repaint {
+            } else if needs_repaint {
                 gl_window.window().request_redraw();
                 glutin::event_loop::ControlFlow::Poll
             } else {
                 glutin::event_loop::ControlFlow::Wait
-            };*/
+            };
 
 
             {
