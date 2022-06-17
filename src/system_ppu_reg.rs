@@ -1,3 +1,5 @@
+use crate::ppu::Ppu;
+
 use super::system::*;
 
 pub const PPU_CTRL_OFFSET: usize = 0x00;
@@ -10,10 +12,9 @@ pub const PPU_ADDR_OFFSET: usize = 0x06;
 pub const PPU_DATA_OFFSET: usize = 0x07;
 pub const APU_IO_OAM_DMA_OFFSET: usize = 0x14;
 
-/// PPU Register Implement
+/// PPU Registers
 /// 0x2000 - 0x2007
-/// PPU本体の実装向けです。CPUから本レジスタを本関数を通して読むことはありません(STA, STX, STYなどで読むのが普通)
-impl System {
+impl Ppu {
     /*************************** 0x2000: PPUCTRL ***************************/
     /// VBLANK発生時にNMI割り込みを出す
     /// oneshotではなく0x2002のVLANKフラグがある限り
@@ -88,11 +89,11 @@ impl System {
     /*************************** 0x2002: PPU_STATUS ***************************/
     /// VBlankフラグをみて、NMI割り込みしようね
     /// CPUからPPU_STATUSを読みだした際の自動クリアなので、この関数を呼んでもクリアされない
-    pub fn read_ppu_is_vblank(&self) -> bool {
+    pub fn ppu_status_is_vblank(&self) -> bool {
         (self.ppu_reg[PPU_STATUS_OFFSET] & 0x80u8) == 0x80u8
     }
-    /// VBlankフラグを立てる、NMI割り込みもしようね
-    pub fn write_ppu_is_vblank(&mut self, is_set: bool) {
+    /// Set the VBlank flag and NMI interrupt
+    pub fn ppu_status_set_is_vblank(&mut self, is_set: bool) {
         if is_set {
             self.ppu_reg[PPU_STATUS_OFFSET] = self.ppu_reg[PPU_STATUS_OFFSET] | 0x80u8;
         } else {
@@ -100,28 +101,30 @@ impl System {
         }
     }
     /// Sprite0描画中かどうか
-    pub fn read_ppu_is_hit_sprite0(&self) -> bool {
+    pub fn ppu_status_is_hit_sprite0(&self) -> bool {
         (self.ppu_reg[PPU_STATUS_OFFSET] & 0x40u8) == 0x40u8
     }
-    pub fn write_ppu_is_hit_sprite0(&mut self, is_set: bool) {
+    pub fn ppu_status_set_is_hit_sprite0(&mut self, is_set: bool) {
         if is_set {
             self.ppu_reg[PPU_STATUS_OFFSET] = self.ppu_reg[PPU_STATUS_OFFSET] | 0x40u8;
         } else {
             self.ppu_reg[PPU_STATUS_OFFSET] = self.ppu_reg[PPU_STATUS_OFFSET] & (!0x40u8);
         }
     }
-    /// scanline上のSprite数が8個より大きいか
-    pub fn read_ppu_is_sprite_overflow(&self) -> bool {
+
+    /// Is the number of Sprites on the scanline greater than 8?
+    pub fn ppu_status_sprite_overflow(&self) -> bool {
         (self.ppu_reg[PPU_STATUS_OFFSET] & 0x20u8) == 0x20u8
     }
-    pub fn write_ppu_is_sprite_overflow(&mut self, is_set: bool) {
+    pub fn ppu_status_set_sprite_overflow(&mut self, is_set: bool) {
         if is_set {
             self.ppu_reg[PPU_STATUS_OFFSET] = self.ppu_reg[PPU_STATUS_OFFSET] | 0x20u8;
         } else {
             self.ppu_reg[PPU_STATUS_OFFSET] = self.ppu_reg[PPU_STATUS_OFFSET] & (!0x20u8);
         }
     }
-    /// line 261到達時のリセット用
+
+    /// For reset when line 261 is reached
     pub fn clear_ppu_status(&mut self) {
         self.ppu_reg[PPU_STATUS_OFFSET] = 0x00u8;
     }
@@ -130,7 +133,8 @@ impl System {
         self.ppu_reg[PPU_OAMADDR_OFFSET]
     }
     /*************************** 0x2004: OAMDATA ***************************/
-    /// OAM_DATAの書き換えがあったかを示すフラグもついてくるよ(自動で揮発します)
+    /// A flag indicating whether OAM_DATA has been rewritten is also attached
+    /// (it will volatilize automatically).
     /// is_read, is_write, data
     pub fn read_oam_data(&mut self) -> (bool, bool, u8) {
         // Write優先でフラグ管理して返してあげる
@@ -150,7 +154,7 @@ impl System {
     }
 
     /*************************** 0x2005: PPUSCROLL ***************************/
-    /// (x,y更新があったか示すフラグ, x, y)
+    /// (Flag indicating if there was an x, y update, x, y)
     pub fn read_ppu_scroll(&mut self) -> (bool, u8, u8) {
         if self.written_ppu_scroll {
             self.written_ppu_scroll = false;
@@ -175,10 +179,10 @@ impl System {
         }
     }
     /*************************** 0x2007: PPUDATA ***************************/
-    /// is_read, is_write, dataが返ります
-    /// read/writeが同時にtrueにはならない。
-    /// read : PPU_DATAにPPU_ADDRが示す値を非破壊で入れてあげ、アドレスインクリメント(自ずとpost-fetchになる)
-    /// write: PPU_DATAの値をPPU_ADDR(PPU空間)に代入、アドレスインクリメント
+    /// returns: is_read, is_write, data
+    /// read/write is not true at the same time
+    /// read: Put the value indicated by PPU_ADDR in PPU_DATA non-destructively and increment the address (it will naturally become post-fetch)
+    /// write: Assign the value of PPU_DATA to PPU_ADDR (PPU space) and increment the address
     pub fn read_ppu_data(&mut self) -> (bool, bool, u8) {
         // Write優先でフラグ管理して返してあげる
         if self.written_ppu_data {
@@ -192,12 +196,12 @@ impl System {
         }
     }
 
-    /// 書き換えるけどオートインクリメントなどはしません
+    /// Rewrite but do not auto-increment
     pub fn write_ppu_data(&mut self, data: u8) {
         self.ppu_reg[PPU_DATA_OFFSET] = data;
     }
 
-    /// PPU_DATAに読み書きをしたときのPPU_ADDR自動加算を行います
+    /// Performs PPU_ADDR automatic addition when reading and writing to PPU_DATA
     pub fn increment_ppu_addr(&mut self) {
         let current_addr =
             (u16::from(self.ppu_reg[PPU_ADDR_OFFSET]) << 8) | u16::from(self.ppu_addr_lower_reg);
@@ -208,16 +212,5 @@ impl System {
         self.ppu_addr_lower_reg = (dst_addr & 0xff) as u8;
         self.ppu_reg[PPU_ADDR_OFFSET] = (dst_addr >> 8) as u8;
     }
-    /*************************** 0x4014: OAM_DMA ***************************/
-    /// DMA開始が必要かどうかと、転送元アドレスを返す
-    /// 面倒なので読み取ったらtriggerは揮発させる
-    pub fn read_oam_dma(&mut self) -> (bool, u16) {
-        let start_addr = u16::from(self.io_reg[APU_IO_OAM_DMA_OFFSET]) << 8;
-        if self.written_oam_dma {
-            self.written_oam_dma = false;
-            (true, start_addr)
-        } else {
-            (false, start_addr)
-        }
-    }
+
 }

@@ -46,7 +46,7 @@ impl Default for VideoSystem {
 }
 
 impl EmulateControl for VideoSystem {
-    fn reset(&mut self) {
+    fn poweron(&mut self) {
         self.nametables = [[0; NAME_TABLE_SIZE]; NUM_OF_NAME_TABLE];
         self.palette = [0; PALETTE_SIZE];
     }
@@ -102,29 +102,17 @@ impl VideoSystem {
         (table_index, offset)
     }
 
-    pub fn read_u8(&self, cartridge: Option<&mut Cartridge>, addr: u16) -> u8 {
+    pub fn read_u8(&self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         debug_assert!(addr < VIDEO_ADDRESS_SIZE);
 
         if addr < NAME_TABLE_BASE_ADDR {
-            if let Some(cartridge) = cartridge {
-                cartridge.read_video_u8(addr)
-            } else {
-                0
-            }
+            cartridge.read_video_u8(addr)
         } else if addr < NAME_TABLE_MIRROR_BASE_ADDR {
-            let mirror_mode = if let Some(cartridge) = cartridge {
-                cartridge.nametable_mirror
-            } else {
-                NameTableMirror::Horizontal
-            };
+            let mirror_mode = cartridge.nametable_mirror;
             let (index, offset) = self.convert_name_table_addr(mirror_mode, addr);
             self.nametables[index][offset]
         } else if addr < PALETTE_TABLE_BASE_ADDR {
-            let mirror_mode = if let Some(cartridge) = cartridge {
-                cartridge.nametable_mirror
-            } else {
-                NameTableMirror::Horizontal
-            };
+            let mirror_mode = cartridge.nametable_mirror;
             // 0x3000 -> 0x2000にミラーする
             let (index, offset) =
                 self.convert_name_table_addr(mirror_mode, addr - 0x1000);
@@ -142,27 +130,17 @@ impl VideoSystem {
             }
         }
     }
-    pub fn write_u8(&mut self, cartridge: Option<&mut Cartridge>, addr: u16, data: u8) {
+    pub fn write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         debug_assert!(addr < VIDEO_ADDRESS_SIZE);
 
         if addr < NAME_TABLE_BASE_ADDR {
-            if let Some(cartridge) = cartridge {
-                cartridge.write_video_u8(addr, data);
-            }
+            cartridge.write_video_u8(addr, data);
         } else if addr < NAME_TABLE_MIRROR_BASE_ADDR {
-            let mirror_mode = if let Some(cartridge) = cartridge {
-                cartridge.nametable_mirror
-            } else {
-                NameTableMirror::Horizontal
-            };
+            let mirror_mode = cartridge.nametable_mirror;
             let (index, offset) = self.convert_name_table_addr(mirror_mode, addr);
             self.nametables[index][offset] = data;
         } else if addr < PALETTE_TABLE_BASE_ADDR {
-            let mirror_mode = if let Some(cartridge) = cartridge {
-                cartridge.nametable_mirror
-            } else {
-                NameTableMirror::Horizontal
-            };
+            let mirror_mode = cartridge.nametable_mirror;
             // 0x3000 -> 0x2000にミラーする
             let (index, offset) =
                 self.convert_name_table_addr(mirror_mode, addr - 0x1000);

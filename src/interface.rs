@@ -1,8 +1,6 @@
-/// System Bus経由でR/Wする機能を提供します
-/// 実装する際は、CPU命令のままであるoffset付きでアクセスすること
 pub trait SystemBus {
-    fn read_u8(&mut self, addr: u16, is_nondestructive: bool) -> u8;
-    fn write_u8(&mut self, addr: u16, data: u8, is_nondestructive: bool);
+    fn read_u8(&mut self, addr: u16) -> u8;
+    fn write_u8(&mut self, addr: u16, data: u8);
 }
 
 /// Video Bus経由でR/Wする機能を提供します
@@ -13,8 +11,7 @@ pub trait VideoBus {
 }
 
 pub trait EmulateControl {
-    /// 内部変数を強制的にリセットします。リセットベクタに飛ぶ挙動ではありません。
-    fn reset(&mut self);
+    fn poweron(&mut self);
 }
 
 #[cfg(feature = "unsafe-opt")]

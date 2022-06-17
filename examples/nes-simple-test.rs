@@ -9,7 +9,7 @@ use glutin::event::VirtualKeyCode;
 use rust_nes_emulator::prelude::*;
 
 fn get_file_as_byte_vec(filename: &str) -> Vec<u8> {
-    println!("Loading {}", filename);
+    //println!("Loading {}", filename);
     let mut f = File::open(&filename).expect("no file found");
     let metadata = std::fs::metadata(&filename).expect("unable to read metadata");
     let mut buffer = vec![0; metadata.len() as usize];
@@ -74,7 +74,7 @@ fn main() {
     let cartridge = Cartridge::from_ines_binary(|addr: usize| rom[addr]);
     nes.insert_cartridge(cartridge);
 
-    nes.reset();
+    nes.poweron();
 
     // XXX: we only need a single framebuffer considering that egui will synchronously copy
     // the data anyway
@@ -140,6 +140,9 @@ fn main() {
                 egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
                     if ui.button("Quit").clicked() {
                         quit = true;
+                    }
+                    if ui.button("Reset").clicked() {
+                        nes.reset();
                     }
                 });
                 egui::CentralPanel::default().show(egui_ctx, |ui| {

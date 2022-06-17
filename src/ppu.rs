@@ -1,3 +1,5 @@
+use crate::prelude::Cartridge;
+
 use super::cpu::*;
 use super::interface::*;
 use super::system::*;
@@ -218,6 +220,30 @@ impl Default for DrawOption {
 
 #[derive(Clone)]
 pub struct Ppu {
+    //  0x2000 - 0x2007: PPU I/O
+    //  0x2008 - 0x3fff: PPU I/O Mirror x1023
+    pub ppu_reg: [u8; PPU_REG_SIZE],
+
+    // PPUDATA reads go via a buffer (except for special behaviour for pallet reads)
+    pub ppu_data_buffer: u8,
+
+    // Request trigger for PPU address space
+    pub written_oam_data: bool,   // OAM_DATAがかかれた
+    pub written_ppu_scroll: bool, // PPU_SCROLLが2回書かれた
+    pub written_ppu_addr: bool,   // PPU_ADDRが2回書かれた
+    pub written_ppu_data: bool,   // PPU_DATAがかかれた
+    pub read_oam_data: bool,      // OAM_DATAが読まれた
+    pub read_ppu_data: bool,      // PPU_DATAが読まれた
+
+    /* 2回海ができるPPU register対応 */
+    /// $2005, $2006は状態を共有する、$2002を読み出すと、どっちを書くかはリセットされる
+    pub ppu_is_second_write: bool, // 初期値falseで, 2回目の書き込みが分岐するようにtrueにする
+    pub ppu_scroll_y_reg: u8,   // $2005
+    pub ppu_addr_lower_reg: u8, // $2006
+
+    /// PPUが描画に使うメモリ空間
+    pub video: VideoSystem,
+
     /// Object Attribute Memoryの実態
     pub oam: [u8; OAM_SIZE],
     /// 次の描画で使うスプライトを格納する
@@ -234,15 +260,6 @@ pub struct Ppu {
     pub current_scroll_x: u8,
     pub current_scroll_y: u8,
 
-    /// DMAが稼働中か示す
-    /// DMAには513cycかかるが、Emulation上ppuのstep2回341cyc*2で完了するので実行中フラグで処理する
-    /// 先頭でDMA開始されたとして、前半341cycで67%(170byte/256byte)処理できる(ので、次のstepで残りを処理したら次のDMA要求を受けても行ける)
-    pub is_dma_running: bool,
-    /// DMAのCPU側のベースアドレス。ページ指定なのでlower byteは0
-    pub dma_cpu_src_addr: u16,
-    /// DMAのOAM側のベースアドレス。256byteしたらwrapする(あまり使われないらしい)
-    pub dma_oam_dst_addr: u8,
-
     /// PPUの描画設定(step時に渡したかったが、毎回渡すのも無駄なので)
     pub draw_option: DrawOption,
 }
@@ -250,6 +267,22 @@ pub struct Ppu {
 impl Default for Ppu {
     fn default() -> Self {
         Self {
+            ppu_reg: [0; PPU_REG_SIZE],
+            ppu_data_buffer: 0,
+
+            video: Default::default(),
+
+            written_oam_data: false,
+            written_ppu_scroll: false,
+            written_ppu_addr: false,
+            written_ppu_data: false,
+            read_oam_data: false,
+            read_ppu_data: false,
+
+            ppu_is_second_write: false,
+            ppu_scroll_y_reg: 0,
+            ppu_addr_lower_reg: 0,
+
             oam: [0; OAM_SIZE],
             sprite_temps: [None; SPRITE_TEMP_SIZE],
 
@@ -261,17 +294,29 @@ impl Default for Ppu {
             current_scroll_x: 0,
             current_scroll_y: 0,
 
-            is_dma_running: false,
-            dma_cpu_src_addr: 0,
-            dma_oam_dst_addr: 0,
-
             draw_option: DrawOption::default(),
         }
     }
 }
 
 impl EmulateControl for Ppu {
-    fn reset(&mut self) {
+    fn poweron(&mut self) {
+
+        self.video.poweron();
+
+        self.ppu_reg = [0; PPU_REG_SIZE];
+
+        self.written_oam_data = false;
+        self.written_ppu_scroll = false;
+        self.written_ppu_addr = false;
+        self.written_ppu_data = false;
+        self.read_oam_data = false;
+        self.read_ppu_data = false;
+
+        self.ppu_is_second_write = false;
+        self.ppu_scroll_y_reg = 0;
+        self.ppu_addr_lower_reg = 0;
+
         self.oam = [0; OAM_SIZE];
         self.sprite_temps = [None; SPRITE_TEMP_SIZE];
 
@@ -282,48 +327,84 @@ impl EmulateControl for Ppu {
         self.fetch_scroll_y = 0;
         self.current_scroll_x = 0;
         self.current_scroll_y = 0;
-
-        self.is_dma_running = false;
-        self.dma_cpu_src_addr = 0;
-        self.dma_oam_dst_addr = 0;
     }
 }
 
 impl Ppu {
-    /// DMA転送を(2回に分けて)行います
-    /// `is_pre_transfer` - 受領直後の転送ならtrue, ppu 1stepあとならfalse
-    fn run_dma(&mut self, system: &mut System, is_pre_transfer: bool) {
-        debug_assert!(
-            (!self.is_dma_running && is_pre_transfer) || (self.is_dma_running && !is_pre_transfer)
-        );
-        debug_assert!((self.dma_cpu_src_addr & 0x00ff) == 0x0000);
 
-        // address計算
-        let start_offset: u8 = if is_pre_transfer {
-            0
-        } else {
-            OAM_DMA_COPY_SIZE_PER_PPU_STEP
-        };
-        let cpu_start_addr: u16 = self.dma_cpu_src_addr.wrapping_add(u16::from(start_offset));
-        let oam_start_addr: u8 = self.dma_oam_dst_addr.wrapping_add(start_offset);
-        // 転送サイズ
-        let transfer_size: u16 = if is_pre_transfer {
-            OAM_DMA_COPY_SIZE_PER_PPU_STEP as u16
-        } else {
-            (OAM_SIZE as u16) - u16::from(OAM_DMA_COPY_SIZE_PER_PPU_STEP)
-        };
-
-        // 転送
-        for offset in 0..transfer_size {
-            let cpu_addr = cpu_start_addr.wrapping_add(offset);
-            let oam_addr = usize::from(oam_start_addr.wrapping_add(offset as u8));
-
-            let cpu_data = system.read_u8(cpu_addr, false);
-            self.oam[oam_addr] = cpu_data;
+    pub fn read_u8(&mut self, addr: u16) -> u8 {
+        // mirror support
+        let index = usize::from(addr - PPU_REG_BASE_ADDR) % self.ppu_reg.len();
+        debug_assert!(index < 0x9);
+        match index {
+            // PPU_STATUS (read-only) Resets double-write register status, clears VBLANK flag
+            0x02 => {
+                let data = self.ppu_reg[index]; // If you don't fetch it first
+                self.ppu_is_second_write = false;
+                self.ppu_status_set_is_vblank(false);
+                data
+            }
+            // OAM_DATAの読み出しフラグ
+            // OAM_DATA read flag
+            0x04 => {
+                self.read_oam_data = true;
+                arr_read!(self.ppu_reg, index)
+            }
+            // Since there is a buffer that sets a flag for PPU_DATA update / address increment,
+            // the result will be entered with a delay of 1 step
+            0x07 => { // PPUDATA
+                self.read_ppu_data = true;
+                arr_read!(self.ppu_reg, index)
+            }
+            // default
+            _ => arr_read!(self.ppu_reg, index),
         }
+    }
 
-        // ステータス更新
-        self.is_dma_running = is_pre_transfer;
+    pub fn write_u8(&mut self, addr: u16, data: u8) {
+        // mirror support
+        let index = usize::from(addr - 0x2000) % self.ppu_reg.len();
+        match index {
+            // $2004 If you write it in OAM_DATA, set a write flag (though you will not use it)
+            0x04 => {
+                self.written_oam_data = true;
+                arr_write!(self.ppu_reg, index, data);
+            }
+            // $2005 PPU_SCROLL Written twice
+            0x05 => {
+                if self.ppu_is_second_write {
+                    self.ppu_scroll_y_reg = data;
+                    self.ppu_is_second_write = false;
+                    // PPUに通知
+                    self.written_ppu_scroll = true;
+                } else {
+                    arr_write!(self.ppu_reg, index, data);
+                    self.ppu_is_second_write = true;
+                }
+            }
+            // $2006 PPU_ADDR Written twice
+            0x06 => {
+                if self.ppu_is_second_write {
+                    self.ppu_addr_lower_reg = data;
+                    self.ppu_is_second_write = false;
+                    // PPUに通知
+                    self.written_ppu_addr = true;
+                } else {
+                    arr_write!(self.ppu_reg, index, data);
+                    self.ppu_is_second_write = true;
+                }
+            }
+            // $2007 PPU_DATA addr autoincrement
+            0x07 => {
+                arr_write!(self.ppu_reg, index, data);
+                // PPUに書いてもらおう
+                self.written_ppu_data = true;
+            }
+            // default
+            _ => {
+                arr_write!(self.ppu_reg, index, data);
+            }
+        };
     }
 
     /// 1行書きます
@@ -332,15 +413,15 @@ impl Ppu {
     /// `tile_global` - スクロールオフセット換算した、4面含めた上でのタイル位置
     /// `tile_local`  - `tile_global`を1Namespace上のタイルでの位置に変換したもの
     /// scrollなしなら上記はすべて一致するはず
-    fn draw_line(&mut self, system: &mut System, fb: *mut u8) {
+    fn draw_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
         // ループ内で何度も呼び出すとパフォーマンスが下がる
-        let nametable_base_addr = system.read_ppu_name_table_base_addr();
-        let pattern_table_addr = system.read_ppu_bg_pattern_table_addr();
-        let is_clip_bg_leftend = system.read_ppu_is_clip_bg_leftend();
-        let is_write_bg = system.read_ppu_is_write_bg();
-        let is_monochrome = system.read_is_monochrome();
-        let master_bg_color = Color::from(system.video.read_u8(
-            system.cartridge.as_mut(),
+        let nametable_base_addr = self.read_ppu_name_table_base_addr();
+        let pattern_table_addr = self.read_ppu_bg_pattern_table_addr();
+        let is_clip_bg_leftend = self.read_ppu_is_clip_bg_leftend();
+        let is_write_bg = self.read_ppu_is_write_bg();
+        let is_monochrome = self.read_is_monochrome();
+        let master_bg_color = Color::from(self.video.read_u8(
+            cartridge,
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
@@ -365,7 +446,7 @@ impl Ppu {
         for pixel_x in 0..VISIBLE_SCREEN_WIDTH {
             // Sprite: 探索したテンポラリレジスタから描画するデータを取得する
             let (sprite_palette_data_back, sprite_palette_data_front) =
-                self.get_sprite_draw_data(system, pixel_x, pixel_y);
+                self.get_sprite_draw_data(cartridge, pixel_x, pixel_y);
 
             // BG(Nametable): 座標に該当するNametableと属性テーブルからデータを取得する
             let offset_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) & 0x07;
@@ -389,7 +470,7 @@ impl Ppu {
                 attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
             // attribute読み出し, BGパレット選択に使う。4*4の位置で使うパレット情報を変える
-            let raw_attribute = system.video.read_u8(system.cartridge.as_mut(), attribute_addr);
+            let raw_attribute = self.video.read_u8(cartridge, attribute_addr);
             let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
                 (true, true) => (raw_attribute >> 0) & 0x03,  // top left
                 (false, true) => (raw_attribute >> 2) & 0x03, // top right
@@ -399,18 +480,18 @@ impl Ppu {
 
             // Nametableからtile_id読み出し->pattern tableからデータ構築
             let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-            let bg_tile_id = u16::from(system.video.read_u8(system.cartridge.as_mut(), nametable_addr));
+            let bg_tile_id = u16::from(self.video.read_u8(cartridge, nametable_addr));
 
             // pattern_table 1entryは16byte, 0行目だったら0,8番目のデータを使えば良い
             let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
             let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
             let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
-            let bg_data_lower = system
+            let bg_data_lower = self
                 .video
-                .read_u8(system.cartridge.as_mut(), bg_pattern_table_addr_lower);
-            let bg_data_upper = system
+                .read_u8(cartridge, bg_pattern_table_addr_lower);
+            let bg_data_upper = self
                 .video
-                .read_u8(system.cartridge.as_mut(), bg_pattern_table_addr_upper);
+                .read_u8(cartridge, bg_pattern_table_addr_upper);
 
             // bgの描画色を作る
             let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
@@ -426,7 +507,7 @@ impl Ppu {
             {
                 None
             } else {
-                Some(system.video.read_u8(system.cartridge.as_mut(), bg_palette_addr))
+                Some(self.video.read_u8(cartridge, bg_palette_addr))
             };
 
             // 透明色
@@ -507,12 +588,12 @@ impl Ppu {
     /// retval - (bgよりも後ろに描画するデータ, bgより前に描画するデータ)
     fn get_sprite_draw_data(
         &mut self,
-        system: &mut System,
+        cartridge: &mut Cartridge,
         pixel_x: usize,
         pixel_y: usize,
     ) -> (Option<u8>, Option<u8>) {
         // Sprite描画無効化されていたら即終了
-        if !system.read_ppu_is_write_sprite() {
+        if !self.read_ppu_is_write_sprite() {
             return (None, None);
         }
         // Spriteを探索する (y位置的に描画しなければならないSpriteは事前に読み込み済)
@@ -524,7 +605,7 @@ impl Ppu {
                 let sprite_x = usize::from(sprite.x);
                 let sprite_y = usize::from(sprite.y);
                 // 左端sprite clippingが有効な場合表示しない
-                let is_sprite_clipping = system.read_ppu_is_clip_sprite_leftend() && (pixel_x < 8);
+                let is_sprite_clipping = self.read_ppu_is_clip_sprite_leftend() && (pixel_x < 8);
                 // X位置が描画範囲の場合
                 if !is_sprite_clipping
                     && (sprite_x <= pixel_x)
@@ -534,12 +615,12 @@ impl Ppu {
                     let sprite_offset_x: usize = pixel_x - sprite_x; // 0-7
                     let sprite_offset_y: usize = pixel_y - sprite_y - 1; // 0-7 or 0-15 (largeの場合, tile参照前に0-7に詰める)
                     debug_assert!(sprite_offset_x < SPRITE_WIDTH);
-                    debug_assert!(sprite_offset_y < usize::from(system.read_ppu_sprite_height()));
+                    debug_assert!(sprite_offset_y < usize::from(self.read_ppu_sprite_height()));
                     // pattern table addrと、tile idはサイズで決まる
                     let (sprite_pattern_table_addr, sprite_tile_id): (u16, u8) = match sprite
                         .tile_id
                     {
-                        TileId::Normal { id } => (system.read_ppu_sprite_pattern_table_addr(), id),
+                        TileId::Normal { id } => (self.read_ppu_sprite_pattern_table_addr(), id),
                         // 8*16 spriteなので上下でidが別れている
                         TileId::Large {
                             pattern_table_addr,
@@ -574,12 +655,12 @@ impl Ppu {
                     let sprite_pattern_table_addr_lower =
                         sprite_pattern_table_base_addr + (tile_offset_y as u16);
                     let sprite_pattern_table_addr_upper = sprite_pattern_table_addr_lower + 8;
-                    let sprite_data_lower = system
+                    let sprite_data_lower = self
                         .video
-                        .read_u8(system.cartridge.as_mut(), sprite_pattern_table_addr_lower);
-                    let sprite_data_upper = system
+                        .read_u8(cartridge, sprite_pattern_table_addr_lower);
+                    let sprite_data_upper = self
                         .video
-                        .read_u8(system.cartridge.as_mut(), sprite_pattern_table_addr_upper);
+                        .read_u8(cartridge, sprite_pattern_table_addr_upper);
                     // 該当するx位置のpixel patternを作る
                     let sprite_palette_offset =
                         (((sprite_data_upper >> (7 - tile_offset_x)) & 0x01) << 1)
@@ -592,9 +673,9 @@ impl Ppu {
                     let is_tranparent = (sprite_palette_addr & 0x03) == 0x00; // 背景色が選択された
                     if !is_tranparent {
                         // パレットを読み出し
-                        let sprite_palette_data = system
+                        let sprite_palette_data = self
                             .video
-                            .read_u8(system.cartridge.as_mut(), sprite_palette_addr);
+                            .read_u8(cartridge, sprite_palette_addr);
                         // 表裏の優先度がattrにあるので、該当する方に書き込み
                         if sprite.attr.is_draw_front {
                             sprite_palette_data_front = Some(sprite_palette_data);
@@ -614,14 +695,14 @@ impl Ppu {
 
     /// OAMを探索して次の描画で使うスプライトをレジスタにフェッチします
     /// 8個を超えるとOverflowフラグを立てる
-    fn fetch_sprite(&mut self, system: &mut System) {
+    fn fetch_sprite(&mut self) {
         // sprite描画無効化
-        if !system.read_ppu_is_write_sprite() {
+        if !self.read_ppu_is_write_sprite() {
             return;
         }
         // スプライトのサイズを事前計算
         let sprite_begin_y = self.current_line;
-        let sprite_height = u16::from(system.read_ppu_sprite_height());
+        let sprite_height = u16::from(self.read_ppu_sprite_height());
         let is_large = sprite_height == 16;
         // とりあえず全部クリアしておく
         self.sprite_temps = [None; SPRITE_TEMP_SIZE];
@@ -637,11 +718,11 @@ impl Ppu {
                 // sprite 0 hitフラグ(1lineごとに処理しているので先に立ててしまう)
                 let is_zero_hit_delay = sprite_begin_y > (sprite_end_y - 3); //1lineずつ処理だとマリオ等早く検知しすぎるので TODO: #40
                 if sprite_index == 0 && is_zero_hit_delay {
-                    system.write_ppu_is_hit_sprite0(true);
+                    self.ppu_status_set_is_hit_sprite0(true);
                 }
                 // sprite overflow
                 if tmp_index >= SPRITE_TEMP_SIZE {
-                    system.write_ppu_is_sprite_overflow(true);
+                    self.ppu_status_set_sprite_overflow(true);
                     break 'search_sprite;
                 } else {
                     debug_assert!(tmp_index < SPRITE_TEMP_SIZE);
@@ -659,36 +740,22 @@ impl Ppu {
         }
     }
 
+
     /// 1行ごとに色々更新する処理です
     /// 341cyc溜まったときに呼び出されることを期待
-    fn update_line(&mut self, system: &mut System, fb: *mut u8) -> Option<Interrupt> {
-        // scroll更新
+    fn update_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> Option<Interrupt> {
         self.current_scroll_x = self.fetch_scroll_x;
         self.current_scroll_y = self.fetch_scroll_y;
-        // OAM DMA
-        if self.is_dma_running {
-            // 前回のOAM DMAのこりをやる
-            self.run_dma(system, false);
-        }
-        let (is_dma_req, dma_cpu_src_addr) = system.read_oam_dma();
-        if is_dma_req {
-            // 新しいDMAのディスクリプタをセットして実行
-            self.dma_cpu_src_addr = dma_cpu_src_addr;
-            self.dma_oam_dst_addr = system.read_ppu_oam_addr();
-            self.run_dma(system, true);
-        }
-        // ステータスを初期化
-        system.write_ppu_is_hit_sprite0(false);
-        system.write_ppu_is_sprite_overflow(false);
 
-        // 行の更新
+        self.ppu_status_set_is_hit_sprite0(false);
+        self.ppu_status_set_sprite_overflow(false);
+
         match LineStatus::from(self.current_line) {
             LineStatus::Visible => {
-                // sprite探索
-                self.fetch_sprite(system);
-                // 1行描く
-                self.draw_line(system, fb);
-                // 行カウンタを更新して終わり
+                self.fetch_sprite();
+                // Draw one line
+                self.draw_line(cartridge, fb);
+                // Update row counter and finish
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
 
                 None
@@ -700,10 +767,9 @@ impl Ppu {
             LineStatus::VerticalBlanking(is_first) => {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
                 if is_first {
-                    system.write_ppu_is_vblank(true);
+                    self.ppu_status_set_is_vblank(true);
                 }
-                // VBLANKフラグが立っていれば割り込みを発生させる($2002を読んでフラグをおろしてもらう)
-                if system.read_ppu_nmi_enable() && system.read_ppu_is_vblank() {
+                if self.read_ppu_nmi_enable() && self.ppu_status_is_vblank() {
                     Some(Interrupt::NMI)
                 } else {
                     None
@@ -711,58 +777,57 @@ impl Ppu {
             }
             LineStatus::PreRender => {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
-                // VBLANKフラグを下ろす
-                system.write_ppu_is_vblank(false);
+                self.ppu_status_set_is_vblank(false);
 
                 None
             }
         }
     }
 
-    /// PPUの処理を進めます(1line進めるまでには341 cpu cycleかかります)
-    /// `cpu_cyc` - cpuが何clock処理したか入れる(cpu 1stepごとに呼ぶこと)
+    /// Proceed with PPU processing (it takes 341 cpu cycle to advance 1 line)
+    /// `cpu_cyc` - Number of cpu clock cycles elapsed for last step of cpu.
     /// `cpu` - Interruptの要求が必要
     /// `system` - レジスタ読み書きする
     /// `video_system` - レジスタ読み書きする
     /// `videoout_func` - pixelごとのデータが決まるごとに呼ぶ(NESは出力ダブルバッファとかない)
-    pub fn step(&mut self, cpu_cyc: usize, system: &mut System, fb: *mut u8) -> Option<Interrupt> {
+    pub fn step(&mut self, cpu_cyc: usize, cartridge: &mut Cartridge, fb: *mut u8) -> Option<Interrupt> {
         // PPU_SCROLL書き込み
-        let (_, scroll_x, scroll_y) = system.read_ppu_scroll();
+        let (_, scroll_x, scroll_y) = self.read_ppu_scroll();
         self.fetch_scroll_x = scroll_x;
         self.fetch_scroll_y = scroll_y;
 
         // PPU_ADDR, PPU_DATA読み書きに答えてあげる
-        let (_, ppu_addr) = system.read_ppu_addr();
-        let (is_read_ppu_req, is_write_ppu_req, ppu_data) = system.read_ppu_data();
+        let (_, ppu_addr) = self.read_ppu_addr();
+        let (is_read_ppu_req, is_write_ppu_req, ppu_data) = self.read_ppu_data();
 
         if is_write_ppu_req {
-            system
+            self
                 .video
-                .write_u8(system.cartridge.as_mut(), ppu_addr, ppu_data);
-            system.increment_ppu_addr();
+                .write_u8(cartridge, ppu_addr, ppu_data);
+            self.increment_ppu_addr();
         }
         if is_read_ppu_req {
-            let data = system.video.read_u8(system.cartridge.as_mut(), ppu_addr);
-            system.write_ppu_data(data);
-            system.increment_ppu_addr();
+            let data = self.video.read_u8(cartridge, ppu_addr);
+            self.write_ppu_data(data);
+            self.increment_ppu_addr();
         }
 
-        // OAM R/W (おおよそはDMAでやられるから使わないらしい)
-        let oam_addr = system.read_ppu_oam_addr();
-        let (is_read_oam_req, is_write_oam_req, oam_data) = system.read_oam_data();
+        // OAM R/W (It seems that it will not be used because it can be done by DMA)
+        let oam_addr = self.read_ppu_oam_addr();
+        let (is_read_oam_req, is_write_oam_req, oam_data) = self.read_oam_data();
         if is_write_oam_req {
             self.oam[usize::from(oam_addr)] = oam_data;
         }
         if is_read_oam_req {
             let data = self.oam[usize::from(oam_addr)];
-            system.write_oam_data(data);
+            self.write_oam_data(data);
         }
 
-        // clock cycle判定して行更新
+        // clock cycle Judgment and row update
         let total_cyc = self.cumulative_cpu_cyc + cpu_cyc;
         if total_cyc >= CPU_CYCLE_PER_LINE {
             self.cumulative_cpu_cyc = total_cyc - CPU_CYCLE_PER_LINE;
-            self.update_line(system, fb)
+            self.update_line(cartridge, fb)
         } else {
             self.cumulative_cpu_cyc = total_cyc;
             None

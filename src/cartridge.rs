@@ -34,6 +34,14 @@ struct INesConfig {
     ignore_mirror_control: bool,
 }
 
+struct NoCartridge;
+impl Mapper for NoCartridge {
+    fn system_bus_read_u8(&mut self, _addr: u16) -> u8 { 0 }
+    fn system_bus_write_u8(&mut self, _addr: u16, _data: u8) { }
+    fn ppu_bus_read_u8(&mut self, _addr: u16) -> u8 { 0 }
+    fn ppu_bus_write_u8(&mut self, _addr: u16, _data: u8) { }
+}
+
 struct Mapper0 {
     pub prg_rom: Vec<u8>,
     pub prg_ram: Vec<u8>,
@@ -133,7 +141,7 @@ enum Mapper1PrgMode {
 
     /// 0x8000 = first page of PRG ROM, 0xc000 page is switchable
     Fixed16KFirstSwitch16K,
-    
+
     /// 0x8000 page is switchable, 0xc000 = last page of PRG ROM
     Switch16KFixed16KLast
 }
@@ -221,7 +229,7 @@ impl Mapper1 {
                         self.chr_bank_mode = match (value & 0b10000) >> 4 {
                             0 => Mapper1ChrMode::Switch8K,
                             1 => Mapper1ChrMode::Switch4KSwitch4K,
-                            
+
                             _ => { unreachable!() } // Rust compiler should know this is unreachable :/
                         };
                         trace!("Control: mirring = {}, PRG mode = {:?}, CHR mode = {:?}",
@@ -516,11 +524,11 @@ impl Cartridge {
         // FIXME: consolidate these seperate enums...
         let nametable_mirroring = if is_mirroring_vertical {
             INesNametableMirroring::Vertical
-        } else { 
+        } else {
             INesNametableMirroring::Horizontal
         };
         let nametable_mirror = if is_mirroring_vertical {
-            NameTableMirror::Vertical 
+            NameTableMirror::Vertical
         } else {
             NameTableMirror::Horizontal
         };
@@ -546,7 +554,7 @@ impl Cartridge {
         mapper_number |= low_nibble;
         let high_nibble = flags7 & 0xF0;
         mapper_number |= high_nibble;
-        
+
         debug!("iNes: Mapper Number {}", mapper_number);
 
         // Ignore the pre-allocated buffers and lets just allocate
@@ -593,7 +601,7 @@ impl Cartridge {
             },
             _ => {
                 unreachable!();
-                Box::new(Mapper0::new(&ines_config, prg_rom, chr_data))
+                Box::new(NoCartridge)
             }
         };
         //debug_assert!(self.mapper != Mapper::Unknown);
@@ -620,13 +628,21 @@ impl Cartridge {
             nametable_mirror
         })
     }
+
+    pub fn none() -> Cartridge {
+        Cartridge {
+            mapper: Box::new(NoCartridge),
+            nametable_mirror: NameTableMirror::Horizontal
+        }
+    }
+
 }
 
 impl SystemBus for Cartridge {
-    fn read_u8(&mut self, addr: u16, _is_nondestructive: bool) -> u8 { 
+    fn read_u8(&mut self, addr: u16) -> u8 {
         self.mapper.system_bus_read_u8(addr)
     }
-    fn write_u8(&mut self, addr: u16, data: u8, _is_nondestructive: bool) {
+    fn write_u8(&mut self, addr: u16, data: u8) {
         self.mapper.system_bus_write_u8(addr, data);
     }
 }
@@ -641,7 +657,7 @@ impl VideoBus for Cartridge {
 }
 
 impl EmulateControl for Cartridge {
-    fn reset(&mut self) {
+    fn poweron(&mut self) {
         //self.mapper = Mapper::Unknown;
         self.nametable_mirror = NameTableMirror::Unknown;
         //self.is_exists_battery_backed_ram = false;

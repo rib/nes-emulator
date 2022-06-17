@@ -1,4 +1,10 @@
+use crate::apu::Apu;
 use crate::cartridge;
+use crate::cpu::Interrupt;
+use crate::ppu::OAM_DMA_COPY_SIZE_PER_PPU_STEP;
+use crate::ppu::OAM_SIZE;
+use crate::ppu::Ppu;
+use crate::system_ppu_reg::APU_IO_OAM_DMA_OFFSET;
 
 use super::cartridge::*;
 use super::interface::*;
@@ -20,53 +26,49 @@ pub const CASSETTE_BASE_ADDR: u16 = 0x4020;
 /// Memory Access Dispatcher
 //#[derive(Clone)]
 pub struct System {
+
+    pub ppu: Ppu,
+
     /// 0x0000 - 0x07ff: WRAM
     /// 0x0800 - 0x1f7ff: WRAM  Mirror x3
     pub wram: [u8; WRAM_SIZE],
-    //  0x2000 - 0x2007: PPU I/O
-    //  0x2008 - 0x3fff: PPU I/O Mirror x1023
-    pub ppu_reg: [u8; PPU_REG_SIZE],
+
     //  0x4000 - 0x401f: APU I/O, PAD
     pub io_reg: [u8; APU_IO_REG_SIZE],
 
-    /// カセットへのR/W要求は呼び出し先でEmulation, 実機を切り替えるようにする
-    /// 引数に渡されるaddrは、CPU命令そのままのアドレスを渡す
+    pub written_oam_dma: bool,    // OAM_DMAが書かれた
+
+    /// DMAが稼働中か示す
+    /// DMAには513cycかかるが、Emulation上ppuのstep2回341cyc*2で完了するので実行中フラグで処理する
+    /// 先頭でDMA開始されたとして、前半341cycで67%(170byte/256byte)処理できる(ので、次のstepで残りを処理したら次のDMA要求を受けても行ける)
+    pub is_dma_running: bool,
+    /// DMAのCPU側のベースアドレス。ページ指定なのでlower byteは0
+    pub dma_cpu_src_addr: u16,
+    /// DMAのOAM側のベースアドレス。256byteしたらwrapする(あまり使われないらしい)
+    pub dma_oam_dst_addr: u8,
+
+    /// The R / W request to the cassette is Emulation at the call destination,
+    /// and the addr passed to the argument that switches the actual machine
+    /// passes the address as it is from the CPU instruction
     ///  0x4020 - 0x5fff: Extended ROM
     ///  0x6000 - 0x7FFF: Extended RAM
     ///  0x8000 - 0xbfff: PRG-ROM switchable
     ///  0xc000 - 0xffff: PRG-ROM fixed to the last bank or switchable
-    pub cartridge: Option<Cartridge>,
-
-    /// PPUが描画に使うメモリ空間
-    pub video: VideoSystem,
+    pub cartridge: Cartridge,
 
     /// コントローラへのアクセスは以下のモジュールにやらせる
     /// 0x4016, 0x4017
     pub pad1: Pad,
     pub pad2: Pad,
-
-    /* PPUのアドレス空間に対する要求トリガ */
-    pub written_oam_data: bool,   // OAM_DATAがかかれた
-    pub written_ppu_scroll: bool, // PPU_SCROLLが2回書かれた
-    pub written_ppu_addr: bool,   // PPU_ADDRが2回書かれた
-    pub written_ppu_data: bool,   // PPU_DATAがかかれた
-    pub written_oam_dma: bool,    // OAM_DMAが書かれた
-    pub read_oam_data: bool,      // OAM_DATAが読まれた
-    pub read_ppu_data: bool,      // PPU_DATAが読まれた
-
-    /* 2回海ができるPPU register対応 */
-    /// $2005, $2006は状態を共有する、$2002を読み出すと、どっちを書くかはリセットされる
-    pub ppu_is_second_write: bool, // 初期値falseで, 2回目の書き込みが分岐するようにtrueにする
-    pub ppu_scroll_y_reg: u8,   // $2005
-    pub ppu_addr_lower_reg: u8, // $2006
 }
-
+/*
 impl Default for System {
     fn default() -> Self {
         Self {
             wram: [0; WRAM_SIZE],
             ppu_reg: [0; PPU_REG_SIZE],
             io_reg: [0; APU_IO_REG_SIZE],
+            ppu_data_buffer: 0,
 
             cartridge: None,
             video: Default::default(),
@@ -86,174 +88,167 @@ impl Default for System {
             ppu_addr_lower_reg: 0,
         }
     }
-}
+}*/
 
 impl EmulateControl for System {
-    fn reset(&mut self) {
-        self.video.reset();
-        self.pad1.reset();
-        self.pad2.reset();
+    fn poweron(&mut self) {
+
+        self.ppu.poweron();
+
+        self.pad1.poweron();
+        self.pad2.poweron();
 
         self.wram = [0; WRAM_SIZE];
-        self.ppu_reg = [0; PPU_REG_SIZE];
         self.io_reg = [0; APU_IO_REG_SIZE];
 
-        self.written_oam_data = false;
-        self.written_ppu_scroll = false;
-        self.written_ppu_addr = false;
-        self.written_ppu_data = false;
-        self.written_oam_dma = false;
-        self.read_oam_data = false;
-        self.read_ppu_data = false;
-
-        self.ppu_is_second_write = false;
-        self.ppu_scroll_y_reg = 0;
-        self.ppu_addr_lower_reg = 0;
+        self.is_dma_running = false;
+        self.dma_cpu_src_addr = 0;
+        self.dma_oam_dst_addr = 0;
     }
 }
 
 impl SystemBus for System {
-    fn read_u8(&mut self, addr: u16, is_nondestructive: bool) -> u8 {
-        if addr < PPU_REG_BASE_ADDR {
-            // mirror support
-            let index = usize::from(addr) % self.wram.len();
-            arr_read!(self.wram, index)
-        } else if addr < APU_IO_REG_BASE_ADDR {
-            // mirror support
-            let index = usize::from(addr - PPU_REG_BASE_ADDR) % self.ppu_reg.len();
-            debug_assert!(index < 0x9);
-            match index {
-                // PPU_STATUS 2度書きレジスタの状態をリセット, VBLANKフラグをクリア
-                // PPU_STATUS Resets the write register status twice, clears the VBLANK flag
-                0x02 => {
-                    let data = self.ppu_reg[index]; // 先にフェッチしないとあかんやんけ - if you don't fetch it first
-                    if !is_nondestructive {
-                        self.ppu_is_second_write = false;
-                        self.write_ppu_is_vblank(false);
-                    }
-                    data
-                }
-                // OAM_DATAの読み出しフラグ
-                // OAM_DATA read flag
-                0x04 => {
-                    if !is_nondestructive {
-                        self.read_oam_data = true;
-                    }
-                    arr_read!(self.ppu_reg, index)
-                }
-                // PPU_DATA update/address incrementのためにフラグを立てる
-                // バッファが入るので1step遅れで結果が入る
-                // Since there is a buffer that sets a flag for PPU_DATA update / address increment,
-                // the result will be entered with a delay of 1 step
-                0x07 => {
-                    if !is_nondestructive {
-                        self.read_ppu_data = true;
-                    }
-                    arr_read!(self.ppu_reg, index)
-                }
-                // default
-                _ => arr_read!(self.ppu_reg, index),
+    fn read_u8(&mut self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x1fff => { // RAM
+                // mirror support
+                let index = usize::from(addr) % self.wram.len();
+                arr_read!(self.wram, index)
             }
-        } else if addr < CASSETTE_BASE_ADDR {
-            let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
-            if !is_nondestructive {
+            0x2000..=0x3fff => { // PPU I/O
+                self.ppu.read_u8(addr)
+            }
+            0x4000..=0x401f => {  // APU I/O
+                let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
                 match index {
                     // TODO: APU
                     0x16 => self.pad1.read_out(), // pad1
                     0x17 => self.pad2.read_out(), // pad2
                     _ => arr_read!(self.io_reg, index),
                 }
-            } else {
-                arr_read!(self.io_reg, index)
             }
-        } else {
-            if let Some(cartridge) = &mut self.cartridge {
-                cartridge.read_u8(addr, is_nondestructive)
-            } else {
-                //trace!("No cartridge to read from");
-                0
+            _ => { // Cartridge
+                self.cartridge.read_u8(addr)
             }
         }
+
     }
-    fn write_u8(&mut self, addr: u16, data: u8, is_nondestructive: bool) {
-        if addr < PPU_REG_BASE_ADDR {
-            // mirror support
-            let index = usize::from(addr) % self.wram.len();
-            arr_write!(self.wram, index, data);
-        } else if addr < APU_IO_REG_BASE_ADDR {
-            // mirror support
-            let index = usize::from(addr - PPU_REG_BASE_ADDR) % self.ppu_reg.len();
-            match index {
-                // $2004 OAM_DATAに書いたら書き込みフラグを立てる(使わないだろうけど)
-                0x04 => {
-                    if !is_nondestructive {
-                        self.written_oam_data = true
-                    }
-                    arr_write!(self.ppu_reg, index, data);
-                }
-                // $2005 PPU_SCROLL 2回書き
-                0x05 => {
-                    if self.ppu_is_second_write {
-                        self.ppu_scroll_y_reg = data;
-                        if !is_nondestructive {
-                            self.ppu_is_second_write = false;
-                            // PPUに通知
-                            self.written_ppu_scroll = true;
-                        }
-                    } else {
-                        arr_write!(self.ppu_reg, index, data);
-                        if !is_nondestructive {
-                            self.ppu_is_second_write = true;
-                        }
-                    }
-                }
-                // $2006 PPU_ADDR 2回書き
-                0x06 => {
-                    if self.ppu_is_second_write {
-                        self.ppu_addr_lower_reg = data;
-                        if !is_nondestructive {
-                            self.ppu_is_second_write = false;
-                            // PPUに通知
-                            self.written_ppu_addr = true;
-                        }
-                    } else {
-                        arr_write!(self.ppu_reg, index, data);
-                        if !is_nondestructive {
-                            self.ppu_is_second_write = true;
-                        }
-                    }
-                }
-                // $2007 PPU_DATA addr autoincrement
-                0x07 => {
-                    arr_write!(self.ppu_reg, index, data);
-                    if !is_nondestructive {
-                        // PPUに書いてもらおう
-                        self.written_ppu_data = true;
-                    }
-                }
-                // default
-                _ => {
-                    arr_write!(self.ppu_reg, index, data);
-                }
-            };
-        } else if addr < CASSETTE_BASE_ADDR {
-            let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
-            if !is_nondestructive {
+
+    fn write_u8(&mut self, addr: u16, data: u8) {
+        match addr {
+            0x0000..=0x1fff => { // RAM
+                // mirror support
+                let index = usize::from(addr) % self.wram.len();
+                arr_write!(self.wram, index, data);
+            }
+            0x2000..=0x3fff => { // PPU I/O
+                self.ppu.write_u8(addr, data);
+            }
+            0x4000..=0x401f => {  // APU I/O
+                let index = usize::from(addr - 0x4000);
                 match index {
                     // TODO: APU
-                    0x14 => self.written_oam_dma = true, // OAM DMA
+                    0x14 => {
+                        // Start OAM DMA
+                        self.written_oam_dma = true; // OAM DMA
+                    }
                     0x16 => self.pad1.write_strobe((data & 0x01) == 0x01), // pad1
                     0x17 => self.pad2.write_strobe((data & 0x01) == 0x01), // pad2
                     _ => {}
                 }
+                arr_write!(self.io_reg, index, data);
             }
-            arr_write!(self.io_reg, index, data);
-        } else {
-            if let Some(cartridge) = &mut self.cartridge {
-                cartridge.write_u8(addr, data, is_nondestructive);
-            } else {
-                // trace!("No cartridge to write to");
+            _ => { // Cartridge
+                self.cartridge.write_u8(addr, data);
             }
         }
+    }
+}
+
+impl System {
+
+    pub fn new(ppu: Ppu, cartridge: Cartridge) -> Self{
+        Self {
+            ppu,
+            cartridge,
+
+            wram: [0; WRAM_SIZE],
+            io_reg: [0; APU_IO_REG_SIZE],
+
+            written_oam_dma: false,
+            is_dma_running: false,
+            dma_cpu_src_addr: 0,
+            dma_oam_dst_addr: 0,
+
+            pad1: Default::default(),
+            pad2: Default::default(),
+        }
+    }
+
+    /*************************** 0x4014: OAM_DMA ***************************/
+    /// Returns whether DMA should be started and the forwarding address
+    /// DMA開始が必要かどうかと、転送元アドレスを返す
+    /// 面倒なので読み取ったらtriggerは揮発させる
+    pub fn read_oam_dma(&mut self) -> (bool, u16) {
+        let start_addr = u16::from(self.io_reg[APU_IO_OAM_DMA_OFFSET]) << 8;
+        if self.written_oam_dma {
+            self.written_oam_dma = false;
+            (true, start_addr)
+        } else {
+            (false, start_addr)
+        }
+    }
+
+    /// Perform DMA transfer (in two steps)
+    /// `is_pre_transfer` --true for transfer immediately after receipt, false after ppu 1step
+    fn run_dma(&mut self, is_pre_transfer: bool) {
+        debug_assert!(
+            (!self.is_dma_running && is_pre_transfer) || (self.is_dma_running && !is_pre_transfer)
+        );
+        debug_assert!((self.dma_cpu_src_addr & 0x00ff) == 0x0000);
+
+        // address計算
+        let start_offset: u8 = if is_pre_transfer {
+            0
+        } else {
+            OAM_DMA_COPY_SIZE_PER_PPU_STEP
+        };
+        let cpu_start_addr: u16 = self.dma_cpu_src_addr.wrapping_add(u16::from(start_offset));
+        let oam_start_addr: u8 = self.dma_oam_dst_addr.wrapping_add(start_offset);
+        // 転送サイズ
+        let transfer_size: u16 = if is_pre_transfer {
+            OAM_DMA_COPY_SIZE_PER_PPU_STEP as u16
+        } else {
+            (OAM_SIZE as u16) - u16::from(OAM_DMA_COPY_SIZE_PER_PPU_STEP)
+        };
+
+        // 転送
+        for offset in 0..transfer_size {
+            let cpu_addr = cpu_start_addr.wrapping_add(offset);
+            let oam_addr = usize::from(oam_start_addr.wrapping_add(offset as u8));
+
+            let cpu_data = self.read_u8(cpu_addr);
+            self.ppu.oam[oam_addr] = cpu_data;
+        }
+
+        // ステータス更新
+        self.is_dma_running = is_pre_transfer;
+    }
+
+    pub fn step(&mut self, cpu_cyc: usize, apu: &mut Apu, fb: *mut u8) -> Option<Interrupt> {
+        // OAM DMA
+        if self.is_dma_running {
+            // Do the rest of the last OAM DMA
+            self.run_dma(false);
+        }
+        let (is_dma_req, dma_cpu_src_addr) = self.read_oam_dma();
+        if is_dma_req {
+            // Set and execute a new DMA descriptor
+            self.dma_cpu_src_addr = dma_cpu_src_addr;
+            self.dma_oam_dst_addr = self.ppu.read_ppu_oam_addr();
+            self.run_dma(true);
+        }
+
+        self.ppu.step(cpu_cyc, &mut self.cartridge, fb)
     }
 }

@@ -33,7 +33,7 @@ impl Default for Pad {
 }
 
 impl EmulateControl for Pad {
-    fn reset(&mut self) {
+    fn poweron(&mut self) {
         self.button_reg = 0;
         self.read_shift_index = 0;
         self.strobe_enable = false;
@@ -49,7 +49,7 @@ impl Pad {
             self.read_shift_index = 0;
         }
     }
-    /// pad出力を読み取ります、シフトレジスタになっているため読むたびに状態を破壊します    
+    /// pad出力を読み取ります、シフトレジスタになっているため読むたびに状態を破壊します
     /// xxxx_xMES
     /// M - microphone unimplement
     /// E - Expansion controller unimplement
