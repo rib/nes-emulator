@@ -1,3 +1,5 @@
+use egui::plot::Line;
+
 use crate::ppu_registers;
 use crate::ppu_registers::Control1Flags;
 use crate::ppu_registers::Control2Flags;
@@ -14,7 +16,7 @@ pub const NUM_OF_COLOR: usize = 4;
 pub const VISIBLE_SCREEN_WIDTH: usize = 256;
 pub const VISIBLE_SCREEN_HEIGHT: usize = 240;
 pub const RENDER_SCREEN_WIDTH: u16 = VISIBLE_SCREEN_WIDTH as u16;
-pub const RENDER_SCREEN_HEIGHT: u16 = 262; // 0 ~ 261
+pub const RENDER_N_LINES: u16 = 262;
 pub const PIXEL_PER_TILE: u16 = 8; // 1tile=8*8
 pub const SCREEN_TILE_WIDTH: u16 = (VISIBLE_SCREEN_WIDTH as u16) / PIXEL_PER_TILE; // 256/8=32
 pub const SCREEN_TILE_HEIGHT: u16 = (VISIBLE_SCREEN_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
@@ -30,7 +32,7 @@ pub const SPRITE_SIZE: usize = 4;
 pub const SPRITE_WIDTH: usize = 8;
 pub const SPRITE_NORMAL_HEIGHT: usize = 8;
 pub const SPRITE_LARGE_HEIGHT: usize = 16;
-pub const CYCLE_PER_DRAW_FRAME: usize = CPU_CYCLE_PER_LINE * ((RENDER_SCREEN_HEIGHT + 1) as usize);
+pub const CYCLE_PER_DRAW_FRAME: usize = CPU_CYCLE_PER_LINE * ((RENDER_N_LINES + 1) as usize);
 
 #[derive(Copy, Clone)]
 pub struct Position(pub u8, pub u8);
@@ -132,11 +134,11 @@ impl Sprite {
 }
 
 #[derive(Copy, Clone)]
-enum LineStatus {
-    Visible,                // 0~239
-    PostRender,             // 240
-    VerticalBlanking(bool), // 241~260
-    PreRender,              // 261
+pub enum LineStatus {
+    Visible,            // 0~239
+    PostRender,         // 240
+    VerticalBlanking,   // 241~260
+    PreRender,          // 261
 }
 
 impl LineStatus {
@@ -146,7 +148,7 @@ impl LineStatus {
         } else if line == 240 {
             LineStatus::PostRender
         } else if line < 261 {
-            LineStatus::VerticalBlanking(line == 241)
+            LineStatus::VerticalBlanking
         } else if line == 261 {
             LineStatus::PreRender
         } else {
@@ -194,7 +196,9 @@ pub enum PpuStatus {
 
 #[derive(Clone)]
 pub struct Ppu {
-    pub dot_clock: u16, // wraps every 341 clock cycles
+    pub dot: u16, // wraps every 341 clock cycles
+    pub line: u16,
+    pub line_status: LineStatus,
 
     pub palette: [u8; PALETTE_SIZE],
 
@@ -220,7 +224,6 @@ pub struct Ppu {
 
     pub sprite_temps: [Option<Sprite>; SPRITE_TEMP_SIZE],
 
-    pub current_line: u16,
 
     pub current_scroll_x: u8,
     pub current_scroll_y: u8,
@@ -231,7 +234,9 @@ pub struct Ppu {
 impl Default for Ppu {
     fn default() -> Self {
         Self {
-            dot_clock: 0,
+            dot: 0,
+            line: 241,
+            line_status: LineStatus::from(241),
 
             io_latch_value: 0,
 
@@ -253,8 +258,6 @@ impl Default for Ppu {
             oam: [0; OAM_SIZE],
             oam_offset: 0,
             sprite_temps: [None; SPRITE_TEMP_SIZE],
-
-            current_line: 241,
 
             current_scroll_x: 0,
             current_scroll_y: 0,
@@ -491,7 +494,7 @@ impl Ppu {
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
-        let raw_y = self.current_line + u16::from(self.current_scroll_y);
+        let raw_y = self.line + u16::from(self.current_scroll_y);
         let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
         let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
                                       // scroll reg shifts in tile conversion
@@ -509,7 +512,7 @@ impl Ppu {
 
         //println!("scroll_x = {}, y = {}", self.current_scroll_x, self.current_scroll_y);
         // Loop in the drawing coordinate system
-        let pixel_y = usize::from(self.current_line);
+        let pixel_y = usize::from(self.line);
         for pixel_x in 0..VISIBLE_SCREEN_WIDTH {
             // Sprite: Get the data to draw from the searched temporary register
             let (sprite_palette_data_back, sprite_palette_data_front) =
@@ -757,7 +760,7 @@ impl Ppu {
         }
 
         // Pre-calculate sprite size
-        let sprite_begin_y = self.current_line;
+        let sprite_begin_y = self.line;
         let sprite_height = u16::from(self.sprite_height());
         let is_large = sprite_height == 16;
 
@@ -798,56 +801,66 @@ impl Ppu {
     }
 
 
-    fn update_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
+    fn step_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
 
-        self.status.set(StatusFlags::SPRITE0_HIT, false);
-        self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
+        //println!("tick, dot = {}, line = {}", self.dot, self.line);
 
-        /*
-        match self.current_line {
-            0..=239 => { // Visible
-
-            },
-            240 => { // PostRender
-
-            },
-            241..=260 => { // VBlank
-
-            }
-            261 => { // PreRender
-
-            }
-        }*/
-        //println!("line = {}", self.current_line);
-        match LineStatus::from(self.current_line) {
-            LineStatus::Visible => {
+        if let LineStatus::Visible | LineStatus::PreRender = self.line_status {
+            // "OAMADDR is set to 0 during each of ticks 257-320 (the sprite tile loading interval)
+            //  of the pre-render and visible scanlines."
+            if let 257..=320 = self.dot {
                 self.oam_offset = 0;
-                self.fetch_sprite();
-                // Draw one line
-                self.draw_line(cartridge, fb);
-                // Update row counter and finish
-                self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
+            }
 
+            if self.dot == 340 {
+                //println!("fetch {}", self.line);
+                self.status.set(StatusFlags::SPRITE0_HIT, false);
+                self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
+                self.fetch_sprite();
+            }
+        }
+
+        match self.line_status {
+            LineStatus::Visible => {
+                if self.dot == 340 {
+                    //println!("draw line = {}", self.line);
+                    self.draw_line(cartridge, fb);
+                }
                 PpuStatus::None
             }
             LineStatus::PostRender => {
-                self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
-                PpuStatus::FinishedFrame
+                if self.dot == 340 {
+                    PpuStatus::FinishedFrame
+                } else {
+                    PpuStatus::None
+                }
             }
-            LineStatus::VerticalBlanking(is_first) => {
-                self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
-                if is_first {
+            LineStatus::VerticalBlanking => {
+                if self.line == 241 && self.dot == 1 {
                     self.status.set(StatusFlags::IN_VBLANK, true);
                 }
-                if self.control1.contains(Control1Flags::NMI_ENABLE) && self.status.contains(StatusFlags::IN_VBLANK) {
+
+                // FIXME: this shouldn't be conditional on the line/dot.
+                //
+                // The PPU asserts the NMI interrupt line if nme_enabled and
+                // nmi_output are set (status::IN_VBLANK and control::NME_ENABLE)
+                // respectively.
+                // Returning PpuStatus::RaiseNmi will end up calling
+                // cpu.interrupt(NMI) for every dot clock while in VBlank
+                // but the actual CPU interrupt should only be edge triggered!
+                //
+                // Even this is wrong, since it's going to invoke the interrupt
+                // repeatedly for every line while in VBlank
+                if self.line == 241 && self.dot == 1 && self.control1.contains(Control1Flags::NMI_ENABLE) && self.status.contains(StatusFlags::IN_VBLANK) {
                     PpuStatus::RaiseNmi
                 } else {
                     PpuStatus::None
                 }
             }
             LineStatus::PreRender => {
-                self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
-                self.status.set(StatusFlags::IN_VBLANK, false);
+                if self.dot == 1 {
+                    self.status.set(StatusFlags::IN_VBLANK, false);
+                }
 
                 // During dots 280 to 304 of the pre-render scanline (end of vblank)
                 //
@@ -858,12 +871,13 @@ impl Ppu {
                 // from t:
                 //
                 // FIXME: don'y copy _all_ bits: v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
-
-                // FIXME
-                //self.shared_vram_addr = self.shared_temp;
-                //let (scroll_x, scroll_y) = self.decode_scroll_xy();
-
-                self.oam_offset = 0;
+                if let 280..=304 = self.dot {
+                    //self.shared_vram_addr = self.shared_temp;
+                    // FIXME
+                    //let (scroll_x, scroll_y) = self.decode_scroll_xy();
+                    //self.current_scroll_x = scroll_x;
+                    //self.current_scroll_y = scroll_y;
+                }
 
                 PpuStatus::None
             }
@@ -887,11 +901,14 @@ impl Ppu {
         // TODO: rework this to update based on a PPU clock step that will be driven by the nes/system
         // according to the cpu clocks elapsed (instead of batching up scanline processing)
 
-        self.dot_clock = (ppu_clock % 341) as u16;
-        if ppu_clock != 0 && self.dot_clock == 0 {
-            self.update_line(cartridge, fb)
-        } else {
-            PpuStatus::None
+        //println!("ppu clock = {ppu_clock}");
+        self.dot = (ppu_clock % 341) as u16;
+        let status = self.step_line(cartridge, fb);
+        if ppu_clock != 0 && self.dot == 0 {
+            //println!("next line");
+            self.line = (self.line + 1) % RENDER_N_LINES;
+            self.line_status = LineStatus::from(self.line);
         }
+        status
     }
 }
