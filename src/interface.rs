@@ -3,15 +3,9 @@ pub trait SystemBus {
     fn write_u8(&mut self, addr: u16, data: u8);
 }
 
-/// Video Bus経由でR/Wする機能を提供します
-/// addrは0x0000 ~ 0x3fffの範囲内
 pub trait VideoBus {
     fn read_video_u8(&mut self, addr: u16) -> u8;
     fn write_video_u8(&mut self, addr: u16, data: u8);
-}
-
-pub trait EmulateControl {
-    fn poweron(&mut self);
 }
 
 #[cfg(feature = "unsafe-opt")]

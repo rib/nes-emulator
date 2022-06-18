@@ -32,12 +32,6 @@ impl Default for VRam {
     }
 }
 
-impl EmulateControl for VRam {
-    fn poweron(&mut self) {
-        self.nametables = [[0; NAME_TABLE_SIZE]; NUM_OF_NAME_TABLE];
-    }
-}
-
 impl VRam {
     fn mirror_name_table_addr(&self, mirror_mode: NameTableMirror, addr: u16) -> (usize, usize) {
         debug_assert!(addr >= NAME_TABLE_BASE_ADDR);

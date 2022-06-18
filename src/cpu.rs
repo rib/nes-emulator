@@ -115,26 +115,10 @@ impl Default for Cpu {
             y: 0,
             pc: 0,
             sp: 0xfd,
-            p: unsafe { Flags::from_bits_unchecked(0x0) },
+            p: unsafe { Flags::from_bits_unchecked(0x34) },
 
             #[cfg(feature="trace")]
             trace: TraceState::default()
-        }
-    }
-}
-
-impl EmulateControl for Cpu {
-    fn poweron(&mut self) {
-        self.a = 0;
-        self.x = 0;
-        self.y = 0;
-        self.pc = 0;
-        self.sp = 0xfd;
-        self.p = unsafe { Flags::from_bits_unchecked(0x34) };
-
-        #[cfg(feature="trace")]
-        {
-            self.trace = TraceState::default();
         }
     }
 }

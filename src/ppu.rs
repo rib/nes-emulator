@@ -299,33 +299,6 @@ impl Default for Ppu {
     }
 }
 
-impl EmulateControl for Ppu {
-    fn poweron(&mut self) {
-
-        self.vram.poweron();
-
-        self.palette = [0; PALETTE_SIZE];
-
-        self.status = StatusFlags::empty();
-        self.control1 = Control1Flags::empty();
-        self.control2 = Control2Flags::empty();
-
-        self.write_toggle = false;
-        self.shared_temp = 0;
-        self.shared_vram_addr = 0;
-        self.scroll_x_fine3 = 0;
-
-        self.oam = [0; OAM_SIZE];
-        self.sprite_temps = [None; SPRITE_TEMP_SIZE];
-
-        self.current_line = 241;
-        self.cumulative_cpu_cyc = 0;
-
-        self.current_scroll_x = 0;
-        self.current_scroll_y = 0;
-    }
-}
-
 impl Ppu {
 
     // TODO: decay the latch value over time

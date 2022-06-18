@@ -42,9 +42,8 @@ impl Nes {
         }
     }
 
+    /// Assumes everything is Default initialized beforehand
     pub fn poweron(&mut self) {
-        self.cpu.poweron();
-        self.system.poweron();
         self.cpu.interrupt(&mut self.system, Interrupt::RESET);
     }
 

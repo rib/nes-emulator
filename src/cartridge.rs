@@ -655,17 +655,3 @@ impl VideoBus for Cartridge {
         self.mapper.ppu_bus_write_u8(addr, data);
     }
 }
-
-impl EmulateControl for Cartridge {
-    fn poweron(&mut self) {
-        //self.mapper = Mapper::Unknown;
-        self.nametable_mirror = NameTableMirror::Unknown;
-        //self.is_exists_battery_backed_ram = false;
-        //self.prg_rom_bytes = 0;
-        //self.chr_rom_bytes = 0;
-        //self.prg_rom.clear();
-        //self.chr_rom.clear();
-        //self.battery_packed_ram.clear();
-    }
-}
-

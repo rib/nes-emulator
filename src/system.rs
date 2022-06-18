@@ -62,22 +62,7 @@ pub struct System {
     pub pad2: Pad,
 }
 
-impl EmulateControl for System {
-    fn poweron(&mut self) {
 
-        self.ppu.poweron();
-
-        self.pad1.poweron();
-        self.pad2.poweron();
-
-        self.wram = [0; WRAM_SIZE];
-        self.io_reg = [0; APU_IO_REG_SIZE];
-
-        self.is_dma_running = false;
-        self.dma_cpu_src_addr = 0;
-        self.dma_oam_dst_addr = 0;
-    }
-}
 
 impl SystemBus for System {
     fn read_u8(&mut self, addr: u16) -> u8 {

@@ -12,6 +12,7 @@ pub const PPU_DATA_OFFSET: usize = 0x07;
 pub const APU_IO_OAM_DMA_OFFSET: usize = 0x14;
 
 bitflags! {
+    #[derive(Default)]
     pub struct Control1Flags: u8 {
         const NMI_ENABLE            = 0b1000_0000;
         const IS_MASTER             = 0b0100_0000;
@@ -31,6 +32,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Default)]
     pub struct Control2Flags: u8 {
         const COLOR_INTENSITY_MASK  = 0b1110_0000;
         const SPRITES_LEFT_COL_SHOW = 0b0001_0000;
@@ -42,6 +44,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Default)]
     pub struct StatusFlags: u8 {
         const IN_VBLANK             = 0b1000_0000;
         const SPRITE0_HIT           = 0b0100_0000;

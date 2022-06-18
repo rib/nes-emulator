@@ -32,14 +32,6 @@ impl Default for Pad {
     }
 }
 
-impl EmulateControl for Pad {
-    fn poweron(&mut self) {
-        self.button_reg = 0;
-        self.read_shift_index = 0;
-        self.strobe_enable = false;
-    }
-}
-
 impl Pad {
     /// pad入力をクリアして取り込み直します
     /// 0x4016/0x4017に1/0を
