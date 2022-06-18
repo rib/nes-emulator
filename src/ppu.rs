@@ -22,9 +22,6 @@ pub const BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY: u16 = 4;
 pub const ATTRIBUTE_TABLE_WIDTH: u16 = SCREEN_TILE_WIDTH / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
 
 pub const OAM_SIZE: usize = 0x100;
-/// Number of bytes to be transferred at the first time when the DMA transfer is to be completed by 2line processing
-/// 341cyc/513cyc*256byte=170.1byte
-pub const OAM_DMA_COPY_SIZE_PER_PPU_STEP: u8 = 0xaa;
 pub const PATTERN_TABLE_ENTRY_BYTE: u16 = 16;
 
 pub const SPRITE_TEMP_SIZE: usize = 8;
@@ -189,8 +186,16 @@ impl Default for DrawOption {
     }
 }
 
+pub enum PpuStatus {
+    None,
+    FinishedFrame,
+    RaiseNmi,
+}
+
 #[derive(Clone)]
 pub struct Ppu {
+    pub dot_clock: u16, // wraps every 341 clock cycles
+
     pub palette: [u8; PALETTE_SIZE],
 
     pub io_latch_value: u8,
@@ -215,7 +220,6 @@ pub struct Ppu {
 
     pub sprite_temps: [Option<Sprite>; SPRITE_TEMP_SIZE],
 
-    pub cumulative_cpu_cyc: usize,
     pub current_line: u16,
 
     pub current_scroll_x: u8,
@@ -227,6 +231,8 @@ pub struct Ppu {
 impl Default for Ppu {
     fn default() -> Self {
         Self {
+            dot_clock: 0,
+
             io_latch_value: 0,
 
             palette: [0; PALETTE_SIZE],
@@ -248,7 +254,6 @@ impl Default for Ppu {
             oam_offset: 0,
             sprite_temps: [None; SPRITE_TEMP_SIZE],
 
-            cumulative_cpu_cyc: 0,
             current_line: 241,
 
             current_scroll_x: 0,
@@ -353,7 +358,7 @@ impl Ppu {
                 (0, 0xff)
             }
             0x2004 => { // OAMDATA (Read/Write)
-                (self.oam[self.oam_offset as usize], 0xff)
+                (self.oam[self.oam_offset as usize], 0x0)
             }
             0x2005 => { // PPU_SCROLL (Write-only)
                 (0, 0xff)
@@ -411,6 +416,7 @@ impl Ppu {
             0x2004 => {
                 //self.written_oam_data = true;
                 //arr_write!(self.ppu_reg, 4, data);
+                //println!("oam write {:x} = {data:x}", self.oam_offset);
                 self.oam[self.oam_offset as usize] = data;
                 self.oam_offset = self.oam_offset.wrapping_add(1);
             }
@@ -792,7 +798,7 @@ impl Ppu {
     }
 
 
-    fn update_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> Option<Interrupt> {
+    fn update_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
 
         self.status.set(StatusFlags::SPRITE0_HIT, false);
         self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
@@ -822,11 +828,11 @@ impl Ppu {
                 // Update row counter and finish
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
 
-                None
+                PpuStatus::None
             }
             LineStatus::PostRender => {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
-                None
+                PpuStatus::FinishedFrame
             }
             LineStatus::VerticalBlanking(is_first) => {
                 self.current_line = (self.current_line + 1) % RENDER_SCREEN_HEIGHT;
@@ -834,9 +840,9 @@ impl Ppu {
                     self.status.set(StatusFlags::IN_VBLANK, true);
                 }
                 if self.control1.contains(Control1Flags::NMI_ENABLE) && self.status.contains(StatusFlags::IN_VBLANK) {
-                    Some(Interrupt::NMI)
+                    PpuStatus::RaiseNmi
                 } else {
-                    None
+                    PpuStatus::None
                 }
             }
             LineStatus::PreRender => {
@@ -859,7 +865,7 @@ impl Ppu {
 
                 self.oam_offset = 0;
 
-                None
+                PpuStatus::None
             }
         }
     }
@@ -872,22 +878,20 @@ impl Ppu {
         let fine_y = ((self.shared_temp & 0b0111_0000_0000_0000) >> 12) as u8;
         let scroll_y  = coarse_y | fine_y;
 
-        println!("scroll_x = {}, scroll_y = {}", self.current_scroll_x, self.current_scroll_y);
+        //println!("scroll_x = {}, scroll_y = {}", self.current_scroll_x, self.current_scroll_y);
         (scroll_x, scroll_y)
     }
 
-    pub fn step(&mut self, cpu_cyc: usize, cartridge: &mut Cartridge, fb: *mut u8) -> Option<Interrupt> {
+    pub fn step(&mut self, ppu_clock: u64, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
 
         // TODO: rework this to update based on a PPU clock step that will be driven by the nes/system
         // according to the cpu clocks elapsed (instead of batching up scanline processing)
 
-        let total_cyc = self.cumulative_cpu_cyc + cpu_cyc;
-        if total_cyc >= CPU_CYCLE_PER_LINE {
-            self.cumulative_cpu_cyc = total_cyc - CPU_CYCLE_PER_LINE;
+        self.dot_clock = (ppu_clock % 341) as u16;
+        if ppu_clock != 0 && self.dot_clock == 0 {
             self.update_line(cartridge, fb)
         } else {
-            self.cumulative_cpu_cyc = total_cyc;
-            None
+            PpuStatus::None
         }
     }
 }

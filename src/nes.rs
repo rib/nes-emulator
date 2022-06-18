@@ -8,6 +8,8 @@ use log::{warn};
 pub struct Nes {
     pixel_format: PixelFormat,
     cpu: Cpu,
+    cpu_clock: u64,
+    ppu_clock: u64,
     apu: Apu,
     system: System,
     framebuffers: Vec<Vec<u8>>,
@@ -30,7 +32,7 @@ impl Nes {
 
         let system = System::new(ppu, Cartridge::none());
         Nes {
-            pixel_format, cpu, apu, system, framebuffers, current_fb: 0
+            pixel_format, cpu, cpu_clock: 0, ppu_clock: 0, apu, system, framebuffers, current_fb: 0
         }
     }
 
@@ -100,21 +102,42 @@ impl Nes {
     pub fn tick_frame(&mut self, mut framebuffer: Framebuffer) {
         let rental = framebuffer.rent_data();
         if let Some(mut fb_data) = rental {
-            let mut i = 0;
-            while i < CYCLE_PER_DRAW_FRAME {
-                let cyc = self.cpu.step(&mut self.system);
+            let fb = fb_data.data.as_mut_ptr();
+            'frame_loop: loop {
+
+                // We treat the CPU as our master clock and the PPU is driven according
+                // to the forward progress of the CPU's clock.
+
+                // For now just assuming NTSC which has an exact 1:3 ratio between cpu
+                // clocks and PPU...
+                let expected_ppu_clock = self.cpu_clock * 3;
+                let ppu_delta = expected_ppu_clock - self.ppu_clock;
+
+                // Let the PPU catch up with the CPU clock before progressing the CPU
+                // in case we need to quit to allow a redraw (so we will resume
+                // catching afterwards)
+                for _ in 0..ppu_delta {
+                    let status = self.system.step_ppu(self.ppu_clock, fb);
+                    self.ppu_clock += 1;
+                    match status {
+                        PpuStatus::None => { continue },
+                        PpuStatus::FinishedFrame => { break 'frame_loop; },
+                        PpuStatus::RaiseNmi => {
+                            //println!("VBLANK NMI");
+                            self.cpu.interrupt(&mut self.system, Interrupt::NMI);
+                        }
+                    }
+                }
+
+                if self.system.oam_dma_cpu_suspend_cycles == 0 {
+                    self.cpu_clock += self.cpu.step(&mut self.system) as u64;
+                } else {
+                    self.cpu_clock += self.system.oam_dma_cpu_suspend_cycles as u64;
+                    self.system.oam_dma_cpu_suspend_cycles = 0;
+                };
 
                 #[cfg(feature="trace")]
                 self.display_trace();
-
-                i += cyc as usize;
-
-
-                let irq = self.system.step(cyc.into(), &mut self.apu, fb_data.data.as_mut_ptr());
-
-                if let Some(irq) = irq {
-                    self.cpu.interrupt(&mut self.system, irq);
-                }
             }
         } else {
             warn!("Can't tick with framebuffer that's still in use!");
