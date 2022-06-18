@@ -9,48 +9,30 @@ use super::interface::*;
 use super::system::*;
 use super::vram::*;
 
-/// 1lineあたりかかるCPUサイクル
 pub const CPU_CYCLE_PER_LINE: usize = 341 / 3; // ppu cyc -> cpu cyc
-/// 色の種類(RGB)
 pub const NUM_OF_COLOR: usize = 4;
-/// ユーザーに表示される領域幅
 pub const VISIBLE_SCREEN_WIDTH: usize = 256;
-/// ユーザーに表示される領域高さ
 pub const VISIBLE_SCREEN_HEIGHT: usize = 240;
-/// 実際に描画する幅(これは表示幅に等しい)
 pub const RENDER_SCREEN_WIDTH: u16 = VISIBLE_SCREEN_WIDTH as u16;
-/// VBlank期間を考慮した描画領域高さ
 pub const RENDER_SCREEN_HEIGHT: u16 = 262; // 0 ~ 261
-/// 1tileあたりのpixel数
 pub const PIXEL_PER_TILE: u16 = 8; // 1tile=8*8
-/// 横タイル数 32
 pub const SCREEN_TILE_WIDTH: u16 = (VISIBLE_SCREEN_WIDTH as u16) / PIXEL_PER_TILE; // 256/8=32
-/// 縦タイル数 30
 pub const SCREEN_TILE_HEIGHT: u16 = (VISIBLE_SCREEN_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
-/// 1属性テーブルエントリに対する横, 縦タイル数
 pub const BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY: u16 = 4;
-/// 属性テーブルの横エントリ数 8
 pub const ATTRIBUTE_TABLE_WIDTH: u16 = SCREEN_TILE_WIDTH / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
 
-/// PPU内部のOAMの容量 dmaの転送サイズと等しい
 pub const OAM_SIZE: usize = 0x100;
-/// DMA転送を2line処理で終えようと思ったときの1回目で転送するバイト数
+/// Number of bytes to be transferred at the first time when the DMA transfer is to be completed by 2line processing
 /// 341cyc/513cyc*256byte=170.1byte
 pub const OAM_DMA_COPY_SIZE_PER_PPU_STEP: u8 = 0xaa;
-/// pattern1個あたりのエントリサイズ
 pub const PATTERN_TABLE_ENTRY_BYTE: u16 = 16;
 
-/// スプライトテンポラリレジスタ数
 pub const SPRITE_TEMP_SIZE: usize = 8;
-/// スプライト総数
 pub const NUM_OF_SPRITE: usize = 64;
-/// スプライト1個あたり4byte
 pub const SPRITE_SIZE: usize = 4;
-/// スプライトの横幅
 pub const SPRITE_WIDTH: usize = 8;
 pub const SPRITE_NORMAL_HEIGHT: usize = 8;
 pub const SPRITE_LARGE_HEIGHT: usize = 16;
-/// 1frame書くのにかかるサイクル数
 pub const CYCLE_PER_DRAW_FRAME: usize = CPU_CYCLE_PER_LINE * ((RENDER_SCREEN_HEIGHT + 1) as usize);
 
 #[derive(Copy, Clone)]
@@ -74,7 +56,7 @@ impl Color {
     }
 }
 
-/// sprite.tile_idのu8から変換する
+/// Convert from u8 in sprite.tile_id
 #[derive(Copy, Clone)]
 pub enum TileId {
     /// 8*8 spriteの場合
@@ -108,17 +90,11 @@ impl TileId {
         }
     }
 }
-/// 描画に必要な補足情報とか
-/// VHP___CC
 #[derive(Copy, Clone)]
 pub struct SpriteAttr {
-    /// V 垂直反転
     is_vert_flip: bool,
-    /// H 垂直反転
     is_hor_flip: bool,
-    /// P 描画優先度
     is_draw_front: bool,
-    /// CC pattele指定(2bit)
     palette_id: u8,
 }
 impl SpriteAttr {
@@ -191,17 +167,12 @@ pub enum PixelFormat {
 
 #[derive(Copy, Clone)]
 pub struct DrawOption {
-    /// Frame Buffer全体の幅
     pub fb_width: u32,
-    /// Frame Buffer全体の高さ
     pub fb_height: u32,
-    /// PPUのデータを書き出す左上座標
     pub offset_x: i32,
-    /// PPUのデータを書き出す左上座標
     pub offset_y: i32,
-    /// PPU 1dotをFrameBufferのpixel数に換算する
+    /// Convert PPU 1 dot to the number of pixels in FrameBuffer
     pub scale: u32,
-    /// Frame Bufferの色設定
     pub pixel_format: PixelFormat,
 }
 
@@ -220,10 +191,6 @@ impl Default for DrawOption {
 
 #[derive(Clone)]
 pub struct Ppu {
-    //  0x2000 - 0x2007: PPU I/O
-    //  0x2008 - 0x3fff: PPU I/O Mirror x1023
-    //pub ppu_reg: [u8; PPU_REG_SIZE],
-
     pub palette: [u8; PALETTE_SIZE],
 
     pub io_latch_value: u8,
@@ -243,24 +210,17 @@ pub struct Ppu {
 
     pub vram: VRam,
 
-    /// Object Attribute Memoryの実態
     pub oam: [u8; OAM_SIZE],
     pub oam_offset: u8,
 
-    /// 次の描画で使うスプライトを格納する
     pub sprite_temps: [Option<Sprite>; SPRITE_TEMP_SIZE],
 
     pub cumulative_cpu_cyc: usize,
-    /// 次処理するy_index
     pub current_line: u16,
 
-    // scrollレジスタは1lineごとに更新
-    //pub fetch_scroll_x: u8,
-    //pub fetch_scroll_y: u8,
     pub current_scroll_x: u8,
     pub current_scroll_y: u8,
 
-    /// PPUの描画設定(step時に渡したかったが、毎回渡すのも無駄なので)
     pub draw_option: DrawOption,
 }
 
