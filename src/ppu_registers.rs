@@ -66,15 +66,6 @@ impl Ppu {
     pub fn sprites_pattern_table_addr(&self) -> u16 {
         if self.control1.contains(Control1Flags::SPRITES_IN_PATTERN_TABLE_1) { 0x1000 } else { 0x0000 }
     }
-    pub fn name_table_base_addr(&self) -> u16 {
-        match self.control1 & Control1Flags::NAME_TABLE_MASK {
-            Control1Flags::NAME_TABLE_0 => 0x2000,
-            Control1Flags::NAME_TABLE_1 => 0x2400,
-            Control1Flags::NAME_TABLE_2 => 0x2800,
-            Control1Flags::NAME_TABLE_3 => 0x2c00,
-            _ => panic!("invalid name table addr index"),
-        }
-    }
 
     pub fn address_increment(&self) -> u16 {
         if self.control1.contains(Control1Flags::ADDRESS_INC_32) { 32 } else { 1 }

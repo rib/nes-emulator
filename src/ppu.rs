@@ -210,10 +210,10 @@ pub struct Ppu {
     pub control1: Control1Flags,
     pub control2: Control2Flags,
 
-    pub write_toggle: bool, // Latch for PPU_SCROLL and PPU_ADDR
-    pub shared_temp: u16, // Shared temp for PPU_SCROLL and PPU_ADDR
+    pub shared_w_toggle: bool, // Latch for PPU_SCROLL and PPU_ADDR
+    pub shared_t_register: u16, // Shared temp for PPU_SCROLL and PPU_ADDR
     // Either configured directly via PPU_ADDR, or indirectly via PPU_SCROLL
-    pub shared_vram_addr: u16,
+    pub shared_v_register: u16,
 
     pub scroll_x_fine3: u8,
 
@@ -248,9 +248,9 @@ impl Default for Ppu {
             control1: Control1Flags::empty(),
             control2: Control2Flags::empty(),
 
-            write_toggle: false,
-            shared_temp: 0,
-            shared_vram_addr: 0,
+            shared_w_toggle: false,
+            shared_t_register: 0,
+            shared_v_register: 0,
             scroll_x_fine3: 0,
 
             vram: Default::default(),
@@ -336,7 +336,7 @@ impl Ppu {
         // "load next value" signal for all of v (when not rendering, the carry
         // inputs are set up to linearly increment v by either 1 or 32)
 
-        self.shared_vram_addr = self.shared_vram_addr.wrapping_add(self.address_increment());
+        self.shared_v_register = self.shared_v_register.wrapping_add(self.address_increment());
     }
 
     pub fn read_u8(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
@@ -352,7 +352,7 @@ impl Ppu {
             // PPU_STATUS (read-only) Resets double-write register status, clears VBLANK flag
             0x2002 => { // Status (Read-only)
                 let data = self.status.bits();
-                self.write_toggle = false;
+                self.shared_w_toggle = false;
                 //self.ppu_is_second_write = false;
                 self.status.set(StatusFlags::IN_VBLANK, false);
                 (data, StatusFlags::UNDEFINED_BITS.bits())
@@ -370,7 +370,7 @@ impl Ppu {
                 (0, 0xff)
             }
             0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.data_read_u8(cartridge, self.shared_vram_addr);
+                let (data, undefined_mask) = self.data_read_u8(cartridge, self.shared_v_register);
                 self.increment_data_addr();
                 (data, undefined_mask)
             }
@@ -389,7 +389,7 @@ impl Ppu {
                 self.control1 = Control1Flags::from_bits_truncate(data);
                 // The lower nametable bits become 10-11 of the shared (15 bit) temp register that's
                 // used by PPU_SCROLL and PPU_ADDR
-                self.shared_temp = (self.shared_temp & 0b0111_0011_1111_1111) | ((data as u16 & 0b11) << 10);
+                self.shared_t_register = (self.shared_t_register & 0b0111_0011_1111_1111) | ((data as u16 & 0b11) << 10);
             }
             0x2001 => {  // Control 2
                 self.control2 = Control2Flags::from_bits_truncate(data);
@@ -431,26 +431,24 @@ impl Ppu {
                 // ||| || +++++-------- coarse Y scroll
                 // ||| ++-------------- nametable select
                 // +++----------------- fine Y scroll
-                if self.write_toggle {
+                if self.shared_w_toggle {
                     let fine3_y = (data & 0b111) as u16;
                     let coarse5_y = ((data & 0b1111_1000) >> 3) as u16;
-                    self.shared_temp = (self.shared_temp & 0b0000_1100_0001_1111) | (fine3_y << 12) | (coarse5_y << 5);
+                    self.shared_t_register = (self.shared_t_register & 0b0000_1100_0001_1111) | (fine3_y << 12) | (coarse5_y << 5);
 
-                    // FIXME this should be updated in PreRender...
-                    let (scroll_x, scroll_y) = self.decode_scroll_xy();
-                    self.current_scroll_x = scroll_x;
-                    self.current_scroll_y = scroll_y;
+                    // TODO: supporting mid-frame updates from t -> v
+                    self.update_scroll_xy();
                 } else {
                     self.scroll_x_fine3 = data & 0b111;
-                    self.shared_temp = (self.shared_temp & 0b0111_1111_1110_0000) | (((data >> 3) as u16) & 0b1_1111);
+                    self.shared_t_register = (self.shared_t_register & 0b0111_1111_1110_0000) | (((data >> 3) as u16) & 0b1_1111);
                 }
-                self.write_toggle = !self.write_toggle;
+                self.shared_w_toggle = !self.shared_w_toggle;
             }
             0x2006 => { // PPU_ADDR
-                if self.write_toggle {
+                if self.shared_w_toggle {
                     let lsb = data;
-                    self.shared_temp = (self.shared_temp & 0xff00) | (lsb as u16);
-                    self.shared_vram_addr = self.shared_temp;
+                    self.shared_t_register = (self.shared_t_register & 0xff00) | (lsb as u16);
+                    self.shared_v_register = self.shared_t_register;
                 } else {
                     // NB: shared_temp (t) is a 15 bit register that's shared between
                     // PPU_ADDR and PPU_SCROLL. Also note the PPU only has a 14bit address
@@ -460,13 +458,13 @@ impl Ppu {
                     // as a 16 bit value)
                     //
                     let msb = data & 0b0011_1111;
-                    self.shared_temp = ((msb as u16) << 8) | (self.shared_temp & 0xff);
+                    self.shared_t_register = ((msb as u16) << 8) | (self.shared_t_register & 0xff);
                 }
-                self.write_toggle = !self.write_toggle;
+                self.shared_w_toggle = !self.shared_w_toggle;
             }
             0x2007 => { // PPU_DATA
                 //println!("data_write_u8: {:x}, {data:x}", self.shared_vram_addr);
-                self.data_write_u8(cartridge, self.shared_vram_addr, data);
+                self.data_write_u8(cartridge, self.shared_v_register, data);
 
                 //arr_write!(self.ppu_reg, 7, data);
                 // PPUに書いてもらおう
@@ -483,7 +481,7 @@ impl Ppu {
     /// `tile_global` - Tile position on 4 sides including scroll offset
     /// `tile_local`  - Converted `tile_global` to the position on the tile on 1Namespace
     /// All of the above should match without scroll
-    fn draw_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
+    fn draw_tile_span(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
         let nametable_base_addr = self.name_table_base_addr();
         let pattern_table_addr = self.bg_pattern_table_addr();
         //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
@@ -494,6 +492,7 @@ impl Ppu {
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
+        //let raw_y = self.scroll_fine_y();
         let raw_y = self.line + u16::from(self.current_scroll_y);
         let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
         let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
@@ -518,6 +517,7 @@ impl Ppu {
             let (sprite_palette_data_back, sprite_palette_data_front) =
                 self.get_sprite_draw_data(cartridge, pixel_x, pixel_y);
 
+            //let offset_x = self.scroll_fine_x();
             // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
             let offset_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) & 0x07;
             let tile_base_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) >> 3;
@@ -808,8 +808,32 @@ impl Ppu {
         if let LineStatus::Visible | LineStatus::PreRender = self.line_status {
             // "OAMADDR is set to 0 during each of ticks 257-320 (the sprite tile loading interval)
             //  of the pre-render and visible scanlines."
+
+            /* TODO: supporting mid-frame updates from t -> v
+            if let 8..=256 = self.dot {
+                if self.dot % 8 == 0 {
+                    self.increment_coarse_x_scroll();
+                }
+            }
+
+            if self.dot == 256 {
+                self.increment_fine_y_scroll();
+            }
+            */
+
+
             if let 257..=320 = self.dot {
                 self.oam_offset = 0;
+
+                /* TODO: supporting mid-frame updates from t -> v
+                if self.dot == 257 {
+                    // "If rendering is enabled, the PPU copies all bits related to horizontal position from t to v"
+                    // ref: https://www.nesdev.org/wiki/File:Ntsc_timing.png
+                    const HORIZONTAL_BITS_MASK: u16 = 0b0000_1000_0001_1111;
+                    self.shared_v_register = (self.shared_v_register & (!HORIZONTAL_BITS_MASK)) | (self.shared_t_register & HORIZONTAL_BITS_MASK);
+                    self.update_scroll_xy();
+                }
+                */
             }
 
             if self.dot == 340 {
@@ -824,7 +848,7 @@ impl Ppu {
             LineStatus::Visible => {
                 if self.dot == 340 {
                     //println!("draw line = {}", self.line);
-                    self.draw_line(cartridge, fb);
+                    self.draw_tile_span(cartridge, fb);
                 }
                 PpuStatus::None
             }
@@ -871,29 +895,102 @@ impl Ppu {
                 // from t:
                 //
                 // FIXME: don'y copy _all_ bits: v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
+                /* TODO: supporting mid-frame updates from t -> v
                 if let 280..=304 = self.dot {
                     //self.shared_vram_addr = self.shared_temp;
                     // FIXME
                     //let (scroll_x, scroll_y) = self.decode_scroll_xy();
                     //self.current_scroll_x = scroll_x;
                     //self.current_scroll_y = scroll_y;
+
+                    const VERTICAL_BITS_MASK: u16 = 0b0111_0111_1110_0000;
+                    self.shared_v_register = (self.shared_v_register & (!VERTICAL_BITS_MASK)) | (self.shared_t_register & VERTICAL_BITS_MASK);
+                    self.update_scroll_xy();
                 }
+                */
 
                 PpuStatus::None
             }
         }
     }
 
+    /*
     pub fn decode_scroll_xy(&self) -> (u8, u8) {
-        let coarse_x = ((self.shared_temp & 0b11111) << 3) as u8;
+        let coarse_x = ((self.shared_t_register & 0b11111) << 3) as u8;
         let fine_x = self.scroll_x_fine3 & 0b111;
         let scroll_x = coarse_x | fine_x;
-        let coarse_y = ((self.shared_temp & 0b11_1110_0000) >> 2) as u8;
-        let fine_y = ((self.shared_temp & 0b0111_0000_0000_0000) >> 12) as u8;
+        let coarse_y = ((self.shared_t_register & 0b11_1110_0000) >> 2) as u8;
+        let fine_y = ((self.shared_t_register & 0b0111_0000_0000_0000) >> 12) as u8;
         let scroll_y  = coarse_y | fine_y;
 
         //println!("scroll_x = {}, scroll_y = {}", self.current_scroll_x, self.current_scroll_y);
         (scroll_x, scroll_y)
+    }*/
+
+    pub fn scroll_coarse_x(&self) -> u8 {
+        (self.shared_t_register & 0b1_1111) as u8
+    }
+    pub fn scroll_fine_x(&self) -> u8 {
+        let coarse_x = ((self.shared_t_register & 0b1_1111) << 3) as u8;
+        let fine_x = self.scroll_x_fine3 & 0b111;
+        coarse_x | fine_x
+    }
+    pub fn scroll_coarse_y(&self) -> u8 {
+        ((self.shared_t_register & 0b0000_0011_1110_0000) >> 5) as u8
+    }
+    pub fn scroll_fine_y(&self) -> u8 {
+        let coarse_y = ((self.shared_t_register & 0b0000_0011_1110_0000) >> 2) as u8;
+        let fine_y   = ((self.shared_t_register & 0b0111_0000_0000_0000) >> 12) as u8;
+        coarse_y | fine_y
+    }
+
+    pub fn name_table_base_addr(&self) -> u16 {
+        //(self.shared_v_register & 0b0000_1100_0000_0000) + 0x2000
+
+        match self.control1 & Control1Flags::NAME_TABLE_MASK {
+            Control1Flags::NAME_TABLE_0 => 0x2000,
+            Control1Flags::NAME_TABLE_1 => 0x2400,
+            Control1Flags::NAME_TABLE_2 => 0x2800,
+            Control1Flags::NAME_TABLE_3 => 0x2c00,
+            _ => panic!("invalid name table addr index"),
+        }
+
+    }
+
+    pub fn update_scroll_xy(&mut self) {
+        //let (scroll_x, scroll_y) = self.decode_scroll_xy();
+        self.current_scroll_x = self.scroll_fine_x();
+        self.current_scroll_y = self.scroll_fine_y();
+    }
+
+    // TODO: don't be so literal with re-packing this state into the internal 'v' register
+    pub fn increment_coarse_x_scroll(&mut self) {
+        let coarse_x = self.shared_t_register & 0b0000_0000_0001_1111;
+        let upper_x = (self.shared_t_register & 0b0000_0100_0000_0000) >> 5;
+        let mut coarse_x = coarse_x | upper_x;
+        coarse_x += 1;
+        let upper_x = (coarse_x & 0b10_0000) << 5;
+        let coarse_x = coarse_x & 0b01_1111;
+
+        self.shared_t_register = (self.shared_t_register & 0b0111_1011_1110_0000) | coarse_x | upper_x;
+
+        self.current_scroll_x = coarse_x as u8;
+    }
+
+    // TODO: don't be so literal with re-packing this state into the internal 'v' register
+    pub fn increment_fine_y_scroll(&mut self) {
+        let upper_y  = (self.shared_t_register & 0b0000_1000_0000_0000) >> 3;
+        let coarse_y = (self.shared_t_register & 0b0000_0011_1110_0000) >> 2;
+        let fine_y   = (self.shared_t_register & 0b0111_0000_0000_0000) >> 12;
+        let mut fine_y = fine_y | coarse_y | upper_y;
+        fine_y += 1;
+        let upper_y  = (fine_y & 0b1_0000_0000) << 3;
+        let coarse_y = (fine_y & 0b0_1111_1000) << 2;
+        let fine_y   = (fine_y & 0b0_0000_0111) << 12;
+
+        self.shared_t_register = (self.shared_t_register & 0b0000_0100_0001_1111) | upper_y | coarse_y | fine_y;
+
+        self.current_scroll_y = coarse_y as u8;
     }
 
     pub fn step(&mut self, ppu_clock: u64, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
