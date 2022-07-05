@@ -26,6 +26,9 @@ env_logger = "0.9"
 bytemuck = "1.9"
 bitflags = "1"
 #bevy = { git = "https://github.com/bevyengine/bevy" }
+cpal = "0.13"
+ring-channel = "0.11"
+anyhow = "1"
 
 egui = "0.18"
 egui_glow = { version = "0.18", features = [ "winit" ] }

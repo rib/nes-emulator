@@ -1,4 +1,5 @@
-use crate::apu::Apu;
+use crate::apu::apu::Apu;
+//use crate::stash_apu::Apu;
 use crate::cartridge;
 use crate::cpu::Interrupt;
 use crate::ppu::OAM_SIZE;
@@ -10,6 +11,7 @@ use super::cartridge::*;
 use super::interface::*;
 use super::pad::*;
 use super::vram::*;
+use bitflags::bitflags;
 
 pub const WRAM_SIZE: usize = 0x0800;
 pub const PPU_REG_SIZE: usize = 0x0008;
@@ -26,12 +28,37 @@ pub const CARTRIDGE_BASE_ADDR: u16 = 0x4020;
 /// Memory Access Dispatcher
 //#[derive(Clone)]
 
+bitflags! {
+    pub struct WatchOps: u8 {
+        const READ =  0b1;
+        const WRITE = 0b10;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchPoint {
+    pub address: u16,
+    pub ops: WatchOps,
+}
+
+// The DMC doesn't have direct access to the system bus within
+// apu.step() so any DMA needs to requested, and the result
+// will be passed back
+pub struct DmcDmaRequest {
+    pub address: u16
+}
+
 pub struct System {
 
     pub cpu_clock: u64,
 
     pub ppu_clock: u64,
     pub ppu: Ppu,
+
+    pub apu_clock: u64,
+    pub apu: Apu,
+
+    pub open_bus_value: u8,
 
     /// 0x0000 - 0x07ff: WRAM
     /// 0x0800 - 0x1f7ff: WRAM  Mirror x3
@@ -41,7 +68,8 @@ pub struct System {
     pub io_reg: [u8; APU_IO_REG_SIZE],
 
     // If the CPU starts an OAM DMA then the CPU will be suspended for 513 or 514 clock cycles
-    pub oam_dma_cpu_suspend_cycles: u16,
+    // If the CPU starts a DCM sample buffer DMA the CPU will be suspended for 4 clock cycles
+    pub dma_cpu_suspend_cycles: u16,
 
     /// The R / W request to the cassette is Emulation at the call destination,
     /// and the addr passed to the argument that switches the actual machine
@@ -56,37 +84,106 @@ pub struct System {
     /// 0x4016, 0x4017
     pub pad1: Pad,
     pub pad2: Pad,
+
+    pub watch_points: Vec<WatchPoint>,
+    pub watch_hit: bool,
 }
 
-impl SystemBus for System {
-    fn read_u8(&mut self, addr: u16) -> u8 {
-        match addr {
+impl System {
+
+    pub fn new(ppu: Ppu, apu: Apu, cartridge: Cartridge) -> Self{
+        Self {
+            cpu_clock: 0,
+
+            ppu_clock: 0,
+            ppu,
+
+            apu_clock: 0,
+            apu,
+
+            cartridge,
+
+            wram: [0; WRAM_SIZE],
+            io_reg: [0; APU_IO_REG_SIZE],
+
+            dma_cpu_suspend_cycles: 0,
+
+            pad1: Default::default(),
+            pad2: Default::default(),
+
+            open_bus_value: 0,
+
+            watch_points: vec![],
+            watch_hit: false,
+        }
+    }
+
+    fn apply_open_bus_bits(&mut self, mut value: u8, undefined_bits: u8) -> u8 {
+        value = value & !undefined_bits;
+        value |= self.open_bus_value & undefined_bits;
+        self.open_bus_value = value;
+        value
+    }
+
+    pub fn read_u8(&mut self, addr: u16) -> u8 {
+        if self.watch_points.len() > 0 {
+            for w in &self.watch_points {
+                if w.address == addr && w.ops.contains(WatchOps::READ) {
+                    self.watch_hit = true;
+                    break;
+                }
+            }
+        }
+        let (value, undefined_bits) = match addr {
             0x0000..=0x1fff => { // RAM
                 //println!("system read {addr:x}");
                 // mirror support
                 let index = usize::from(addr) % self.wram.len();
-                arr_read!(self.wram, index)
+                (arr_read!(self.wram, index), 0)
             }
             0x2000..=0x3fff => { // PPU I/O
-                self.ppu.read_u8(&mut self.cartridge, addr)
+                // PPU read handles open bus behaviour, so we assume there
+                // are no undefined bits at this point
+                (self.ppu.read_u8(&mut self.cartridge, addr), 0)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
                 match index {
-                    // TODO: APU
-                    0x16 => self.pad1.read_out(), // pad1
-                    0x17 => self.pad2.read_out(), // pad2
-                    _ => arr_read!(self.io_reg, index),
+                    0x14 => { // Write-only OAMDMA
+                        (0, 0xff)
+                    }
+                    0x16 => (self.pad1.read(), 0b1110_0000), // pad1
+                    0x17 => (self.pad2.read(), 0b1110_0000), // pad2
+                    _ => {
+                        self.apu.read(addr)
+                        //arr_read!(self.io_reg, index),
+                    }
                 }
             }
             _ => { // Cartridge
-                self.cartridge.read_u8(addr)
+                // FIXME: Probably shouldn't assume there's no open bus for cartridge reads
+                //println!("calling cartridge read_u8 for {addr:x}");
+                (self.cartridge.read_u8(addr), 0)
+            }
+        };
+
+        let value = self.apply_open_bus_bits(value, undefined_bits);
+        //if addr == 0x4016 {
+        //    println!("Read $4016 as {value:02x} / {value:08b}");
+        //}
+        value
+    }
+
+    pub fn write_u8(&mut self, addr: u16, data: u8) {
+        if self.watch_points.len() > 0 {
+            for w in &self.watch_points {
+                if w.address == addr && w.ops.contains(WatchOps::WRITE) {
+                    self.watch_hit = true;
+                    break;
+                }
             }
         }
 
-    }
-
-    fn write_u8(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x1fff => { // RAM
                 // mirror support
@@ -99,49 +196,36 @@ impl SystemBus for System {
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
                 match index {
-                    // TODO: APU
-                    0x14 => {
+                    0x14 => { // OAMDMA
                         //println!("start OAM DMA");
 
-                        self.oam_dma_cpu_suspend_cycles = 513;
+                        self.dma_cpu_suspend_cycles = 513;
                         if self.cpu_clock % 2 == 1 {
-                            self.oam_dma_cpu_suspend_cycles += 1;
+                            self.dma_cpu_suspend_cycles += 1;
                         }
                         self.run_dma((data as u16) << 8);
                     }
-                    0x16 => self.pad1.write_strobe((data & 0x01) == 0x01), // pad1
-                    0x17 => self.pad2.write_strobe((data & 0x01) == 0x01), // pad2
-                    _ => {}
+                    0x16 => {
+                        // This register is split between being an APU register and a controller register
+                        self.pad1.write_register(data);
+                        self.pad2.write_register(data);
+                        self.apu.write(addr, data);
+                    },
+                    0x17 => {
+                        // This register is split between being an APU register and a controller register
+                        self.apu.write(addr, data);
+                    }
+                    _ => {
+                        self.apu.write(addr, data);
+                    }
                 }
-                arr_write!(self.io_reg, index, data);
+                //arr_write!(self.io_reg, index, data);
             }
             _ => { // Cartridge
                 self.cartridge.write_u8(addr, data);
             }
         }
     }
-}
-
-impl System {
-
-    pub fn new(ppu: Ppu, cartridge: Cartridge) -> Self{
-        Self {
-            cpu_clock: 0,
-
-            ppu_clock: 0,
-            ppu,
-            cartridge,
-
-            wram: [0; WRAM_SIZE],
-            io_reg: [0; APU_IO_REG_SIZE],
-
-            oam_dma_cpu_suspend_cycles: 0,
-
-            pad1: Default::default(),
-            pad2: Default::default(),
-        }
-    }
-
     // An OAM DMA is currently handled immediately and assumed to not be observed by anything
     // (considering the CPU is going to be suspended)
     fn run_dma(&mut self, cpu_start_addr: u16) {
@@ -156,4 +240,21 @@ impl System {
         self.ppu_clock = ppu_clock;
         self.ppu.step(ppu_clock, &mut self.cartridge, fb)
     }
+
+    // Returns: number of cycles to pause the CPU (form DMC sample buffer DMA)
+    pub fn step_apu(&mut self) {
+        self.apu_clock += 1;
+        self.apu.step(self.apu_clock);
+    }
+
+    pub fn add_watch(&mut self, addr: u16, ops: WatchOps) {
+        if let Some(i) = self.watch_points.iter().position(|w| w.address == addr) {
+            self.watch_points.swap_remove(i);
+        }
+        self.watch_points.push(WatchPoint {
+            address: addr,
+            ops
+        })
+    }
+
 }

@@ -1,7 +1,42 @@
+
+use log::{error, debug, trace};
+use anyhow::anyhow;
+use anyhow::Result;
+
+use crate::binary::{self, NsfConfig, INesConfig};
+use crate::constants::*;
 use super::interface::*;
-use log::{debug, trace};
+
+
+
+
+pub const fn page_offset(page_no: usize, page_size: usize) -> usize {
+    page_no * page_size
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum TVSystem {
+    Ntsc,
+    Pal,
+    Dual,
+    Unknown
+}
+
+pub enum MapperId {
+    None,
+    Mapper000,
+    Mapper001,
+    Mapper031,
+}
 
 pub trait Mapper {
+    fn id(&self) -> MapperId;
+
+    // FIXME: find a less hacky way of special casing the 031 mapper
+    // for NSF playback
+    //fn nsf_config(&self) -> Option<NsfConfig>;
+
+    fn reset(&mut self);
 
     fn system_bus_read_u8(&mut self, addr: u16) -> u8;
     fn system_bus_write_u8(&mut self, addr: u16, data: u8);
@@ -10,32 +45,11 @@ pub trait Mapper {
     fn ppu_bus_write_u8(&mut self, addr: u16, data: u8);
 }
 
-enum INesNametableMirroring {
-    Vertical,
-    Horizontal
-}
-
-#[derive(Copy, Clone, Debug)]
-enum INesTVSystem {
-    Ntsc,
-    Pal,
-    Dual
-}
-struct INesConfig {
-    mapper_number: u8,
-    tv_system: INesTVSystem,
-    n_prg_rom_pages: usize,
-    n_prg_ram_pages: usize,
-    n_chr_data_pages: usize,
-    has_chr_ram: bool,
-    has_battery: bool,
-    has_trainer: bool,
-    nametable_mirroring: INesNametableMirroring,
-    ignore_mirror_control: bool,
-}
-
 struct NoCartridge;
 impl Mapper for NoCartridge {
+    fn id(&self) -> MapperId { MapperId::None }
+    //fn nsf_config(&self) -> Option<NsfConfig> { None }
+    fn reset(&mut self) {}
     fn system_bus_read_u8(&mut self, _addr: u16) -> u8 { 0 }
     fn system_bus_write_u8(&mut self, _addr: u16, _data: u8) { }
     fn ppu_bus_read_u8(&mut self, _addr: u16) -> u8 { 0 }
@@ -50,17 +64,23 @@ struct Mapper0 {
 }
 
 impl Mapper0 {
-    pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Mapper0 {
+    pub fn new(n_prg_ram_pages: usize, has_chr_ram: bool, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Mapper0 {
         Mapper0 {
             prg_rom,
-            prg_ram: vec![0u8; config.n_prg_ram_pages * PAGE_SIZE_16K],
-            has_chr_ram: config.has_chr_ram,
+            prg_ram: vec![0u8; n_prg_ram_pages * PAGE_SIZE_16K],
+            has_chr_ram: has_chr_ram,
             chr_data,
          }
+    }
+    pub fn new_from_ines(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Mapper0 {
+        Self::new(config.n_prg_ram_pages, config.has_chr_ram, prg_rom, chr_data)
     }
 }
 
 impl Mapper for Mapper0 {
+    fn id(&self) -> MapperId { MapperId::Mapper000 }
+    fn reset(&mut self) {}
+
     fn system_bus_read_u8(&mut self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7fff => { // PRG RAM
@@ -122,15 +142,6 @@ impl Mapper for Mapper0 {
             }
         }
     }
-}
-
-const PAGE_SIZE_2K: usize = 2048;
-const PAGE_SIZE_4K: usize = 4096;
-const PAGE_SIZE_8K: usize = 8192;
-const PAGE_SIZE_16K: usize = 16384;
-
-pub const fn page_offset(page_no: usize, page_size: usize) -> usize {
-    page_no * page_size
 }
 
 #[derive(Debug)]
@@ -292,6 +303,9 @@ impl Mapper1 {
 }
 
 impl Mapper for Mapper1 {
+    fn id(&self) -> MapperId { MapperId::Mapper001 }
+    fn reset(&mut self) {}
+
     fn system_bus_read_u8(&mut self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7fff => { // 8 KB PRG RAM bank, (optional)
@@ -392,6 +406,142 @@ impl Mapper for Mapper1 {
     }
 }
 
+struct Mapper031 {
+    pub prg_rom: Vec<u8>,
+    pub prg_ram: Vec<u8>, // 32k
+    pub chr_ram: Vec<u8>, // 8k
+    pub prg_bank_offsets: [u8; 8], // 8 x 4k banks
+    pub nsf_bios: Vec<u8>,
+}
+
+
+impl Mapper031 {
+    pub fn new(config: &NsfConfig, prg_rom_in: &[u8]) -> Mapper031 {
+        let padding = if config.is_bank_switched {
+            (config.load_address & 0xfff) as usize
+        } else {
+            (config.load_address - 0x8000) as usize
+        };
+
+        println!("NSF padding = {padding:x}, load address = {:x}", config.load_address);
+
+        let padded_prg_rom_len = prg_rom_in.len() + padding;
+        // Ensure we have at least 32k to cover 0x8000-0x7fff in the
+        // unbanked case
+        let padded_prg_rom_len = usize::max(padded_prg_rom_len, PAGE_SIZE_16K * 2);
+
+        let mut prg_rom = vec![0u8; padded_prg_rom_len];
+        prg_rom[padding..(padding + prg_rom_in.len())].copy_from_slice(prg_rom_in);
+
+        let prg_bank_offsets = if config.is_bank_switched {
+            config.banks
+        } else {
+            [0, 1, 2, 3, 4, 5, 6, 7]
+        };
+
+        let nsf_bios = include_bytes!("nsf-bios.bin");
+        let nsf_bios = nsf_bios.to_vec();
+        println!("NSF BIOS len = {}", nsf_bios.len());
+        println!("NSF BIOS = {nsf_bios:x?}");
+
+        Mapper031 {
+            prg_rom,
+            prg_ram: vec![0u8; 2 * PAGE_SIZE_16K],
+            chr_ram: vec![0u8; 1 * PAGE_SIZE_8K],
+            prg_bank_offsets: prg_bank_offsets,
+            nsf_bios,
+         }
+
+    }
+}
+
+impl Mapper for Mapper031 {
+    fn id(&self) -> MapperId { MapperId::Mapper031 }
+    fn reset(&mut self) {}
+
+    fn system_bus_read_u8(&mut self, addr: u16) -> u8 {
+        match addr {
+            // Unused memory region according to https://www.nesdev.org/wiki/NSF
+            // Used to store a minimal 'bios' that can bootstrap NSF playback.
+            0x5000..=0x5200 => {
+                let offset = addr - 0x5000;
+                //println!("bios read {offset:x} = {:x}", self.nsf_bios[offset as usize]);
+                self.nsf_bios[offset as usize]
+            }
+            0x6000..=0x7fff => { // PRG RAM
+                let ram_offset = (addr - 0x6000) as usize;
+                self.prg_ram[ram_offset]
+            }
+            0x8000..=0xffff => { // 8 x 4k bank switched rom
+                let addr = (addr - 0x8000) as usize;
+                let bank_index = (addr & 0b0111_0000_0000_0000) >> 12;
+
+                let bank_offset = self.prg_bank_offsets[bank_index];
+                let bank_offset = PAGE_SIZE_4K * bank_offset as usize;
+                let page_offset = addr & 0xfff;
+                let rom_addr = bank_offset + page_offset;
+
+                self.prg_rom[rom_addr]
+            }
+            _ => {
+                trace!("Invalid mapper read @ {}", addr);
+                0
+            }
+        }
+    }
+
+    fn system_bus_write_u8(&mut self, addr: u16, data: u8) {
+        match addr {
+            // Unused memory region according to https://www.nesdev.org/wiki/NSF
+            // Used to store a minimal 'bios' that can bootstrap NSF playback.
+            0x5000..=0x5200 => {
+                let offset = addr - 0x5000;
+
+                //panic!("bios write");
+                self.nsf_bios[offset as usize] = data;
+            }
+            0x6000..=0x7fff => {
+                let ram_offset = (addr - 0x6000) as usize;
+                self.prg_ram[ram_offset] = data;
+            }
+            0x5000..=0x5fff => {
+                let bank = addr & 0b111;
+                self.prg_bank_offsets[bank as usize] = data;
+            }
+            _ => { trace!("unhandled system bus write in cartridge"); }
+        }
+    }
+
+    fn ppu_bus_read_u8(&mut self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x1fff => {
+                let index = addr as usize;
+                arr_read!(self.chr_ram, index)
+            }
+            _ => {
+                trace!("Unexpected PPU read via mapper, address = {}", addr);
+                0
+             }
+        }
+    }
+
+    fn ppu_bus_write_u8(&mut self, addr: u16, data: u8) {
+        match addr {
+            0x0000..=0x1fff => {
+                let index = addr as usize;
+                arr_write!(self.chr_ram, index, data);
+            },
+            _ => {
+                trace!("Unexpected PPU write via mapper, address = {}", addr);
+            }
+        }
+    }
+}
+
+
+
+
+
 #[derive(Copy, Clone, Debug)]
 pub enum NameTableMirror {
     Unknown,
@@ -400,232 +550,92 @@ pub enum NameTableMirror {
     SingleScreen,
     FourScreen,
 }
-/// Cassete and mapper implement
-/// https://wiki.nesdev.com/w/index.php/List_of_mappers
-//#[derive(Clone)]
+
 pub struct Cartridge {
-    // Mapperの種類
     pub mapper: Box<dyn Mapper>,
-    /// Video領域での0x2000 ~ 0x2effのミラーリング設定
     pub nametable_mirror: NameTableMirror,
-    // 0x6000 ~ 0x7fffのカセット内RAMを有効化する
-    //pub is_exists_battery_backed_ram: bool,
-
-
-
-    // data size
-    //pub prg_rom_bytes: usize,
-    //pub chr_rom_bytes: usize,
-    // datas
-    //pub prg_rom: Vec<u8>,
-    //pub chr_rom: Vec<u8>,
-    //pub battery_packed_ram: Vec<u8>,
 }
-/*
-impl Clone for Cartridge {
-    fn clone(&self) -> Self {
-        Self {
-            mapper: self.mapper.clone(),
-            nametable_mirror: self.nametable_mirror.clone(),
-            is_exists_battery_backed_ram: self.is_exists_battery_backed_ram.clone(),
-            prg_rom_bytes: self.prg_rom_bytes.clone(),
-            chr_rom_bytes: self.chr_rom_bytes.clone(),
-            prg_rom: self.prg_rom.clone(),
-            chr_rom: self.chr_rom.clone(),
-            battery_packed_ram: self.battery_packed_ram.clone() }
-    }
-}
-*/
-
-/*
-impl Default for Cartridge {
-    fn default() -> Self {
-        Self {
-            mapper: Mapper::Unknown,
-            nametable_mirror: NameTableMirror::Unknown,
-            is_exists_battery_backed_ram: false,
-
-            prg_rom_bytes: 0,
-            chr_rom_bytes: 0,
-
-            prg_rom: vec![],
-            chr_rom: vec![],
-            battery_packed_ram: vec![],
-        }
-    }
-}
-*/
 
 impl Cartridge {
-    /// inesファイルから読み出してメモリ上に展開します
-    /// 組み込み環境でRAM展開されていなくても利用できるように、多少パフォーマンスを犠牲にしてもclosure経由で読み出します
-    /// Read from ines file and extract to memory
-    /// Read via closure at the expense of some performance so that it can be used in an embedded
-    /// environment without RAM expansion
-    pub fn from_ines_binary(read_func: impl Fn(usize) -> u8) -> Option<Cartridge> {
-        // header : 16byte
-        // trainer: 0 or 512byte
-        // prg rom: prg_rom_size * 16KB(0x4000)
-        // chr rom: prg_rom_size * 8KB(0x2000)
-        // playchoise inst-rom: 0 or 8192byte(8KB)
-        // playchoise prom: 16byte
 
-        debug!("Parsing iNes header...");
-
-        // header check
-        if read_func(0) != 0x4e {
-            // N
-            return None;
+    pub fn from_nsf_binary(config: &NsfConfig, nsf: &[u8]) -> Result<Cartridge> {
+        if !matches!(binary::check_type(nsf), binary::Type::NSF) {
+            return Err(anyhow!("Missing NSF file marker"));
         }
-        if read_func(1) != 0x45 {
-            // E
-            return None;
-        }
-        if read_func(2) != 0x53 {
-            // S
-            return None;
-        }
-        if read_func(3) != 0x1a {
-            // character break
-            return None;
+        let prg_len = config.prg_len;
+        if nsf.len() < (128 + prg_len as usize) {
+            return Err(anyhow!("Inconsistent binary size"));
         }
 
-        let mut has_chr_ram = false;
-        let n_prg_rom_pages = usize::from(read_func(4)); // * 16KBしてあげる
-        debug!("iNes: {} PRG ROM pages", n_prg_rom_pages);
-        let n_chr_rom_pages = usize::from(read_func(5)); // * 8KBしてあげる
-        debug!("iNes: {} CHR ROM pages", n_chr_rom_pages);
-        let mut n_chr_data_pages = n_chr_rom_pages;
-        if n_chr_data_pages == 0 {
-            has_chr_ram = true;
-            n_chr_data_pages = 1;
-        }
-        let n_prg_ram_pages = 2; // Need iNes 2.0 to configure properly
+        println!("NSF Config = {config:#?}");
 
-        let flags6 = read_func(6);
-        let flags7 = read_func(7);
-        let _flags8 = read_func(8);
-        let _flags9 = read_func(9);
-        let flags10 = read_func(10);
-        let tv_system = match flags10 & 0b11 {
-            0 => INesTVSystem::Ntsc,
-            2 => INesTVSystem::Pal,
-            1 | 3 => INesTVSystem::Dual,
+        let mapper = Box::new(Mapper031::new(&config, &nsf[128..(prg_len as usize)]));
+        Ok(Cartridge{
+            mapper,
+            nametable_mirror: NameTableMirror::Vertical, // Arbitrary
+        })
+    }
 
-            _ => { unreachable!() } // Rust compiler should know this is unreachable :/
-        };
-        debug!("iNes: TV System {:?}", tv_system);
-        // 11~15 unused_padding
-        debug_assert!(n_prg_rom_pages > 0);
-
-        // flags parsing
-        let is_mirroring_vertical = (flags6 & 0x01) == 0x01;
-
-        // FIXME: consolidate these seperate enums...
-        let nametable_mirroring = if is_mirroring_vertical {
-            INesNametableMirroring::Vertical
-        } else {
-            INesNametableMirroring::Horizontal
-        };
-        let nametable_mirror = if is_mirroring_vertical {
-            NameTableMirror::Vertical
-        } else {
-            NameTableMirror::Horizontal
-        };
-        debug!("iNes: Mirroring {:?}", nametable_mirror);
-
-        let has_battery = (flags6 & 0x02) == 0x02; // 0x6000 - 0x7fffのRAMを使わせる
-        debug!("iNes: Has Battery {}", has_battery);
-        let has_trainer = (flags6 & 0x04) == 0x04; // 512byte trainer at 0x7000-0x71ff in ines file
-        debug!("iNes: Has Trainer {}", has_trainer);
-
-        // 領域計算
-        let header_bytes = 16;
-        let trainer_bytes = if has_trainer { 512 } else { 0 };
-        let prg_rom_bytes = n_prg_rom_pages * PAGE_SIZE_16K;
-        let chr_rom_bytes = n_chr_rom_pages * PAGE_SIZE_8K;
-
-        let _trainer_baseaddr = header_bytes;
-        let prg_rom_baseaddr = header_bytes + trainer_bytes;
-        let chr_rom_baseaddr = header_bytes + trainer_bytes + prg_rom_bytes;
-
-        let mut mapper_number: u8 = 0;
-        let low_nibble = (flags6 & 0b11110000) >> 4;
-        mapper_number |= low_nibble;
-        let high_nibble = flags7 & 0xF0;
-        mapper_number |= high_nibble;
-
-        debug!("iNes: Mapper Number {}", mapper_number);
-
-        // Ignore the pre-allocated buffers and lets just allocate
-        // vectors dynamically instead (will probably break the
-        // embedding functionally)
-        let mut prg_rom = vec![0u8; n_prg_rom_pages * PAGE_SIZE_16K];
-        let mut chr_data = vec![0u8; n_chr_data_pages * PAGE_SIZE_8K];
-
-        // PRG-ROM
-        for index in 0..prg_rom_bytes {
-            let ines_binary_addr = prg_rom_baseaddr + index;
-            let byte = read_func(ines_binary_addr);
-            prg_rom[index] = byte;
+    pub fn from_ines_binary(config: &INesConfig, ines: &[u8]) -> Result<Cartridge> {
+        if !matches!(binary::check_type(ines), binary::Type::INES) {
+            return Err(anyhow!("Missing iNES file marker"));
         }
 
-        // CHR-ROM
-        if !has_chr_ram {
-            for index in 0..chr_rom_bytes {
-                let ines_binary_addr = chr_rom_baseaddr + index;
-                let byte = read_func(ines_binary_addr);
-                chr_data[index] = byte;
+        debug!("iNes: Mapper Number {}", config.mapper_number);
+
+        let prg_rom_bytes = config.prg_rom_bytes();
+        let mut prg_rom = vec![0u8; prg_rom_bytes];
+
+        let mut chr_data_bytes = usize::max(config.chr_ram_bytes(), config.chr_rom_bytes());
+        let mut chr_data = vec![0u8; chr_data_bytes];
+
+        // Load PRG-ROM
+        {
+            let ines_start = config.prg_rom_baseaddr;
+            let ines_end = ines_start + prg_rom_bytes;
+            if ines.len() < ines_end {
+                return Err(anyhow!("Inconsistent binary size: couldn't read PRG ROM data"));
             }
+            prg_rom[0..prg_rom_bytes].copy_from_slice(&ines[ines_start..ines_end]);
         }
 
-        let ines_config = INesConfig {
-            mapper_number,
-            tv_system,
-            n_prg_rom_pages,
-            n_prg_ram_pages,
-            n_chr_data_pages,
-            nametable_mirroring,
-            ignore_mirror_control: false, // FIXME
-            has_battery,
-            has_chr_ram,
-            has_trainer
-        };
+        // Load CHR-ROM
+        let chr_rom_bytes = config.chr_rom_bytes();
+        if chr_rom_bytes > 0 {
+            let ines_start = config.chr_rom_baseaddr;
+            let ines_end = ines_start + chr_rom_bytes;
+            if ines.len() < ines_end {
+                return Err(anyhow!("Inconsistent binary size: couldn't read CHR ROM data"));
+            }
+            chr_data[0..chr_rom_bytes].copy_from_slice(&ines[ines_start..ines_end]);
+        }
 
-        let mapper: Box<dyn Mapper> = match mapper_number {
+        let mut mapper: Box<dyn Mapper> = match config.mapper_number {
             0 => {
-                Box::new(Mapper0::new(&ines_config, prg_rom, chr_data))
+                Box::new(Mapper0::new_from_ines(config, prg_rom, chr_data))
             },
             1 => {
-                Box::new(Mapper1::new(&ines_config, prg_rom, chr_data))
+                Box::new(Mapper1::new(config, prg_rom, chr_data))
             },
             _ => {
-                unreachable!();
-                Box::new(NoCartridge)
+                return Err(anyhow!("Unsupported mapper number {}", config.mapper_number));
             }
         };
-        //debug_assert!(self.mapper != Mapper::Unknown);
 
-        /* FIXME: add trainer support back later if necessary
-        // Battery Packed RAMの初期値
-        if is_exists_trainer {
-            // 0x7000 - 0x71ffに展開する
-            for index in 0..INES_TRAINER_DATA_SIZE {
-                let ines_binary_addr = trainer_baseaddr + index;
-                self.prg_rom[index] = read_func(ines_binary_addr);
+        if config.has_trainer {
+            let ines_start = config.trainer_baseaddr.unwrap();
+            let ines_end = ines_start + 512;
+            if ines.len() < ines_end {
+                return Err(anyhow!("Inconsistent binary size: couldn't read trainer data"));
+            }
+            for i in ines_start..ines_end {
+                mapper.system_bus_write_u8(0x7000 + (i as u16), ines[i]);
             }
         }
-        */
 
-        // rom sizeをセットしとく
-        // Set the rom size
-        //self.prg_rom_bytes = prg_rom_bytes;
-        //self.chr_rom_bytes = chr_rom_bytes;
-
-        // やったね
-        Some(Cartridge {
+        Ok(Cartridge {
             mapper,
-            nametable_mirror
+            nametable_mirror: config.nametable_mirror
         })
     }
 
@@ -650,7 +660,6 @@ impl VideoBus for Cartridge {
     fn read_video_u8(&mut self, addr: u16) -> u8 {
         self.mapper.ppu_bus_read_u8(addr)
     }
-    /// CHR_RAM対応も込めて書き換え可能にしておく
     fn write_video_u8(&mut self, addr: u16, data: u8) {
         self.mapper.ppu_bus_write_u8(addr, data);
     }

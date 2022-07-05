@@ -124,13 +124,15 @@ struct FetchedOperand {
 
     /// The number of clock cycles that it took to fetch the
     /// effective operand
-    pub fetch_cyc: u8
+    pub oops_cyc: u8
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Instruction {
     pub op: Opcode,
     pub mode: AddressingMode,
+
+    // Base number of cycles without 'oops' cycles from fetching across page boundaries
     pub cyc: u8
 }
 
@@ -142,7 +144,7 @@ impl Instruction {
             0x69 => Instruction { op: Opcode::ADC, mode: AddressingMode::Immediate, cyc: 2 },
             0x65 => Instruction { op: Opcode::ADC, mode: AddressingMode::ZeroPage, cyc: 3 },
             0x75 => Instruction { op: Opcode::ADC, mode: AddressingMode::ZeroPageX, cyc: 4 },
-            0x6d => Instruction { op: Opcode::ADC, mode: AddressingMode::Absolute, cyc: 5 },
+            0x6d => Instruction { op: Opcode::ADC, mode: AddressingMode::Absolute, cyc: 4 },
             0x7d => Instruction { op: Opcode::ADC, mode: AddressingMode::AbsoluteX, cyc: 4 },
             0x79 => Instruction { op: Opcode::ADC, mode: AddressingMode::AbsoluteY, cyc: 4 },
             0x61 => Instruction { op: Opcode::ADC, mode: AddressingMode::IndirectX, cyc: 6 },
@@ -224,7 +226,7 @@ impl Instruction {
             0xde => Instruction { op: Opcode::DEC, mode: AddressingMode::AbsoluteX, cyc: 7 },
 
             0xca => Instruction { op: Opcode::DEX, mode: AddressingMode::Implied, cyc: 2 },
-            0x88 => Instruction { op: Opcode::DEY, mode: AddressingMode::Implied, cyc: 3 },
+            0x88 => Instruction { op: Opcode::DEY, mode: AddressingMode::Implied, cyc: 2 },
 
             /* *************** load/store op ***************  */
             0xa9 => Instruction { op: Opcode::LDA, mode: AddressingMode::Immediate, cyc: 2 },
@@ -435,9 +437,9 @@ impl Instruction {
             0x43 => Instruction { op: Opcode::SRE, mode: AddressingMode::IndirectX, cyc: 8 },
             0x53 => Instruction { op: Opcode::SRE, mode: AddressingMode::IndirectY, cyc: 8 },
 
-            0x9e => Instruction { op: Opcode::SXA, mode: AddressingMode::AbsoluteY, cyc: 8 },
+            0x9e => Instruction { op: Opcode::SXA, mode: AddressingMode::AbsoluteY, cyc: 5 },
 
-            0x9c => Instruction { op: Opcode::SYA, mode: AddressingMode::AbsoluteX, cyc: 8 },
+            0x9c => Instruction { op: Opcode::SYA, mode: AddressingMode::AbsoluteX, cyc: 5 },
 
             0x0c => Instruction { op: Opcode::TOP, mode: AddressingMode::Absolute, cyc: 4 },
             0x1c => Instruction { op: Opcode::TOP, mode: AddressingMode::AbsoluteX, cyc: 4 },
@@ -696,10 +698,20 @@ impl Instruction {
 }
 
 impl Cpu {
+
+    fn clock_cpu(&mut self, system: &mut System) {
+
+    }
+
     /// Fetch 1 byte from PC and after fetching, advance the PC by one
     fn fetch_u8(&mut self, system: &mut System) -> u8 {
+        //println!("calling system.read_u8({:x}", self.pc);
         let data = system.read_u8(self.pc);
         self.pc = self.pc + 1;
+
+        // "Each byte of memory read or written adds 1 more cycle to the instruction"
+        self.clock_cpu(system);
+
         data
     }
 
@@ -718,56 +730,60 @@ impl Cpu {
         }
 
         system.write_u8(addr, data);
+
+        // "Each byte of memory read or written adds 1 more cycle to the instruction"
+        self.clock_cpu(system);
     }
 
     /// Fetch the operand.
     /// Depending on the Addressing mode, the PC also advances.
     /// When implementing, Cpu::fetch when reading the operand immediately after the instruction, otherwise System::read
-    fn fetch_operand(&mut self, system: &mut System, mode: AddressingMode) -> FetchedOperand {
+    fn fetch_operand(&mut self, system: &mut System, mode: AddressingMode, force_oops: bool) -> FetchedOperand {
         let operand = match mode {
-            AddressingMode::Implied => FetchedOperand { raw_operand: 0, operand: 0, fetch_cyc: 0 },
-            AddressingMode::Accumulator => FetchedOperand { raw_operand: 0, operand: 0, fetch_cyc: 1 },
+            AddressingMode::Implied => FetchedOperand { raw_operand: 0, operand: 0, oops_cyc: 0 },
+            AddressingMode::Accumulator => FetchedOperand { raw_operand: 0, operand: 0, oops_cyc: 0 },
             AddressingMode::Immediate => {
                 let in_operand = self.fetch_u8(system) as u16;
-                FetchedOperand { raw_operand: in_operand, operand: u16::from(in_operand), fetch_cyc: 1 }
+                FetchedOperand { raw_operand: in_operand, operand: u16::from(in_operand), oops_cyc: 0 }
             },
             AddressingMode::Absolute => {
                 let in_operand = self.fetch_u16(system);
-                FetchedOperand { raw_operand: in_operand, operand: in_operand, fetch_cyc: 3 }
+                FetchedOperand { raw_operand: in_operand, operand: in_operand, oops_cyc: 0 }
             },
             AddressingMode::ZeroPage => {
                 let in_operand = self.fetch_u8(system) as u16;
-                FetchedOperand { raw_operand: in_operand, operand: in_operand, fetch_cyc: 2 }
+                FetchedOperand { raw_operand: in_operand, operand: in_operand, oops_cyc: 0 }
             },
             AddressingMode::ZeroPageX => {
                 let in_operand = self.fetch_u8(system);
-                FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.x)), fetch_cyc: 3 }
+                FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.x)), oops_cyc: 0 }
             }
             AddressingMode::ZeroPageY => {
                 let in_operand = self.fetch_u8(system);
-                FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.y)), fetch_cyc: 3 }
+                FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.y)), oops_cyc: 0 }
             }
             AddressingMode::AbsoluteX => {
                 let in_operand = self.fetch_u16(system);
                 let data = in_operand.wrapping_add(u16::from(self.x));
-                let additional_cyc =
-                    if (data & 0xff00u16) != (data.wrapping_add(u16::from(self.x)) & 0xff00u16) {
+                let oops_cyc =
+                    if (in_operand & 0xff00u16) != (data & 0xff00u16) || force_oops {
+                        //println!("AbsoluteX oops: operand = {in_operand:x} addr = {data:x}");
                         1
                     } else {
                         0
                     };
-                FetchedOperand { raw_operand: in_operand as u16, operand: data, fetch_cyc: 3 + additional_cyc }
+                FetchedOperand { raw_operand: in_operand as u16, operand: data, oops_cyc }
             }
             AddressingMode::AbsoluteY => {
                 let in_operand = self.fetch_u16(system);
                 let data = in_operand.wrapping_add(u16::from(self.y));
-                let additional_cyc =
-                    if (data & 0xff00u16) != (data.wrapping_add(u16::from(self.y)) & 0xff00u16) {
+                let oops_cyc =
+                    if (in_operand & 0xff00u16) != (data & 0xff00u16) || force_oops {
                         1
                     } else {
                         0
                     };
-                FetchedOperand { raw_operand: in_operand as u16, operand: data, fetch_cyc: 3 + additional_cyc }
+                FetchedOperand { raw_operand: in_operand as u16, operand: data, oops_cyc }
             }
             AddressingMode::Relative => {
                 let in_operand = self.fetch_u8(system);
@@ -782,13 +798,13 @@ impl Cpu {
                 //debug_assert!(signed_addr < 0x10000);
 
                 //let data = signed_addr as u16;
-                let additional_cyc = if (data & 0xff00u16) != (self.pc & 0xff00u16) {
+                let oops_cyc = if (data & 0xff00u16) != (self.pc & 0xff00u16) || force_oops {
                     1
                 } else {
                     0
                 };
 
-                FetchedOperand { raw_operand: in_operand as u16, operand: data, fetch_cyc: 1 + additional_cyc }
+                FetchedOperand { raw_operand: in_operand as u16, operand: data, oops_cyc }
             }
             AddressingMode::AbsoluteIndirect => {
                 let src_addr_lower = self.fetch_u8(system);
@@ -805,7 +821,7 @@ impl Cpu {
                 let dst_data_upper = u16::from(system.read_u8(dst_addr_upper));
 
                 let indirect = dst_data_lower | (dst_data_upper << 8);
-                FetchedOperand { raw_operand: dst_addr_lower, operand: indirect, fetch_cyc: 5 }
+                FetchedOperand { raw_operand: dst_addr_lower, operand: indirect, oops_cyc: 0 }
             }
             AddressingMode::IndirectX => {
                 let src_addr = self.fetch_u8(system);
@@ -816,7 +832,7 @@ impl Cpu {
                     u16::from(system.read_u8(u16::from(dst_addr.wrapping_add(1))));
 
                 let indirect = data_lower | (data_upper << 8);
-                FetchedOperand { raw_operand: src_addr as u16, operand: indirect, fetch_cyc: 5 }
+                FetchedOperand { raw_operand: src_addr as u16, operand: indirect, oops_cyc: 0 }
             }
             AddressingMode::IndirectY => {
                 let src_addr = self.fetch_u8(system);
@@ -827,13 +843,13 @@ impl Cpu {
 
                 let base_data = data_lower | (data_upper << 8);
                 let indirect = base_data.wrapping_add(u16::from(self.y));
-                let additional_cyc = if (base_data & 0xff00u16) != (indirect & 0xff00u16) {
+                let oops_cyc = if (base_data & 0xff00u16) != (indirect & 0xff00u16) || force_oops {
                     1
                 } else {
                     0
                 };
 
-                FetchedOperand { raw_operand: src_addr as u16, operand: indirect, fetch_cyc: 5 + additional_cyc }
+                FetchedOperand { raw_operand: src_addr as u16, operand: indirect, oops_cyc }
             }
         };
 
@@ -857,22 +873,22 @@ impl Cpu {
                 unreachable!()
             },
             // Use the value of the a register
-            AddressingMode::Accumulator => (self.fetch_operand(system, mode), self.a),
+            AddressingMode::Accumulator => (self.fetch_operand(system, mode, false), self.a),
             // Immediate value uses 1 byte of data immediately after opcode as it is
             AddressingMode::Immediate => {
-                //let FetchedOperand { data, fetch_cyc: cyc } = self.fetch_operand(system, mode);
-                let fetched_operand = self.fetch_operand(system, mode);
+                //let FetchedOperand { data, fetch_cyc: cyc } = self.fetch_operand(system, mode, false);
+                let fetched_operand = self.fetch_operand(system, mode, false);
                 debug_assert!(fetched_operand.operand < 0x100u16);
                 //(FetchedOperand { data, fetch_cyc: cyc }, data as u8)
                 (fetched_operand, fetched_operand.operand as u8)
             }
             // Others pull back the data from the returned address. May not be used
             _ => {
-                let fetched_operand = self.fetch_operand(system, mode);
+                let fetched_operand = self.fetch_operand(system, mode, false);
                 let data = system.read_u8(fetched_operand.operand);
                 (fetched_operand, data)
 
-                //let FetchedOperand { data: addr, fetch_cyc: cyc } = self.fetch_operand(system, mode);
+                //let FetchedOperand { data: addr, fetch_cyc: cyc } = self.fetch_operand(system, mode, false);
                 //let data = system.read_u8(addr, false);
                 //(FetchedOperand { data: addr, fetch_cyc: cyc }, data)
             }
@@ -889,7 +905,16 @@ impl Cpu {
     /// Execute the instruction
     /// returns: number of cycles
     /// https://www.nesdev.org/obelisk-6502-guide/reference.html
-    pub fn step(&mut self, system: &mut System) -> u8 {
+    pub fn step(&mut self, system: &mut System, cpu_clock: u64) -> u8 {
+        if self.breakpoints_paused == false && self.breakpoints.len() > 0 {
+            for b in &self.breakpoints {
+                if b.addr == self.pc {
+                    self.breakpoint_hit = true;
+                    return 0;
+                }
+            }
+        }
+        self.breakpoints_paused = false;
 
         #[cfg(feature="trace")]
         {
@@ -898,8 +923,9 @@ impl Cpu {
             self.trace.saved_y = self.y;
             self.trace.saved_sp = self.sp;
             self.trace.saved_p = self.p;
-            self.trace.saved_cyc = self.trace.cycle_count;
+            self.trace.cycle_count = cpu_clock;
         }
+
         // Address where the instruction is placed
         let inst_pc = self.pc;
         let inst_code = self.fetch_u8(system);
@@ -910,15 +936,7 @@ impl Cpu {
             /* *************** binary op ***************  */
             // The result is stored in the a register, so the address of the operand is not used
             Opcode::ADC => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let tmp = u16::from(self.a)
                     + u16::from(arg)
@@ -935,18 +953,10 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.write_overflow_flag(is_overflow);
                 self.a = result;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::SBC => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let (data1, is_carry1) = self.a.overflowing_sub(arg);
                 let (result, is_carry2) =
@@ -963,18 +973,10 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.write_overflow_flag(is_overflow);
                 self.a = result;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::AND => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = self.a & arg;
                 let is_zero = result == 0;
@@ -983,18 +985,10 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = result;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::EOR => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = self.a ^ arg;
 
@@ -1004,18 +998,12 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = result;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::ORA => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, raw_operand, .. }, arg) = self.fetch_operand_and_value(system, mode);
+
+                //println!("{:x} ORA: {mode:?}, raw operand = {raw_operand}, operand = {_addr}, fetch oops cycles = {oops_cyc}, x = {}, y = {}", inst_code, self.x, self.y);
 
                 let result = self.a | arg;
 
@@ -1025,24 +1013,16 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = result;
-                1 + cyc
+
+                expected_cyc + oops_cyc
             }
-            /* *************** shift/rotate op ***************  */
-            // aレジスタを操作する場合があるので注意
             Opcode::ASL => {
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { raw_operand, operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
+                //println!("{:x} ASL: {mode:?}, raw operand = {raw_operand}, operand = {addr}, fetch oops cycles = {oops_cyc}, x = {}, y = {}", inst_code, self.x, self.y);
                 let result = arg.wrapping_shl(1);
 
-                let is_carry = (arg & 0x80) == 0x80; // shift前データでわかるよね
+                let is_carry = (arg & 0x80) == 0x80;
                 let is_zero = result == 0;
                 let is_negative = (result & 0x80) == 0x80;
 
@@ -1052,28 +1032,13 @@ impl Cpu {
 
                 if mode == AddressingMode::Accumulator {
                     self.a = result;
-                    1 + cyc
                 } else {
-                    /*
-                    #[cfg(feature="trace")]
-                    {
-                        self.trace.stored_mem_value = result;
-                    }*/
-                    // Write back the calculation result to the original address
                     self.write_u8(system, addr, result);
-                    3 + cyc
                 }
+                expected_cyc// + oops_cyc
             }
             Opcode::LSR => {
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = arg.wrapping_shr(1);
 
@@ -1087,27 +1052,13 @@ impl Cpu {
 
                 if mode == AddressingMode::Accumulator {
                     self.a = result;
-                    1 + cyc
                 } else {
-                    /*
-                    #[cfg(feature="trace")]
-                    {
-                        self.trace.stored_mem_value = result;
-                    }*/
                     self.write_u8(system, addr, result);
-                    3 + cyc
                 }
+                expected_cyc// + oops_cyc
             }
             Opcode::ROL => {
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result =
                     arg.wrapping_shl(1) | (if self.read_carry_flag() { 0x01 } else { 0x00 });
@@ -1122,27 +1073,13 @@ impl Cpu {
 
                 if mode == AddressingMode::Accumulator {
                     self.a = result;
-                    1 + cyc
                 } else {
-                    /*
-                    #[cfg(feature="trace")]
-                    {
-                        self.trace.stored_mem_value = result;
-                    }*/
                     self.write_u8(system, addr, result);
-                    3 + cyc
                 }
+                expected_cyc// + oops_cyc
             }
             Opcode::ROR => {
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result =
                     arg.wrapping_shr(1) | (if self.read_carry_flag() { 0x80 } else { 0x00 });
@@ -1157,29 +1094,13 @@ impl Cpu {
 
                 if mode == AddressingMode::Accumulator {
                     self.a = result;
-                    1 + cyc
                 } else {
-                    /*
-                    #[cfg(feature="trace")]
-                    {
-                        self.trace.stored_mem_value = result;
-                    }*/
                     self.write_u8(system, addr, result);
-                    3 + cyc
                 }
+                expected_cyc// + oops_cyc
             }
-            /* *************** inc/dec op ***************  */
-            // accumulatorは使わない, x,yレジスタを使うバージョンはImplied
             Opcode::INC => {
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = arg.wrapping_add(1);
 
@@ -1188,14 +1109,9 @@ impl Cpu {
 
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result;
-                }
-                */
+
                 self.write_u8(system, addr, result);
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::INX => {
                 let result = self.x.wrapping_add(1);
@@ -1206,7 +1122,7 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.x = result;
-                2
+                expected_cyc
             }
             Opcode::INY => {
                 let result = self.y.wrapping_add(1);
@@ -1217,18 +1133,10 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.y = result;
-                2
+                expected_cyc
             }
             Opcode::DEC => {
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = arg.wrapping_sub(1);
 
@@ -1237,14 +1145,9 @@ impl Cpu {
 
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result;
-                }
-                */
+
                 self.write_u8(system, addr, result);
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::DEX => {
                 let result = self.x.wrapping_sub(1);
@@ -1266,14 +1169,14 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.y = result;
-                2
+                expected_cyc
             }
 
             /* *************** load/store op ***************  */
             // Accumualtorはなし
             // store系はargはいらない, Immediateなし
             Opcode::LDA => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
                 /*
                 #[cfg(feature="trace")]
                 {
@@ -1289,10 +1192,10 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = arg;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::LDX => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
                 /*
                 #[cfg(feature="trace")]
                 {
@@ -1308,10 +1211,10 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.x = arg;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::LDY => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
                 /*
                 #[cfg(feature="trace")]
                 {
@@ -1327,10 +1230,10 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.y = arg;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::STA => {
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, true);
 
                 /*
                 #[cfg(feature="trace")]
@@ -1341,10 +1244,10 @@ impl Cpu {
                 }*/
 
                 system.write_u8(addr, self.a);
-                1 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::STX => {
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, true);
 
                 /*
                 #[cfg(feature="trace")]
@@ -1355,10 +1258,10 @@ impl Cpu {
                 }*/
 
                 system.write_u8(addr, self.x);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::STY => {
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, true);
 
                 /*
                 #[cfg(feature="trace")]
@@ -1369,52 +1272,44 @@ impl Cpu {
                 }*/
 
                 system.write_u8(addr, self.y);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
 
             /* *************** set/clear flag ***************  */
             // すべてImplied
             Opcode::SEC => {
                 self.write_carry_flag(true);
-                2
+                expected_cyc
             }
             Opcode::SED => {
                 self.write_decimal_flag(true);
-                2
+                expected_cyc
             }
             Opcode::SEI => {
                 self.write_interrupt_flag(true);
-                2
+                expected_cyc
             }
             Opcode::CLC => {
                 self.write_carry_flag(false);
-                2
+                expected_cyc
             }
             Opcode::CLD => {
                 self.write_decimal_flag(false);
-                2
+                expected_cyc
             }
             Opcode::CLI => {
                 self.write_interrupt_flag(false);
-                2
+                expected_cyc
             }
             Opcode::CLV => {
                 self.write_overflow_flag(false);
-                2
+                expected_cyc
             }
 
             /* *************** compare ***************  */
             // Accumulatorなし
             Opcode::CMP => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let (result, _) = self.a.overflowing_sub(arg);
 
@@ -1425,18 +1320,10 @@ impl Cpu {
                 self.write_carry_flag(is_carry);
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::CPX => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let (result, _) = self.x.overflowing_sub(arg);
 
@@ -1447,18 +1334,10 @@ impl Cpu {
                 self.write_carry_flag(is_carry);
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::CPY => {
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let (result, _) = self.y.overflowing_sub(arg);
 
@@ -1469,194 +1348,126 @@ impl Cpu {
                 self.write_carry_flag(is_carry);
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
 
             /* *************** jump/return ***************  */
             // JMP: Absolute or Indirect, JSR: Absolute, RTI,RTS: Implied
             Opcode::JMP => {
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
                 self.pc = addr;
-                cyc
+                expected_cyc + oops_cyc
             }
             Opcode::JSR => {
-                let FetchedOperand { operand: addr, fetch_cyc: _, .. } = self.fetch_operand(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
-                // opcodeがあったアドレスを取得する(opcode, operand fetchで3進んでる)
+                let FetchedOperand { operand: addr, oops_cyc: _, .. } = self.fetch_operand(system, mode, false);
                 let opcode_addr = inst_pc;
-
-                // pushはUpper, Lower
                 let ret_addr = opcode_addr + 2;
                 self.stack_push(system, (ret_addr >> 8) as u8);
                 self.stack_push(system, (ret_addr & 0xff) as u8);
                 self.pc = addr;
-                6
+                expected_cyc
             }
             Opcode::RTI => {
                 self.p = unsafe { Flags::from_bits_unchecked(self.stack_pop(system)) & Flags::REAL };
                 let pc_lower = self.stack_pop(system);
                 let pc_upper = self.stack_pop(system);
                 self.pc = ((pc_upper as u16) << 8) | (pc_lower as u16);
-                6
+                expected_cyc
             }
             Opcode::RTS => {
                 let pc_lower = self.stack_pop(system);
                 let pc_upper = self.stack_pop(system);
                 self.pc = (((pc_upper as u16) << 8) | (pc_lower as u16)) + 1;
-                6
+                expected_cyc
             }
 
             /* *************** branch ***************  */
-            // Relativeのみ
             Opcode::BCC => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if !self.read_carry_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BCS => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if self.read_carry_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BEQ => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if self.read_zero_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BNE => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                debug_assert!(_in_operand < 0x100);
-
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                   self.trace.effective_address = addr;
-                }*/
                 if !self.read_zero_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BMI => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if self.read_negative_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BPL => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if !self.read_negative_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BVC => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if !self.read_overflow_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
             Opcode::BVS => {
                 debug_assert!(mode == AddressingMode::Relative);
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
                 if self.read_overflow_flag() {
                     self.pc = addr;
-                    1 + cyc + 1
+                    expected_cyc + oops_cyc + 1
                 } else {
-                    1 + cyc
+                    expected_cyc
                 }
             }
 
@@ -1664,11 +1475,11 @@ impl Cpu {
             // Impliedのみ
             Opcode::PHA => {
                 self.stack_push(system, self.a);
-                3
+                expected_cyc
             }
             Opcode::PHP => {
                 self.stack_push(system, (self.p | Flags::BREAK_HIGH | Flags::BREAK_LOW).bits());
-                3
+                expected_cyc
             }
             Opcode::PLA => {
                 let result = self.stack_pop(system);
@@ -1679,12 +1490,12 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = result;
-                4
+                expected_cyc
             }
             Opcode::PLP => {
                 self.p = unsafe { Flags::from_bits_unchecked(self.stack_pop(system)) & Flags::REAL };
-                println!("Status after PLP = {:?}", self.p);
-                4
+                //println!("Status after PLP = {:?}", self.p);
+                expected_cyc
             }
 
             /* *************** transfer ***************  */
@@ -1696,7 +1507,7 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.x = self.a;
-                2
+                expected_cyc
             }
             Opcode::TAY => {
                 let is_zero = self.a == 0;
@@ -1705,7 +1516,7 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.y = self.a;
-                2
+                expected_cyc
             }
             Opcode::TSX => {
                 let result = (self.sp & 0xff) as u8;
@@ -1716,7 +1527,7 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.x = result;
-                2
+                expected_cyc
             }
             Opcode::TXA => {
                 let is_zero = self.x == 0;
@@ -1725,12 +1536,12 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = self.x;
-                2
+                expected_cyc
             }
             Opcode::TXS => {
                 // txs does not rewrite status
                 self.sp = self.x;
-                2
+                expected_cyc
             }
             Opcode::TYA => {
                 let is_zero = self.y == 0;
@@ -1739,7 +1550,7 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.a = self.y;
-                2
+                expected_cyc
             }
 
             /* *************** other ***************  */
@@ -1747,20 +1558,13 @@ impl Cpu {
                 // Implied
                 //self.write_break_flag(true);
                 self.interrupt(system, Interrupt::BRK);
-                7
+                expected_cyc
             }
             Opcode::BIT => {
                 // ZeroPage or Absolute
                 // Requires non-destructive read, so don't call fetch_and_deref...
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }
-*/
                 let arg = system.read_u8(addr);
 
                 #[cfg(feature="trace")]
@@ -1775,11 +1579,10 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.write_zero_flag(is_zero);
                 self.write_overflow_flag(is_overflow);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::NOP => {
-                //なにもしない、Implied
-                2
+                expected_cyc
             }
             /* *************** unofficial1 ***************  */
 
@@ -1787,15 +1590,7 @@ impl Cpu {
                 // AND byte with accumulator. If result is negative then carry is set. Status flags: N,Z,C
 
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = self.a & arg;
                 let is_zero = result == 0;
@@ -1805,18 +1600,10 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.write_carry_flag(is_negative);
                 self.a = result;
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::AAX => {
-                // memory = A & X, flag操作はなし
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, _arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }*/
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, _arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = self.a & self.x;
 
@@ -1825,20 +1612,11 @@ impl Cpu {
                     self.trace.stored_mem_value = result;
                 }
                 self.write_u8(system, addr, result);
-                1 + cyc
+                expected_cyc + oops_cyc
             }
             Opcode::ARR => {
-                // Immediateのみ、Carry=bit6, V=bit6 xor bit5
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (_, arg) = self.fetch_operand_and_value(system, mode);
 
                 let src = self.a & arg;
                 let result =
@@ -1855,20 +1633,11 @@ impl Cpu {
                 self.write_overflow_flag(is_overflow);
 
                 self.a = result;
-                1 + cyc
+                expected_cyc
             }
             Opcode::ASR => {
-                // Immediateのみ、(A & #Imm) >> 1
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (_, arg) = self.fetch_operand_and_value(system, mode);
 
                 let src = self.a & arg;
                 let result = src.wrapping_shr(1);
@@ -1882,7 +1651,7 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
 
                 self.a = result;
-                1 + cyc
+                expected_cyc
             }
             Opcode::ATX => {
 
@@ -1895,15 +1664,7 @@ impl Cpu {
                 // what we implement here.
 
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (_, arg) = self.fetch_operand_and_value(system, mode);
 
                 self.a = arg;
                 self.x = arg;
@@ -1914,22 +1675,15 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
 
-                1 + cyc
+                expected_cyc
             },
             Opcode::AXA => {
                 // http://www.ffd2.com/fridge/docs/6502-NMOS.extra.opcodes
                 // This opcode stores the result of A AND X AND the high byte of the target
                 // address of the operand +1 in memory.
 
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }
-*/
                 let high = (addr >> 8) as u8;
                 let result = self.a & self.x & high.wrapping_add(1);
 
@@ -1939,7 +1693,7 @@ impl Cpu {
                 }
                 self.write_u8(system, addr, result);
 
-                1 + cyc
+                expected_cyc// + oops_cyc
             },
             Opcode::AXS => { // Sometimes called SAX
                 // From http://www.ffd2.com/fridge/docs/6502-NMOS.extra.opcodes (called SAX):
@@ -1953,15 +1707,7 @@ impl Cpu {
                 //    flag.
 
                 debug_assert!(mode == AddressingMode::Immediate);
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                    /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (_, arg) = self.fetch_operand_and_value(system, mode);
 
                 let result = self.a & self.x;
                 let (result, overflow) = result.overflowing_sub(arg);
@@ -1973,20 +1719,16 @@ impl Cpu {
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
                 self.x = result;
-                1 + cyc
+
+                expected_cyc
             }
-            Opcode::LAR => todo!(),
+            Opcode::LAR => {
+                let (FetchedOperand { oops_cyc, .. }, _arg) = self.fetch_operand_and_value(system, mode);
+                // TODO
+                expected_cyc + oops_cyc
+            },
             Opcode::LAX => {
-                // A = X = argsっぽい
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                    self.trace.loaded_mem_value = arg;
-                }
-                */
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, arg) = self.fetch_operand_and_value(system, mode);
 
                 let is_zero = arg == 0;
                 let is_negative = (arg & 0x80) == 0x80;
@@ -1995,21 +1737,12 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.a = arg;
                 self.x = arg;
-                1 + cyc
+
+                expected_cyc + oops_cyc
             }
             Opcode::DCP => {
-                // DEC->CMPっぽい
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
-                // DEC
                 let dec_result = arg.wrapping_sub(1);
 
                 #[cfg(feature="trace")]
@@ -2028,47 +1761,25 @@ impl Cpu {
                 self.write_carry_flag(is_carry);
                 self.write_zero_flag(is_zero);
                 self.write_negative_flag(is_negative);
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::DOP => {
                 // Fetch but do nothing
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, _arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                }*/
-                1 + cyc
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, _arg) = self.fetch_operand_and_value(system, mode);
+                expected_cyc + oops_cyc
             }
             Opcode::ISC => {
-                // INC->SBC
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
-                // INC
                 let inc_result = arg.wrapping_add(1);
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = inc_result;
-                }*/
-                system.write_u8(addr, inc_result);
 
-                // SBC
+                self.write_u8(system, addr, inc_result);
+
                 let (data1, is_carry1) = self.a.overflowing_sub(inc_result);
                 let (result, is_carry2) =
                     data1.overflowing_sub(if self.read_carry_flag() { 0 } else { 1 });
 
-                let is_carry = !(is_carry1 || is_carry2); // アンダーフローが発生したら0
+                let is_carry = !(is_carry1 || is_carry2);
                 let is_zero = result == 0;
                 let is_negative = (result & 0x80) == 0x80;
                 let is_overflow = (((self.a ^ inc_result) & 0x80) == 0x80)
@@ -2079,34 +1790,19 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.write_overflow_flag(is_overflow);
                 self.a = result;
-                1 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::RLA => {
-                // ROL -> AND
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
-                // ROL
                 let result_rol =
                     arg.wrapping_shl(1) | (if self.read_carry_flag() { 0x01 } else { 0x00 });
 
                 let is_carry = (arg & 0x80) == 0x80;
                 self.write_carry_flag(is_carry);
 
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result_rol;
-                }
-                system.write_u8(addr, result_rol);
+                self.write_u8(system, addr, result_rol);
 
-                // AND
                 let result_and = self.a & result_rol;
 
                 let is_zero = result_and == 0;
@@ -2117,34 +1813,19 @@ impl Cpu {
 
                 self.a = result_and;
 
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::RRA => {
-                // ROR -> ADC
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
-                // ROR
                 let result_ror =
                     arg.wrapping_shr(1) | (if self.read_carry_flag() { 0x80 } else { 0x00 });
 
                 let is_carry_ror = (arg & 0x01) == 0x01;
                 self.write_carry_flag(is_carry_ror);
 
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result_ror;
-                }
-                system.write_u8(addr, result_ror);
+                self.write_u8(system, addr, result_ror);
 
-                // ADC
                 let tmp = u16::from(self.a)
                     + u16::from(result_ror)
                     + (if self.read_carry_flag() { 1 } else { 0 });
@@ -2162,33 +1843,18 @@ impl Cpu {
                 self.write_overflow_flag(is_overflow);
                 self.a = result_adc;
 
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::SLO => {
-                // ASL -> ORA
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
-                // ASL
                 let result_asl = arg.wrapping_shl(1);
 
-                let is_carry = (arg & 0x80) == 0x80; // shift前データでわかるよね
+                let is_carry = (arg & 0x80) == 0x80;
                 self.write_carry_flag(is_carry);
 
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result_asl;
-                }
-                system.write_u8(addr, result_asl);
+                self.write_u8(system, addr, result_asl);
 
-                // ORA
                 let result_ora = self.a | result_asl;
 
                 let is_zero = result_ora == 0;
@@ -2198,33 +1864,18 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.a = result_ora;
 
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::SRE => {
-                // LSR -> EOR
-                let (FetchedOperand { operand: addr, fetch_cyc: cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
+                let (FetchedOperand { operand: addr, oops_cyc, ..}, arg) = self.fetch_operand_and_value(system, mode);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                    self.trace.loaded_mem_value = arg;
-                }*/
-
-                // LSR
                 let result_lsr = arg.wrapping_shr(1);
 
                 let is_carry = (arg & 0x01) == 0x01;
                 self.write_carry_flag(is_carry);
 
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result_lsr;
-                }
-                system.write_u8(addr, result_lsr);
+                self.write_u8(system, addr, result_lsr);
 
-                // EOR
                 let result_eor = self.a ^ result_lsr;
 
                 let is_zero = result_eor == 0;
@@ -2234,7 +1885,7 @@ impl Cpu {
                 self.write_negative_flag(is_negative);
                 self.a = result_eor;
 
-                3 + cyc
+                expected_cyc// + oops_cyc
             }
             Opcode::SXA => {
                 // Conflicting information
@@ -2247,27 +1898,16 @@ impl Cpu {
                 // For now the implementation uses the same logic as Mesen, since that
                 // passes existing tests
 
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }
-*/
                 let high = (addr >> 8) as u8;
                 let low = (addr & 0xff) as u8;
                 let result = self.x & high.wrapping_add(1);
                 let addr = ((result as u16) << 8) | low as u16;
 
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result;
-                }
                 self.write_u8(system, addr, result);
 
-                1 + cyc
+                expected_cyc// + oops_cyc
             },
             Opcode::SYA => {
                 // Conflicting information
@@ -2280,48 +1920,37 @@ impl Cpu {
                 // For now the implementation uses the same logic as Mesen, since that
                 // passes existing tests
 
-                let FetchedOperand { operand: addr, fetch_cyc: cyc, .. } = self.fetch_operand(system, mode);
+                let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = addr;
-                }
-*/
                 let high = (addr >> 8) as u8;
                 let low = (addr & 0xff) as u8;
                 let result = self.y & high.wrapping_add(1);
                 let addr = ((result as u16) << 8) | low as u16;
 
-                #[cfg(feature="trace")]
-                {
-                    self.trace.stored_mem_value = result;
-                }
                 self.write_u8(system, addr, result);
 
-                1 + cyc
+                expected_cyc// + oops_cyc
             },
             Opcode::TOP => {
                 // Fetch but do nothing
-                let (FetchedOperand { operand: _addr, fetch_cyc: cyc, .. }, _arg) = self.fetch_operand_and_value(system, mode);
-
-                /*
-                #[cfg(feature="trace")]
-                {
-                    self.trace.instruction_operand = _in_operand;
-                    self.trace.effective_address = _addr;
-                }*/
-                1 + cyc
+                let (FetchedOperand { operand: _addr, oops_cyc, .. }, _arg) = self.fetch_operand_and_value(system, mode);
+                expected_cyc + oops_cyc
             }
-            Opcode::XAA => todo!(),
-            Opcode::XAS => todo!(),
+            Opcode::XAA => {
+                let (FetchedOperand { .. }, _arg) = self.fetch_operand_and_value(system, mode);
+                // TODO
+                expected_cyc
+            },
+            Opcode::XAS => {
+                let (FetchedOperand { .. }, _arg) = self.fetch_operand_and_value(system, mode);
+                // TODO
+                expected_cyc
+            },
         };
 
         #[cfg(feature="trace")]
         {
             //debug_assert!(cyc == expected_cyc);
-            self.trace.cycle_count += cyc as u64;
             self.trace.instruction = Instruction { op: opcode, mode, cyc: expected_cyc };
             self.trace.instruction_pc = inst_pc;
             self.trace.instruction_op_code = inst_code;

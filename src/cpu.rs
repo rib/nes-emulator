@@ -30,7 +30,6 @@ pub struct TraceState {
     pub saved_y: u8,
     pub saved_sp: u8,
     pub saved_p: Flags,
-    pub saved_cyc: u64,
     pub instruction: Instruction,
     pub instruction_pc: u16,
     pub instruction_op_code: u8,
@@ -42,13 +41,12 @@ pub struct TraceState {
 impl Default for TraceState {
     fn default() -> Self {
         Self {
-            cycle_count: 8,
+            cycle_count: 0,
             saved_a: 0,
             saved_x: 0,
             saved_y: 0,
             saved_sp: 0,
             saved_p: Flags::NONE,
-            saved_cyc: 0,
             instruction_pc: 0,
             instruction_op_code: 0,
             instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0},
@@ -88,6 +86,14 @@ impl Flags {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Breakpoint {
+    pub addr: u16,
+
+    /// automatically remove breakpoint when hit
+    pub temp: bool
+}
+
 #[derive(Clone)]
 pub struct Cpu {
     /// Accumulator
@@ -104,7 +110,14 @@ pub struct Cpu {
     pub p: Flags,
 
     #[cfg(feature="trace")]
-    pub trace: TraceState
+    pub trace: TraceState,
+
+    /// Set to true to continue without re-breaking on the
+    /// current instruction (automatically cleared when
+    /// the pc updates)
+    pub breakpoints_paused: bool,
+    pub breakpoints: Vec<Breakpoint>,
+    pub breakpoint_hit: bool,
 }
 
 impl Default for Cpu {
@@ -118,7 +131,11 @@ impl Default for Cpu {
             p: unsafe { Flags::from_bits_unchecked(0x34) },
 
             #[cfg(feature="trace")]
-            trace: TraceState::default()
+            trace: TraceState::default(),
+
+            breakpoints_paused: false,
+            breakpoints: vec![],
+            breakpoint_hit: false,
         }
     }
 }
@@ -193,5 +210,31 @@ impl Cpu {
         let lower = system.read_u8(lower_addr);
         let upper = system.read_u8(upper_addr);
         self.pc = (lower as u16) | ((upper as u16) << 8);
+    }
+
+    pub fn add_break(&mut self, addr: u16, temp: bool) {
+        if !temp { // Allow multiple temporaries, but only one permanent
+            self.remove_break(addr, false);
+        }
+        self.breakpoints.push(Breakpoint {
+            addr,
+            temp
+        })
+    }
+
+    pub fn remove_break(&mut self, addr: u16, temp: bool) {
+        if temp {
+            loop { // There may be multiple temporary breakpoints
+                if let Some(i) = self.breakpoints.iter().position(|b| b.temp == true && b.addr == addr) {
+                    self.breakpoints.swap_remove(i);
+                } else {
+                    break;
+                }
+            }
+        } else {
+            if let Some(i) = self.breakpoints.iter().position(|b| b.addr == addr) {
+                self.breakpoints.swap_remove(i);
+            }
+        }
     }
 }

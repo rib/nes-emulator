@@ -1,4 +1,4 @@
-use super::apu::*;
+use super::stash_apu::*;
 use super::system::*;
 
 pub const APU_PULSE_1_OFFSET: usize = 0x00;

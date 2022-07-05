@@ -41,10 +41,6 @@ pub struct Position(pub u8, pub u8);
 /// R,G,B
 pub struct Color(pub u8, pub u8, pub u8);
 impl Color {
-    /// 2C02の色情報をRGBに変換します
-    /// ..VV_HHHH 形式
-    /// V - 明度
-    /// H - 色相
     pub fn from(src: u8) -> Color {
         let index = src & 0x3f;
         let table: [Color; 0x40] = include!("ppu_palette_table.rs");
