@@ -1,6 +1,3 @@
-#![crate_type = "lib"]
-#![crate_name = "rust_nes_emulator"]
-//#![cfg_attr(not(feature = "std"), no_std)]
 #[macro_use]
 pub mod interface;
 
@@ -20,3 +17,5 @@ pub mod system;
 //pub mod system_apu_reg;
 pub mod ppu_registers;
 pub mod vram;
+
+pub mod ui;

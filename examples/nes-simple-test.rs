@@ -181,7 +181,6 @@ fn main() {
     let mut egui_glow = egui_glow::EguiGlow::new(&event_loop, gl.clone());
 
     let rom = get_file_as_byte_vec(&std::env::args().nth(1).expect("Expected path to .nes ROM"));
-
     let mut nes = Nes::new(PixelFormat::RGBA8888, audio_config.sample_rate().0);
 
     let buffer_time_millis = 5000;
