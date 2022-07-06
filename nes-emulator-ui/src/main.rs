@@ -100,14 +100,18 @@ fn _main() -> Result<()> {
     event_loop.run(move |event, event_loop, control_flow| {
 
         match event {
-
             RedrawRequested(..) => {
                 if let Some(window) = window.as_ref() {
                     let mut raw_input = winit_state.take_egui_input(window);
                     emulator_ui.update();
 
                     let full_output = ctx.run(raw_input, |ctx| {
-                        emulator_ui.draw(ctx);
+                        match emulator_ui.draw(ctx) {
+                            ui::Status::Ok => {}
+                            ui::Status::Quit => {
+                                *control_flow = winit::event_loop::ControlFlow::Exit;
+                            }
+                        }
                     });
                     winit_state.handle_platform_output(window, &ctx, full_output.platform_output);
 
@@ -116,23 +120,32 @@ fn _main() -> Result<()> {
                         &ctx.tessellate(full_output.shapes),
                         &full_output.textures_delta);
 
-                    *control_flow = if full_output.repaint_after.is_zero() {
-                        window.request_redraw();
-                        winit::event_loop::ControlFlow::Poll
-                    } else if let Some(repaint_after_instant) =
-                        std::time::Instant::now().checked_add(full_output.repaint_after)
-                    {
-                        // XXX: Really not liking the design of this API :/ (egui and winit)
-
-                        // if repaint_after is something huge and can't be added to Instant,
-                        // we will use `ControlFlow::Wait` instead.
-                        // technically, this might lead to some weird corner cases where the user *WANTS*
-                        // winit to use `WaitUntil(MAX_INSTANT)` explicitly. they can roll their own
-                        // egui backend impl i guess.
-                        winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
-                    } else {
-                        winit::event_loop::ControlFlow::Wait
-                    };
+                    // This seems like some pretty funky API design :/
+                    //
+                    // Winit should probably have some kind of timers API to remove the need for
+                    // WaitUntil and there should maybe be an explicit .quit() API for the event
+                    // loop that would avoid this awkward control_flow precedence issue.
+                    //
+                    // It also seems pretty odd for Egui to specify a wait _duration_ when it
+                    // doesn't know when we will start waiting - surely they should specify
+                    // an optional deadline instant instead.
+                    if *control_flow != winit::event_loop::ControlFlow::Exit {
+                        *control_flow = if full_output.repaint_after.is_zero() {
+                            window.request_redraw();
+                            winit::event_loop::ControlFlow::Poll
+                        } else if let Some(repaint_after_instant) =
+                            std::time::Instant::now().checked_add(full_output.repaint_after)
+                        {
+                            // if repaint_after is something huge and can't be added to Instant,
+                            // we will use `ControlFlow::Wait` instead.
+                            // technically, this might lead to some weird corner cases where the user *WANTS*
+                            // winit to use `WaitUntil(MAX_INSTANT)` explicitly. they can roll their own
+                            // egui backend impl i guess.
+                            winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
+                        } else {
+                            winit::event_loop::ControlFlow::Wait
+                        };
+                    }
                 }
             }
             MainEventsCleared | UserEvent(Event::RequestRedraw) => {

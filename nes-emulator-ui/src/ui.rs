@@ -32,7 +32,10 @@ pub enum UserEvent {
     ShowText(log::Level, String),
 }
 
-
+pub enum Status {
+    Ok,
+    Quit
+}
 
 struct Notice {
     level: log::Level,
@@ -50,6 +53,13 @@ fn get_file_as_byte_vec(filename: impl AsRef<Path>) -> Vec<u8> {
     f.read(&mut buffer).expect("buffer overflow");
 
     buffer
+}
+
+fn epoch_timestamp() -> u64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(n) => n.as_secs(),
+        Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+    }
 }
 
 unsafe fn u8_slice_as_color32_slice(u8_data: &[u8]) -> &[egui::Color32] {
@@ -277,6 +287,29 @@ impl EmulatorUi {
         }
     }
 
+    fn save_image(&mut self) {
+        let mut front = self.front_buffer();
+        if let Some(rental) = front.rent_data() {
+            let fb_width = front.width();
+            let fb_height = front.height();
+
+            let fb_buf = &rental.data;
+            let stride = fb_width * 4;
+            let mut imgbuf = image::ImageBuffer::new(fb_width as u32, fb_height as u32);
+            for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
+                let x = x as usize;
+                let y = y as usize;
+                let r = fb_buf[stride * y + x * 4];
+                let g = fb_buf[stride * y + x * 4 + 1];
+                let b = fb_buf[stride * y + x * 4 + 2];
+                let _a = fb_buf[stride * y + x * 4 + 3];
+                *pixel = image::Rgb([r, g, b]);
+            }
+            println!("Saving debug image");
+            imgbuf.save(format!("nes-emulator-frame-{}.png", epoch_timestamp())).unwrap();
+        }
+    }
+
     pub fn draw_notices_header(&mut self, ui: &mut Ui) {
 
         while self.notices.len() > 0 {
@@ -341,7 +374,9 @@ impl EmulatorUi {
         self.framebuffers[self.front_framebuffer].clone()
     }
 
-    pub fn draw(&mut self, ctx: &egui::Context) {
+    pub fn draw(&mut self, ctx: &egui::Context) -> Status {
+        let mut status = Status::Ok;
+
         let front = self.front_buffer();
 
         if self.queue_framebuffer_upload {
@@ -364,10 +399,37 @@ impl EmulatorUi {
 
         });
 
+        egui::SidePanel::left("side_panel").show(ctx, |ui| {
+            if ui.button("Quit").clicked() {
+                status = Status::Quit;
+            }
+            if ui.button("Reset").clicked() {
+                self.nes.reset();
+            }
+            if !self.paused {
+                if ui.button("Break").clicked() {
+                    self.paused = true;
+                }
+            } else {
+                if ui.button("Step").clicked() {
+                    self.single_step = true;
+                }
+                if ui.button("Continue").clicked() {
+                    self.paused = false;
+                }
+
+                let ppu = self.nes.system_ppu();
+                let debug_val = self.nes.debug_read_ppu(0x2000);
+                //println!("PPU debug = {debug_val:x}");
+            }
+        });
+
         egui::CentralPanel::default().show(ctx, |ui| {
 
             ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
         });
+
+        status
     }
 
     pub fn handle_event(&mut self, event: Event<UserEvent>) {
