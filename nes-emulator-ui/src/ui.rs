@@ -25,13 +25,6 @@ use nes_emulator::prelude::*;
 
 
 
-#[derive(Debug, Clone)]
-pub enum UserEvent {
-    RequestRedraw,
-    // Show a notice to the user...
-    ShowText(log::Level, String),
-}
-
 pub enum Status {
     Ok,
     Quit
@@ -163,25 +156,39 @@ fn make_audio_stream<T: Sample + Send + Debug + 'static>(
 }
 
 pub struct EmulatorUi {
+    real_time: bool,
+
     notices: VecDeque<Notice>,
 
     audio_device: cpal::Device,
     audio_sample_rate: u32,
     //audio_config: cpal::SupportedStreamConfig
+    audio_tx: RingSender<f32>,
+    audio_stream: cpal::Stream,
 
     nes: Nes,
     framebuffers: [Framebuffer; 2],
     front_framebuffer: usize,
     back_framebuffer: usize,
     framebuffer_texture: TextureHandle,
-    audio_tx: RingSender<f32>,
-    audio_stream: cpal::Stream,
-    paused: bool,
+    queue_framebuffer_upload: bool,
+    last_frame_time: Instant,
+
+    pub paused: bool,
     single_step: bool,
 
-    frame_no: u32,
+    frame_no: u32, // emulated frames (not drawn frames)
 
-    queue_framebuffer_upload: bool,
+    stats_update_period: Duration,
+    last_stats_update_timestamp: Instant,
+    last_stats_update_frame_no: u32,
+    last_stats_update_cpu_clock: u64,
+
+    profiled_last_clocks_per_second: u32, // Measured from last update()
+    profiled_aggregate_clocks_per_second: u32, // Measure over stats update period
+
+    profiled_last_fps: f32, // Extrapolated from last frame duration
+    profiled_aggregate_fps: f32, // Measured over stats update period
 }
 
 #[derive(Parser, Debug)]
@@ -191,6 +198,12 @@ pub struct Args {
 
     #[clap(short='t', long="trace", help="Record a trace of CPU instructions executed")]
     trace: Option<String>,
+
+    #[clap(short='r', long="relative-time", help="Step emulator by relative time intervals, not necessarily keeping up with real time")]
+    relative_time: Option<bool>,
+
+    #[clap(short='w', long="wav", help="Record audio to this WAV file")]
+    wav_output: Option<String>
 }
 
 impl EmulatorUi {
@@ -236,23 +249,41 @@ impl EmulatorUi {
             tex
         };
 
+        let now = Instant::now();
+
         let mut emulator = Self {
+            real_time: !args.relative_time.unwrap_or(false),
+
             notices: Default::default(),
             audio_device,
             audio_sample_rate,
             //audio_config,
+            audio_tx,
+            audio_stream,
+
             nes,
             framebuffers: [framebuffer0, framebuffer1],
             back_framebuffer: 0,
             front_framebuffer: 1,
             framebuffer_texture,
-            audio_tx,
-            audio_stream,
+            queue_framebuffer_upload: false,
+            last_frame_time: now,
+
             paused: false,
             single_step: false,
 
             frame_no: 0,
-            queue_framebuffer_upload: false,
+
+            stats_update_period: Duration::from_secs(5),
+            last_stats_update_timestamp: now,
+            last_stats_update_frame_no: 0,
+            last_stats_update_cpu_clock: 0,
+
+            profiled_last_clocks_per_second: 0,
+            profiled_aggregate_clocks_per_second: 0,
+
+            profiled_last_fps: 0.0,
+            profiled_aggregate_fps: 0.0,
         };
 
         if let Some(ref rom) = args.rom {
@@ -336,14 +367,70 @@ impl EmulatorUi {
         }
     }
 
+
+    fn real_time_emulation_speed(&self) -> f32 {
+        self.profiled_last_clocks_per_second as f32 / self.nes.cpu_clock_hz() as f32
+    }
+    fn aggregated_emulation_speed(&self) -> f32 {
+        self.profiled_aggregate_clocks_per_second as f32 / self.nes.cpu_clock_hz() as f32
+    }
+
+    pub fn estimated_cpu_clocks_for_duration(&self, duration: Duration) -> u64 {
+        if self.profiled_last_clocks_per_second > 0 {
+            (self.profiled_last_clocks_per_second as f64 * duration.as_secs_f64()) as u64
+        } else {
+            (self.nes.cpu_clock_hz() as f64 * duration.as_secs_f64()) as u64
+        }
+    }
+    pub fn estimate_duration_for_cpu_clocks(&self, cpu_clocks: u64) -> Duration {
+        if self.profiled_last_clocks_per_second > 0 {
+            Duration::from_secs_f64(cpu_clocks as f64 / self.profiled_last_clocks_per_second as f64)
+        } else {
+            Duration::from_secs_f64(cpu_clocks as f64 / self.nes.cpu_clock_hz() as f64)
+        }
+    }
+
     pub fn update(&mut self) {
 
         if self.paused == false || self.single_step == true {
-            let target_timestamp = Instant::now();
-            'progress: loop {
+            let update_limit = Duration::from_micros(1_000_000 / 30); // We want to render at at-least 30fps even if emulation is running slow
 
-                match self.nes.progress(target_timestamp, self.framebuffers[self.back_framebuffer].clone()) {
+            let update_start = Instant::now();
+            let update_start_clock = self.nes.cpu_clock();
+
+            let target = if self.real_time {
+                let ideal_target = self.nes.cpu_clocks_for_time_since_poweron(update_start);
+                if self.estimate_duration_for_cpu_clocks(ideal_target - self.nes.cpu_clock()) < update_limit {
+                    // The happy path: we are emulating in real-time and we are keeping up
+
+                    // TODO: if we are consistently vblank synchronized and not missing frames then we
+                    // should aim to accurately snap+align update intervals with the vblank interval (even
+                    // if that might technically have a small time skew compared to the original hardware
+                    // with 60hz vs 59.94hz)
+                    ProgressTarget::Clock(self.nes.cpu_clocks_for_time_since_poweron(update_start))
+                } else {
+                    // We are _trying_ to emulate in real-time but not keeping up, so we limit
+                    // how much we try and progress based on the emulation performance we have
+                    // observed.
+                    let ideal_target = self.nes.cpu_clocks_for_time_since_poweron(update_start);
+                    let limit_step_target = self.nes.cpu_clock() + self.estimated_cpu_clocks_for_duration(update_limit);
+                    let target = limit_step_target.min(ideal_target);
+                    ProgressTarget::Clock(target)
+                }
+            } else {
+                // Non-real-time emulation: we progress the emulator forwards based on
+                // the limit duration and based on the emulation performance we have observed
+                let limit_step_target = self.nes.cpu_clock() + self.estimated_cpu_clocks_for_duration(update_limit);
+                ProgressTarget::Clock(limit_step_target)
+            };
+
+            'progress: loop {
+                match self.nes.progress(target, self.framebuffers[self.back_framebuffer].clone()) {
                     ProgressStatus::FrameReady => {
+                        let now = Instant::now();
+                        let frame_duration = now - self.last_frame_time;
+                        self.profiled_last_fps = (1.0 as f64 / frame_duration.as_secs_f64()) as f32;
+                        self.last_frame_time = now;
                         self.front_framebuffer = self.back_framebuffer;
                         self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
                         self.queue_framebuffer_upload = true;
@@ -366,6 +453,36 @@ impl EmulatorUi {
                 //}
             }
 
+            let cpu_clock = self.nes.cpu_clock();
+            let elapsed = Instant::now() - update_start;
+            let clocks_elapsed = cpu_clock - update_start_clock;
+            // Try to avoid updating last_clocks_per_second for early exit conditions where we didn't actually do any work
+            if elapsed > Duration::from_millis(1) || clocks_elapsed > 2000 {
+                self.profiled_last_clocks_per_second = (clocks_elapsed as f64 / elapsed.as_secs_f64()) as u32;
+            }
+            let now = Instant::now();
+            let stats_update_duration = now - self.last_stats_update_timestamp;
+            if stats_update_duration > self.stats_update_period {
+                let n_frames = self.frame_no - self.last_stats_update_frame_no;
+                let aggregate_fps = (n_frames as f64 / stats_update_duration.as_secs_f64()) as f32;
+
+                let n_clocks = cpu_clock - self.last_stats_update_cpu_clock;
+                let aggregate_cps = (n_clocks as f64 / stats_update_duration.as_secs_f64()) as u32;
+
+                let aggregate_speed = (self.aggregated_emulation_speed() * 100.0) as u32;
+                debug!("Aggregate Emulator Stats: Clocks/s: {aggregate_cps:8}, Update FPS: {aggregate_fps:4.2}, Real-time Speed: {aggregate_speed:3}%");
+
+                let last_fps = self.profiled_last_fps;
+                let last_cps = self.profiled_last_clocks_per_second;
+                let latest_speed = (self.real_time_emulation_speed() * 100.0) as u32;
+                debug!("Raw Emulator Stats:       Clocks/s: {last_cps:8}, Update FPS: {last_fps:4.2}, Real-time Speed: {latest_speed:3}%");
+
+                self.last_stats_update_timestamp = now;
+                self.last_stats_update_frame_no = self.frame_no;
+                self.last_stats_update_cpu_clock = cpu_clock;
+                self.profiled_aggregate_fps = aggregate_fps as f32;
+                self.profiled_aggregate_clocks_per_second = aggregate_cps;
+            }
             self.single_step = false;
         }
     }
@@ -396,6 +513,15 @@ impl EmulatorUi {
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             self.draw_notices_header(ui);
+            use egui::{menu, Button};
+
+            menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open").clicked() {
+                        self.open_dialog();
+                    }
+                });
+            });
 
         });
 
@@ -432,46 +558,30 @@ impl EmulatorUi {
         status
     }
 
-    pub fn handle_event(&mut self, event: Event<UserEvent>) {
+    pub fn handle_window_event(&mut self, event: winit::event::WindowEvent) {
         match event {
-            Event::WindowEvent { event, .. } => {
-                match event {
-                    WindowEvent::KeyboardInput { input, .. } => {
-                        if let Some(keycode) = input.virtual_keycode {
-                            let button = match keycode {
-                                VirtualKeyCode::Return => {
-                                    println!("{:?} Start Button", input.state);
-                                    Some(PadButton::Start) }
-                                VirtualKeyCode::Space => { Some(PadButton::Select) }
-                                VirtualKeyCode::A => { Some(PadButton::Left) }
-                                VirtualKeyCode::D => { Some(PadButton::Right) }
-                                VirtualKeyCode::W => { Some(PadButton::Up) }
-                                VirtualKeyCode::S => { Some(PadButton::Down) }
-                                VirtualKeyCode::Right => {
-                                    println!("{:?} Button A", input.state);
-                                     Some(PadButton::A) }
-                                VirtualKeyCode::Left => {
-                                    println!("{:?} Button B", input.state);
-                                    Some(PadButton::B) }
-                                _ => None
-                            };
-                            if let Some(button) = button {
-                                let system = self.nes.system_mut();
-                                if input.state == winit::event::ElementState::Pressed {
-                                    system.pad1.press_button(button);
-                                } else {
-                                    system.pad1.release_button(button);
-                                }
-                            }
+            WindowEvent::KeyboardInput { input, .. } => {
+                if let Some(keycode) = input.virtual_keycode {
+                    let button = match keycode {
+                        VirtualKeyCode::Return => { Some(PadButton::Start) }
+                        VirtualKeyCode::Space => { Some(PadButton::Select) }
+                        VirtualKeyCode::A => { Some(PadButton::Left) }
+                        VirtualKeyCode::D => { Some(PadButton::Right) }
+                        VirtualKeyCode::W => { Some(PadButton::Up) }
+                        VirtualKeyCode::S => { Some(PadButton::Down) }
+                        VirtualKeyCode::Right => { Some(PadButton::A) }
+                        VirtualKeyCode::Left => { Some(PadButton::B) }
+                        _ => None
+                    };
+                    if let Some(button) = button {
+                        let system = self.nes.system_mut();
+                        if input.state == winit::event::ElementState::Pressed {
+                            system.pad1.press_button(button);
+                        } else {
+                            system.pad1.release_button(button);
                         }
                     }
-                    _ => {
-
-                    }
                 }
-            }
-            Event::UserEvent(UserEvent::ShowText(level, text)) => {
-                self.notices.push_back(Notice { level, text, timestamp: Instant::now() });
             }
             _ => {
 

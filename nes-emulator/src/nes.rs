@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::time::Instant;
 
 use log::{warn};
@@ -17,6 +18,15 @@ use crate::cpu::*;
 use crate::ppu::*;
 
 const NTSC_CPU_CLOCK_HZ: u32 = 1_789_166;
+
+#[derive(Clone, Copy)]
+pub enum ProgressTarget {
+    /// Progress until the CPU clock reaches the given count
+    Clock(u64),
+
+    /// Progress up to the given wall clock time, relative to the [`Nes::poweron`] time
+    Time(Instant)
+}
 
 pub enum ProgressStatus {
     FrameReady,
@@ -41,6 +51,8 @@ pub struct Nes {
     nsf_step_period: u64,
     nsf_step_progress: u64,
     nsf_current_track: u8,
+
+    last_clocks_per_second: u32,
 }
 
 impl Nes {
@@ -70,6 +82,8 @@ impl Nes {
             nsf_step_period: 0,
             nsf_step_progress: 0,
             nsf_current_track: 0,
+
+            last_clocks_per_second: NTSC_CPU_CLOCK_HZ,
         }
     }
 
@@ -202,21 +216,34 @@ impl Nes {
         println!("{pc:0X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}");
     }
 
-    // Accurately track the number of (cpu) clock cycles that should have elapsed over a given wall-clock
-    // time interval
-    fn get_ntsc_cpu_cycle_target(&self, target_timestamp: Instant) -> u64 {
+    /// Returns the number of CPU clocks that will cover the given `duration`
+    ///
+    /// Note: this currently assumes we're emulating an NTSC NES!
+    pub fn cpu_clocks_for_duration(&self, duration: Duration) -> u64 {
         const NANOS_PER_SEC: f64 = 1_000_000_000.0;
 
-        let delta = target_timestamp - self.reference_timestamp;
-        let mut delta_clocks = delta.as_secs() * NTSC_CPU_CLOCK_HZ as u64;
-        delta_clocks += ((delta.subsec_nanos() as f64 / NANOS_PER_SEC) * NTSC_CPU_CLOCK_HZ as f64) as u64;
+        let mut delta_clocks = duration.as_secs() * NTSC_CPU_CLOCK_HZ as u64;
+        delta_clocks += ((duration.subsec_nanos() as f64 / NANOS_PER_SEC) * NTSC_CPU_CLOCK_HZ as f64) as u64;
 
+        delta_clocks
+    }
+
+    /// Based on the power on time for the NES, (or the last reference point that was saved) this
+    /// calculates the number of (cpu) clock cycles that should have elapsed by the time we reach
+    /// the `target_timestamp`
+    pub fn cpu_clocks_for_time_since_poweron(&self, target_timestamp: Instant) -> u64 {
+        let delta = target_timestamp - self.reference_timestamp;
+        let delta_clocks = self.cpu_clocks_for_duration(delta);
         self.reference_cpu_clock + delta_clocks
     }
 
-    pub fn progress(&mut self, target_timestamp: Instant, mut framebuffer: Framebuffer) -> ProgressStatus {
+    pub fn progress(&mut self, target: ProgressTarget, mut framebuffer: Framebuffer) -> ProgressStatus {
 
-        let cpu_clock_target = self.get_ntsc_cpu_cycle_target(target_timestamp);
+        let cpu_clock_target = match target {
+            ProgressTarget::Time(target_timestamp) => self.cpu_clocks_for_time_since_poweron(target_timestamp),
+            ProgressTarget::Clock(clock) => clock
+        };
+
         let rental = framebuffer.rent_data();
         if let Some(mut fb_data) = rental {
             let fb = fb_data.data.as_mut_ptr();
@@ -325,5 +352,17 @@ impl Nes {
             unreachable!();
         }
         self.nsf_step_progress = 0;
+    }
+
+    pub fn cpu_clock_hz(&self) -> u64 {
+        NTSC_CPU_CLOCK_HZ as u64
+    }
+
+    pub fn cpu_clocks_per_frame(&self) -> f32 {
+        29780.5 // NTSC
+    }
+
+    pub fn cpu_clock(&self) -> u64 {
+        self.cpu_clock
     }
 }

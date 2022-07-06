@@ -8,6 +8,11 @@ resolver="2"
 [profile.dev]
 opt-level = 0
 
+[profile.realtime]
+inherits = "dev"
+opt-level = 1
+debug-assertions = false
+
 [profile.release]
 opt-level = 3
 lto = true

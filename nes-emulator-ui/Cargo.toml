@@ -22,6 +22,7 @@ cpal = "0.13"
 ring-channel = "0.11"
 anyhow = "1"
 image = "0.23"
+wav_io = "0.1.8"
 rfd = "0.8"
 clap = { version = "3.2.6", features = ["derive", "cargo"] }
 nes-emulator = { path = "../nes-emulator" }

@@ -63,7 +63,7 @@ fn create_window<T>(event_loop: &EventLoopWindowTarget<T>, state: &mut State, pa
     window
 }
 
-enum Event {
+pub enum Event {
     RequestRedraw
 }
 
@@ -130,7 +130,7 @@ fn _main() -> Result<()> {
                     // doesn't know when we will start waiting - surely they should specify
                     // an optional deadline instant instead.
                     if *control_flow != winit::event_loop::ControlFlow::Exit {
-                        *control_flow = if full_output.repaint_after.is_zero() {
+                        *control_flow = if full_output.repaint_after.is_zero() || emulator_ui.paused == false  {
                             window.request_redraw();
                             winit::event_loop::ControlFlow::Poll
                         } else if let Some(repaint_after_instant) =
@@ -153,7 +153,7 @@ fn _main() -> Result<()> {
                     window.request_redraw();
                 }
             }
-            UserEvent(user_event) => {
+            UserEvent(ref user_event) => {
             }
             WindowEvent { event, .. } => {
                 if winit_state.on_event(&ctx, &event) == false {
@@ -164,7 +164,7 @@ fn _main() -> Result<()> {
                         winit::event::WindowEvent::CloseRequested => {
                             *control_flow = ControlFlow::Exit;
                         }
-                        _ => {}
+                        event => { emulator_ui.handle_window_event(event); }
                     }
                 }
             },
