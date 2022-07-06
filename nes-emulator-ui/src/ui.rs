@@ -21,7 +21,7 @@ use cpal::{traits::{HostTrait, DeviceTrait}, OutputCallbackInfo, SampleFormat, S
 
 use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
 
-use crate::prelude::*;
+use nes_emulator::prelude::*;
 
 
 

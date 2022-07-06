@@ -1,5 +1,3 @@
-use egui::plot::Line;
-
 use crate::ppu_registers;
 use crate::ppu_registers::Control1Flags;
 use crate::ppu_registers::Control2Flags;

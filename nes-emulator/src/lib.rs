@@ -17,5 +17,3 @@ pub mod system;
 //pub mod system_apu_reg;
 pub mod ppu_registers;
 pub mod vram;
-
-pub mod ui;

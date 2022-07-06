@@ -11,7 +11,7 @@ use clap::Parser;
 
 use anyhow::Result;
 
-use nes_emulator::ui;
+mod ui;
 
 use winit::event_loop::{EventLoopWindowTarget, EventLoop};
 
