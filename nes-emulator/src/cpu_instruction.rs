@@ -1,5 +1,4 @@
 use super::cpu::*;
-use super::interface::SystemBus;
 use super::system::System;
 use log::{warn, error};
 
@@ -706,7 +705,7 @@ impl Cpu {
     /// Fetch 1 byte from PC and after fetching, advance the PC by one
     fn fetch_u8(&mut self, system: &mut System) -> u8 {
         //println!("calling system.read_u8({:x}", self.pc);
-        let data = system.read_u8(self.pc);
+        let data = system.read(self.pc);
         self.pc = self.pc + 1;
 
         // "Each byte of memory read or written adds 1 more cycle to the instruction"
@@ -729,7 +728,7 @@ impl Cpu {
             self.trace.stored_mem_value = data;
         }
 
-        system.write_u8(addr, data);
+        system.write(addr, data);
 
         // "Each byte of memory read or written adds 1 more cycle to the instruction"
         self.clock_cpu(system);
@@ -817,8 +816,8 @@ impl Cpu {
                 let dst_addr_upper =
                     u16::from(src_addr_lower.wrapping_add(1)) | (u16::from(src_addr_upper) << 8); // +1 to the lower of the operand
 
-                let dst_data_lower = u16::from(system.read_u8(dst_addr_lower));
-                let dst_data_upper = u16::from(system.read_u8(dst_addr_upper));
+                let dst_data_lower = u16::from(system.read(dst_addr_lower));
+                let dst_data_upper = u16::from(system.read(dst_addr_upper));
 
                 let indirect = dst_data_lower | (dst_data_upper << 8);
                 FetchedOperand { raw_operand: dst_addr_lower, operand: indirect, oops_cyc: 0 }
@@ -827,9 +826,9 @@ impl Cpu {
                 let src_addr = self.fetch_u8(system);
                 let dst_addr = src_addr.wrapping_add(self.x);
 
-                let data_lower = u16::from(system.read_u8(u16::from(dst_addr)));
+                let data_lower = u16::from(system.read(u16::from(dst_addr)));
                 let data_upper =
-                    u16::from(system.read_u8(u16::from(dst_addr.wrapping_add(1))));
+                    u16::from(system.read(u16::from(dst_addr.wrapping_add(1))));
 
                 let indirect = data_lower | (data_upper << 8);
                 FetchedOperand { raw_operand: src_addr as u16, operand: indirect, oops_cyc: 0 }
@@ -837,9 +836,9 @@ impl Cpu {
             AddressingMode::IndirectY => {
                 let src_addr = self.fetch_u8(system);
 
-                let data_lower = u16::from(system.read_u8(u16::from(src_addr)));
+                let data_lower = u16::from(system.read(u16::from(src_addr)));
                 let data_upper =
-                    u16::from(system.read_u8(u16::from(src_addr.wrapping_add(1))));
+                    u16::from(system.read(u16::from(src_addr.wrapping_add(1))));
 
                 let base_data = data_lower | (data_upper << 8);
                 let indirect = base_data.wrapping_add(u16::from(self.y));
@@ -885,7 +884,7 @@ impl Cpu {
             // Others pull back the data from the returned address. May not be used
             _ => {
                 let fetched_operand = self.fetch_operand(system, mode, false);
-                let data = system.read_u8(fetched_operand.operand);
+                let data = system.read(fetched_operand.operand);
                 (fetched_operand, data)
 
                 //let FetchedOperand { data: addr, fetch_cyc: cyc } = self.fetch_operand(system, mode, false);
@@ -1243,7 +1242,7 @@ impl Cpu {
                     self.trace.stored_mem_value = self.a;
                 }*/
 
-                system.write_u8(addr, self.a);
+                system.write(addr, self.a);
                 expected_cyc// + oops_cyc
             }
             Opcode::STX => {
@@ -1257,7 +1256,7 @@ impl Cpu {
                     self.trace.stored_mem_value = self.x;
                 }*/
 
-                system.write_u8(addr, self.x);
+                system.write(addr, self.x);
                 expected_cyc + oops_cyc
             }
             Opcode::STY => {
@@ -1271,7 +1270,7 @@ impl Cpu {
                     self.trace.stored_mem_value = self.y;
                 }*/
 
-                system.write_u8(addr, self.y);
+                system.write(addr, self.y);
                 expected_cyc + oops_cyc
             }
 
@@ -1565,7 +1564,7 @@ impl Cpu {
                 // Requires non-destructive read, so don't call fetch_and_deref...
                 let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, false);
 
-                let arg = system.read_u8(addr);
+                let arg = system.read(addr);
 
                 #[cfg(feature="trace")]
                 {
@@ -1749,7 +1748,7 @@ impl Cpu {
                 {
                     self.trace.stored_mem_value = dec_result;
                 }
-                system.write_u8(addr, dec_result);
+                system.write(addr, dec_result);
 
                 // CMP
                 let result = self.a.wrapping_sub(dec_result);

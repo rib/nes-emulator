@@ -1,12 +1,3 @@
-pub trait SystemBus {
-    fn read_u8(&mut self, addr: u16) -> u8;
-    fn write_u8(&mut self, addr: u16, data: u8);
-}
-
-pub trait VideoBus {
-    fn read_video_u8(&mut self, addr: u16) -> u8;
-    fn write_video_u8(&mut self, addr: u16, data: u8);
-}
 
 #[cfg(feature = "unsafe-opt")]
 #[allow(unused_macros)]

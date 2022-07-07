@@ -147,7 +147,7 @@ impl Cpu {
     }
     pub fn stack_push(&mut self, system: &mut System, data: u8) {
         // data store
-        system.write_u8(self.sp as u16 + 0x100, data);
+        system.write(self.sp as u16 + 0x100, data);
         // decrement
         self.sp = self.sp.wrapping_sub(1);
     }
@@ -156,7 +156,7 @@ impl Cpu {
         // increment
         self.sp = self.sp.wrapping_add(1);
         // data fetch
-        system.read_u8(self.sp as u16 + 0x100)
+        system.read(self.sp as u16 + 0x100)
     }
     pub fn interrupt(&mut self, system: &mut System, irq_type: Interrupt) {
         match irq_type {
@@ -207,8 +207,8 @@ impl Cpu {
             Interrupt::BRK => BRK_READ_UPPER,
         };
 
-        let lower = system.read_u8(lower_addr);
-        let upper = system.read_u8(upper_addr);
+        let lower = system.read(lower_addr);
+        let upper = system.read(upper_addr);
         self.pc = (lower as u16) | ((upper as u16) << 8);
     }
 

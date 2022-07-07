@@ -118,14 +118,22 @@ impl System {
         }
     }
 
-    fn apply_open_bus_bits(&mut self, mut value: u8, undefined_bits: u8) -> u8 {
+    /// Apply the open bus bits and update the open bus value for future reads
+    fn apply_open_bus_bits_mut(&mut self, mut value: u8, undefined_bits: u8) -> u8 {
         value = value & !undefined_bits;
         value |= self.open_bus_value & undefined_bits;
         self.open_bus_value = value;
         value
     }
 
-    pub fn read_u8(&mut self, addr: u16) -> u8 {
+    /// Apply the open bus bits without additional side effects (for peeking)
+    fn apply_open_bus_bits(&self, mut value: u8, undefined_bits: u8) -> u8 {
+        value = value & !undefined_bits;
+        value |= self.open_bus_value & undefined_bits;
+        value
+    }
+
+    pub fn read(&mut self, addr: u16) -> u8 {
         if self.watch_points.len() > 0 {
             for w in &self.watch_points {
                 if w.address == addr && w.ops.contains(WatchOps::READ) {
@@ -144,7 +152,7 @@ impl System {
             0x2000..=0x3fff => { // PPU I/O
                 // PPU read handles open bus behaviour, so we assume there
                 // are no undefined bits at this point
-                (self.ppu.read_u8(&mut self.cartridge, addr), 0)
+                (self.ppu.read(&mut self.cartridge, addr), 0)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
@@ -161,20 +169,57 @@ impl System {
                 }
             }
             _ => { // Cartridge
-                // FIXME: Probably shouldn't assume there's no open bus for cartridge reads
                 //println!("calling cartridge read_u8 for {addr:x}");
-                (self.cartridge.read_u8(addr), 0)
+                self.cartridge.system_bus_read(addr)
             }
         };
 
-        let value = self.apply_open_bus_bits(value, undefined_bits);
+        let value = self.apply_open_bus_bits_mut(value, undefined_bits);
         //if addr == 0x4016 {
         //    println!("Read $4016 as {value:02x} / {value:08b}");
         //}
         value
     }
 
-    pub fn write_u8(&mut self, addr: u16, data: u8) {
+    /// Read without side-effects
+    ///
+    /// Use this for debugging purposes to be able to inspect memory and registers
+    /// without affecting any state.
+    pub fn peek(&mut self, addr: u16) -> u8 {
+
+        let (value, undefined_bits) = match addr {
+            0x0000..=0x1fff => { // RAM
+                let index = usize::from(addr) % self.wram.len();
+                (arr_read!(self.wram, index), 0)
+            }
+            0x2000..=0x3fff => { // PPU I/O
+                // PPU read handles open bus behaviour, so we assume there
+                // are no undefined bits at this point
+                (self.ppu.peek(&mut self.cartridge, addr), 0)
+            }
+            0x4000..=0x401f => {  // APU I/O
+                let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
+                match index {
+                    0x14 => { // Write-only OAMDMA
+                        (0, 0xff)
+                    }
+                    0x16 => (self.pad1.peek(), 0b1110_0000), // pad1
+                    0x17 => (self.pad2.peek(), 0b1110_0000), // pad2
+                    _ => {
+                        self.apu.peek(addr)
+                    }
+                }
+            }
+            _ => { // Cartridge
+                self.cartridge.system_bus_peek(addr)
+            }
+        };
+
+        let value = self.apply_open_bus_bits(value, undefined_bits);
+        value
+    }
+
+    pub fn write(&mut self, addr: u16, data: u8) {
         if self.watch_points.len() > 0 {
             for w in &self.watch_points {
                 if w.address == addr && w.ops.contains(WatchOps::WRITE) {
@@ -191,7 +236,7 @@ impl System {
                 arr_write!(self.wram, index, data);
             }
             0x2000..=0x3fff => { // PPU I/O
-                self.ppu.write_u8(&mut self.cartridge, addr, data);
+                self.ppu.write(&mut self.cartridge, addr, data);
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
@@ -222,17 +267,18 @@ impl System {
                 //arr_write!(self.io_reg, index, data);
             }
             _ => { // Cartridge
-                self.cartridge.write_u8(addr, data);
+                self.cartridge.system_bus_write(addr, data);
             }
         }
     }
+
     // An OAM DMA is currently handled immediately and assumed to not be observed by anything
     // (considering the CPU is going to be suspended)
     fn run_dma(&mut self, cpu_start_addr: u16) {
         for offset in 0..256 {
             let cpu_addr = cpu_start_addr.wrapping_add(offset);
-            let cpu_data = self.read_u8(cpu_addr);
-            self.ppu.write_u8(&mut self.cartridge, 0x2004 /* OAMDATA */, cpu_data);
+            let cpu_data = self.read(cpu_addr);
+            self.ppu.write(&mut self.cartridge, 0x2004 /* OAMDATA */, cpu_data);
         }
     }
 

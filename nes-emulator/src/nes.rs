@@ -127,13 +127,13 @@ impl Nes {
 
             // 2. Initialize the sound registers by writing $00 to $4000-$4013, and $00 then $0F to $4015.
             for i in 0..0x13 {
-                self.system.write_u8(0x4000 + i, 0x00);
+                self.system.write(0x4000 + i, 0x00);
             }
-            self.system.write_u8(0x4015, 0x00);
-            self.system.write_u8(0x4015, 0x0f);
+            self.system.write(0x4015, 0x00);
+            self.system.write(0x4015, 0x0f);
 
             // 3. Initialize the frame counter to 4-step mode ($40 to $4017).
-            self.system.write_u8(0x4017, 0x40);
+            self.system.write(0x4017, 0x40);
 
             // 4. If the tune is bank switched, load the bank values from $070-$077 into $5FF8-$5FFF.
             // (handled by Mapper 031)
@@ -147,8 +147,8 @@ impl Nes {
 
             // 7. Call the music INIT routine.
             let init = nsf_config.init_address;
-            self.system.write_u8(0x5001, (init & 0xff) as u8);
-            self.system.write_u8(0x5002, ((init & 0xff00) >> 8) as u8);
+            self.system.write(0x5001, (init & 0xff) as u8);
+            self.system.write(0x5002, ((init & 0xff00) >> 8) as u8);
             //self.cpu.add_break(0x5003, false); // break when we hit the infinite loop in the NSF bios
             self.nsf_initialized = false;
             self.nsf_current_track = first_track;
@@ -183,7 +183,7 @@ impl Nes {
     }
 
     pub fn debug_read_ppu(&mut self, addr: u16) -> u8 {
-        self.system.ppu.read_u8(&mut self.system.cartridge, addr)
+        self.system.ppu.read(&mut self.system.cartridge, addr)
     }
 
     pub fn allocate_framebuffer(&self) -> Framebuffer {
@@ -262,7 +262,7 @@ impl Nes {
                 for _ in 0..apu_delta {
                     if let Some(DmcDmaRequest { address }) = self.system.apu.dmc_channel.step_dma_reader() {
                         self.system.dma_cpu_suspend_cycles += 4;
-                        let dma_value = self.system.read_u8(address);
+                        let dma_value = self.system.read(address);
                         self.system.apu.dmc_channel.completed_dma(address, dma_value);
                     }
 
@@ -345,8 +345,8 @@ impl Nes {
         if let Some(ref config) = self.nsf_config {
             println!("Calling NSF play code");
             let play = config.play_address;
-            self.system.write_u8(0x5001, (play & 0xff) as u8);
-            self.system.write_u8(0x5002, ((play & 0xff00) >> 8) as u8);
+            self.system.write(0x5001, (play & 0xff) as u8);
+            self.system.write(0x5002, ((play & 0xff00) >> 8) as u8);
             self.cpu.pc = 0x5000;
         } else {
             unreachable!();

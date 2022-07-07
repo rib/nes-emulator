@@ -38,11 +38,13 @@ pub trait Mapper {
 
     fn reset(&mut self);
 
-    fn system_bus_read_u8(&mut self, addr: u16) -> u8;
-    fn system_bus_write_u8(&mut self, addr: u16, data: u8);
+    // Returns (value, undefined_bits)
+    fn system_bus_read(&mut self, addr: u16) -> (u8, u8);
+    fn system_bus_peek(&mut self, addr: u16) -> (u8, u8);
+    fn system_bus_write(&mut self, addr: u16, data: u8);
 
-    fn ppu_bus_read_u8(&mut self, addr: u16) -> u8;
-    fn ppu_bus_write_u8(&mut self, addr: u16, data: u8);
+    fn ppu_bus_read(&mut self, addr: u16) -> u8;
+    fn ppu_bus_write(&mut self, addr: u16, data: u8);
 }
 
 struct NoCartridge;
@@ -50,10 +52,11 @@ impl Mapper for NoCartridge {
     fn id(&self) -> MapperId { MapperId::None }
     //fn nsf_config(&self) -> Option<NsfConfig> { None }
     fn reset(&mut self) {}
-    fn system_bus_read_u8(&mut self, _addr: u16) -> u8 { 0 }
-    fn system_bus_write_u8(&mut self, _addr: u16, _data: u8) { }
-    fn ppu_bus_read_u8(&mut self, _addr: u16) -> u8 { 0 }
-    fn ppu_bus_write_u8(&mut self, _addr: u16, _data: u8) { }
+    fn system_bus_read(&mut self, _addr: u16) -> (u8, u8) { (0, 0) }
+    fn system_bus_peek(&mut self, _addr: u16) -> (u8, u8) { (0, 0) }
+    fn system_bus_write(&mut self, _addr: u16, _data: u8) { }
+    fn ppu_bus_read(&mut self, _addr: u16) -> u8 { 0 }
+    fn ppu_bus_write(&mut self, _addr: u16, _data: u8) { }
 }
 
 struct Mapper0 {
@@ -81,8 +84,8 @@ impl Mapper for Mapper0 {
     fn id(&self) -> MapperId { MapperId::Mapper000 }
     fn reset(&mut self) {}
 
-    fn system_bus_read_u8(&mut self, addr: u16) -> u8 {
-        match addr {
+    fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
+        let value = match addr {
             0x6000..=0x7fff => { // PRG RAM
                 let ram_offset = (addr - 0x6000) as usize;
                 self.prg_ram[ram_offset]
@@ -100,13 +103,19 @@ impl Mapper for Mapper0 {
                 }
             }
             _ => {
-                trace!("Invalid mapper read @ {}", addr);
-                0
+                error!("Invalid mapper read @ {}", addr);
+                return (0, 0xff)
             }
-        }
+        };
+
+        (value, 0) // No undefined (open bus) bits
     }
 
-    fn system_bus_write_u8(&mut self, addr: u16, data: u8) {
+    fn system_bus_peek(&mut self, addr: u16) -> (u8, u8) {
+        self.system_bus_read(addr)
+    }
+
+    fn system_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7fff => {
                 let ram_offset = (addr - 0x6000) as usize;
@@ -116,7 +125,7 @@ impl Mapper for Mapper0 {
         }
     }
 
-    fn ppu_bus_read_u8(&mut self, addr: u16) -> u8 {
+    fn ppu_bus_read(&mut self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x1fff => {
                 let index = addr as usize;
@@ -129,7 +138,7 @@ impl Mapper for Mapper0 {
         }
     }
 
-    fn ppu_bus_write_u8(&mut self, addr: u16, data: u8) {
+    fn ppu_bus_write(&mut self, addr: u16, data: u8) {
         if self.has_chr_ram {
             match addr {
                 0x0000..=0x1fff => {
@@ -306,8 +315,8 @@ impl Mapper for Mapper1 {
     fn id(&self) -> MapperId { MapperId::Mapper001 }
     fn reset(&mut self) {}
 
-    fn system_bus_read_u8(&mut self, addr: u16) -> u8 {
-        match addr {
+    fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
+        let value = match addr {
             0x6000..=0x7fff => { // 8 KB PRG RAM bank, (optional)
                 let ram_offset = (addr - 0x6000) as usize;
                 self.prg_ram[ram_offset]
@@ -349,14 +358,20 @@ impl Mapper for Mapper1 {
                 arr_read!(self.prg_rom, prg_bank_offset + bank_offset)
             }
             _ => {
-                trace!("MMC1: unhandled system bus read");
-                0
+                error!("MMC1: unhandled system bus read");
+                return (0, 0xff)
             }
-        }
+        };
+
+        (value, 0) // no undefined bits
 
     }
 
-    fn system_bus_write_u8(&mut self, addr: u16, data: u8) {
+    fn system_bus_peek(&mut self, addr: u16) -> (u8, u8) {
+        self.system_bus_read(addr)
+    }
+
+    fn system_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7fff => {
                 let ram_offset = (addr - 0x6000) as usize;
@@ -372,7 +387,7 @@ impl Mapper for Mapper1 {
         }
     }
 
-    fn ppu_bus_read_u8(&mut self, addr: u16) -> u8 {
+    fn ppu_bus_read(&mut self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x0fff => {
                 let offset = self.chr_bank_0_data_offset(addr as usize);
@@ -389,7 +404,7 @@ impl Mapper for Mapper1 {
         }
     }
 
-    fn ppu_bus_write_u8(&mut self, addr: u16, data: u8) {
+    fn ppu_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x0fff => {
                 let offset = self.chr_bank_0_data_offset(addr as usize);
@@ -459,8 +474,8 @@ impl Mapper for Mapper031 {
     fn id(&self) -> MapperId { MapperId::Mapper031 }
     fn reset(&mut self) {}
 
-    fn system_bus_read_u8(&mut self, addr: u16) -> u8 {
-        match addr {
+    fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
+        let value = match addr {
             // Unused memory region according to https://www.nesdev.org/wiki/NSF
             // Used to store a minimal 'bios' that can bootstrap NSF playback.
             0x5000..=0x5200 => {
@@ -487,10 +502,16 @@ impl Mapper for Mapper031 {
                 trace!("Invalid mapper read @ {}", addr);
                 0
             }
-        }
+        };
+
+        (value, 0) // no undefined bits
     }
 
-    fn system_bus_write_u8(&mut self, addr: u16, data: u8) {
+    fn system_bus_peek(&mut self, addr: u16) -> (u8, u8) {
+        self.system_bus_read(addr)
+    }
+
+    fn system_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
             // Unused memory region according to https://www.nesdev.org/wiki/NSF
             // Used to store a minimal 'bios' that can bootstrap NSF playback.
@@ -512,7 +533,7 @@ impl Mapper for Mapper031 {
         }
     }
 
-    fn ppu_bus_read_u8(&mut self, addr: u16) -> u8 {
+    fn ppu_bus_read(&mut self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x1fff => {
                 let index = addr as usize;
@@ -525,7 +546,7 @@ impl Mapper for Mapper031 {
         }
     }
 
-    fn ppu_bus_write_u8(&mut self, addr: u16, data: u8) {
+    fn ppu_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x1fff => {
                 let index = addr as usize;
@@ -629,7 +650,7 @@ impl Cartridge {
                 return Err(anyhow!("Inconsistent binary size: couldn't read trainer data"));
             }
             for i in ines_start..ines_end {
-                mapper.system_bus_write_u8(0x7000 + (i as u16), ines[i]);
+                mapper.system_bus_write(0x7000 + (i as u16), ines[i]);
             }
         }
 
@@ -646,21 +667,20 @@ impl Cartridge {
         }
     }
 
-}
+    pub fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
+        self.mapper.system_bus_read(addr)
+    }
+    pub fn system_bus_peek(&mut self, addr: u16) -> (u8, u8) {
+        self.mapper.system_bus_peek(addr)
+    }
+    pub fn system_bus_write(&mut self, addr: u16, data: u8) {
+        self.mapper.system_bus_write(addr, data);
+    }
 
-impl SystemBus for Cartridge {
-    fn read_u8(&mut self, addr: u16) -> u8 {
-        self.mapper.system_bus_read_u8(addr)
+    pub fn ppu_bus_read(&mut self, addr: u16) -> u8 {
+        self.mapper.ppu_bus_read(addr)
     }
-    fn write_u8(&mut self, addr: u16, data: u8) {
-        self.mapper.system_bus_write_u8(addr, data);
-    }
-}
-impl VideoBus for Cartridge {
-    fn read_video_u8(&mut self, addr: u16) -> u8 {
-        self.mapper.ppu_bus_read_u8(addr)
-    }
-    fn write_video_u8(&mut self, addr: u16, data: u8) {
-        self.mapper.ppu_bus_write_u8(addr, data);
+    pub fn ppu_bus_write(&mut self, addr: u16, data: u8) {
+        self.mapper.ppu_bus_write(addr, data);
     }
 }

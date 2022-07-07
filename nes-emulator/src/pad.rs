@@ -18,10 +18,13 @@ trait ControllerIO {
     fn press_button(&mut self, button: PadButton);
     fn release_button(&mut self, button: PadButton);
 
-    // $4016/7 reads
+    /// $4016/7 reads
     fn read(&mut self) -> u8;
 
-    // $4016 writes
+    /// $4016/7 reads without side effects
+    fn peek(&mut self) -> u8;
+
+    /// $4016 writes
     fn write(&mut self, value: u8);
 
 }
@@ -117,6 +120,14 @@ impl ControllerIO for StandardControllerState {
         }
     }
 
+    fn peek(&mut self) -> u8 {
+        if self.poll_mode {
+            self.button_press_latches & 1
+        } else {
+            self.controller_shift & 1
+        }
+    }
+
     // $4016 writes
     fn write(&mut self, value: u8) {
         let prev = self.poll_mode;
@@ -171,6 +182,12 @@ impl Pad {
     pub fn read(&mut self) -> u8 {
         match &mut self.controller {
             Controller::StandardController(state) => state.read(),
+        }
+    }
+
+    pub fn peek(&mut self) -> u8 {
+        match &mut self.controller {
+            Controller::StandardController(state) => state.peek(),
         }
     }
 

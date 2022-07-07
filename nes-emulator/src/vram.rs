@@ -79,7 +79,7 @@ impl VRam {
 
         match addr {
             0x0000..=0x1fff => {
-                cartridge.read_video_u8(addr)
+                cartridge.ppu_bus_read(addr)
             }
             0x2000..=0x3fff => {
                 let mirror_mode = cartridge.nametable_mirror;
@@ -95,7 +95,7 @@ impl VRam {
 
         match addr {
             0x0000..=0x1fff => {
-                cartridge.write_video_u8(addr, data);
+                cartridge.ppu_bus_write(addr, data);
             }
             0x2000..=0x3fff => {
                 let mirror_mode = cartridge.nametable_mirror;

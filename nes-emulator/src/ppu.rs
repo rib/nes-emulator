@@ -263,14 +263,7 @@ impl Default for Ppu {
 
 impl Ppu {
 
-    // TODO: decay the latch value over time
-    pub fn read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
-        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
-        self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
-        read
-    }
-
-    pub fn pallet_read_u8(&self, addr: u16) -> u8 {
+    pub fn pallet_read(&self, addr: u16) -> u8 {
         let index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
         match index {
             0x10 => self.palette[0x00],
@@ -281,7 +274,7 @@ impl Ppu {
         }
     }
 
-    pub fn pallet_write_u8(&mut self, addr: u16, data: u8) {
+    pub fn pallet_write(&mut self, addr: u16, data: u8) {
         // Palette with mirroring
         let index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
         match index {
@@ -294,10 +287,10 @@ impl Ppu {
     }
 
     /// Returns (value, undefined_bit_mask)
-    pub fn data_read_u8(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+    pub fn data_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
         if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
             self.read_buffer = self.vram.read_u8(cartridge, addr);
-            (self.pallet_read_u8(addr), 0xc0)
+            (self.pallet_read(addr), 0xc0)
         } else {
             let buffered = self.read_buffer;
             self.read_buffer = self.vram.read_u8(cartridge, addr);
@@ -308,7 +301,7 @@ impl Ppu {
     pub fn data_write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         if let 0x3f00..=0x3fff = addr {
             //println!("palette write: addr={addr:x}, data={data:x}");
-            self.pallet_write_u8(addr, data);
+            self.pallet_write(addr, data);
         } else {
             //println!("data write: addr={addr:x}, data={data:x}");
             self.vram.write_u8(cartridge, addr, data);
@@ -333,10 +326,25 @@ impl Ppu {
         self.shared_v_register = self.shared_v_register.wrapping_add(self.address_increment());
     }
 
-    pub fn read_u8(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
-        // mirror support
+    // TODO: decay the latch value over time
+    pub fn finish_read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
+        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
+        self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
+        read
+    }
+
+    pub fn finish_peek_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
+        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
+        read
+    }
+
+    /// Read without applying open bus latch value
+    ///
+    /// Returns (value, undefined bits mask)
+    fn read_without_openbus(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+        // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
-        let (value, undefined_bits) = match addr {
+        match addr {
             0x2000 => { // Control 1 (Write-only)
                 (0, 0xff)
             }
@@ -364,17 +372,38 @@ impl Ppu {
                 (0, 0xff)
             }
             0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.data_read_u8(cartridge, self.shared_v_register);
+                let (data, undefined_mask) = self.data_read(cartridge, self.shared_v_register);
                 self.increment_data_addr();
                 (data, undefined_mask)
             }
             _ => unreachable!()
-        };
-
-        self.read_with_latch(value, undefined_bits)
+        }
     }
 
-    pub fn write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    pub fn read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+        let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
+        self.finish_read_with_latch(value, undefined_bits)
+    }
+
+    pub fn peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+        // mirror
+        let addr = ((addr - 0x2000) % 8) + 0x2000;
+        let (value, undefined_bits) = match addr {
+            0x2002 => { // Status (Read-only)
+                let data = self.status.bits();
+                (data, StatusFlags::UNDEFINED_BITS.bits())
+            }
+            0x2007 => { // PPU_DATA (Read/Write)
+                let (data, undefined_mask) = self.data_read(cartridge, self.shared_v_register);
+                (data, undefined_mask)
+            }
+            _ => self.read_without_openbus(cartridge, addr)
+        };
+
+        self.finish_peek_with_latch(value, undefined_bits)
+    }
+
+    pub fn write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         // mirror support
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         self.io_latch_value = data;
@@ -482,7 +511,7 @@ impl Ppu {
         let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
         let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
         let is_monochrome = self.control2.contains(Control2Flags::MONOCHROME);
-        let master_bg_color = Color::from(self.pallet_read_u8(
+        let master_bg_color = Color::from(self.pallet_read(
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
@@ -575,7 +604,7 @@ impl Ppu {
             {
                 None
             } else {
-                Some(self.pallet_read_u8(bg_palette_addr))
+                Some(self.pallet_read(bg_palette_addr))
             };
 
             // transparent
@@ -730,7 +759,7 @@ impl Ppu {
                     let is_tranparent = (sprite_palette_addr & 0x03) == 0x00; // Background color selected
                     if !is_tranparent {
                         let sprite_palette_data = self
-                            .pallet_read_u8(sprite_palette_addr);
+                            .pallet_read(sprite_palette_addr);
                         if sprite.attr.is_draw_front {
                             sprite_palette_data_front = Some(sprite_palette_data);
                         } else {

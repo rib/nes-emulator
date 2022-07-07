@@ -148,35 +148,45 @@ impl Apu {
 
     }
 
+    fn read_4015_status(&self) -> (u8, u8) {
+        // IF-D NT21	DMC interrupt (I), frame interrupt (F), DMC active (D), length counter > 0 (N/T/2/1)
+
+        let dmc_interrupt = if self.dmc_channel.interrupt_flagged { 0b1000_0000} else { 0u8 };
+        let frame_interrupt = if self.frame_sequencer.interrupt_flagged { 0b0100_0000} else { 0u8 };
+
+        // "D will read as 1 if the DMC bytes remaining is more than 0."
+        let dmc_active = if self.dmc_channel.is_active() { 0b0001_0000 } else { 0u8 };
+
+        let noise_has_len = if self.noise_channel.length() > 0 { 0b0000_1000 } else { 0u8 };
+        let triangle_has_len = if self.triangle_channel.length() > 0 { 0b0000_0100 } else { 0u8 };
+        let square2_has_len = if self.square_channel2.length() > 0 { 0b0000_0010 } else { 0u8 };
+        let square1_has_len = if self.square_channel1.length() > 0 { 0b0000_0001 } else { 0u8 };
+
+        let value = dmc_interrupt | frame_interrupt | dmc_active | noise_has_len | triangle_has_len | square2_has_len | square1_has_len;
+
+        //println!("$4015 read = {value:08b}");
+        (value, 0b0010_0000)
+    }
+
     // Returns: (value, undefined_bits)
     pub fn read(&mut self, address: u16) -> (u8, u8) {
         match address {
             0x4015 => { // Status
-
-                // IF-D NT21	DMC interrupt (I), frame interrupt (F), DMC active (D), length counter > 0 (N/T/2/1)
-
-                let dmc_interrupt = if self.dmc_channel.interrupt_flagged { 0b1000_0000} else { 0u8 };
-                let frame_interrupt = if self.frame_sequencer.interrupt_flagged { 0b0100_0000} else { 0u8 };
-
-                // "D will read as 1 if the DMC bytes remaining is more than 0."
-                let dmc_active = if self.dmc_channel.is_active() { 0b0001_0000 } else { 0u8 };
-
-                let noise_has_len = if self.noise_channel.length() > 0 { 0b0000_1000 } else { 0u8 };
-                let triangle_has_len = if self.triangle_channel.length() > 0 { 0b0000_0100 } else { 0u8 };
-                let square2_has_len = if self.square_channel2.length() > 0 { 0b0000_0010 } else { 0u8 };
-                let square1_has_len = if self.square_channel1.length() > 0 { 0b0000_0001 } else { 0u8 };
-
                 // "Reading this register clears the frame interrupt flag (but not the DMC interrupt flag)."
                 // TODO: "If an interrupt flag was set at the same moment of the read, it will read back as 1 but it will not be cleared"
                 self.frame_sequencer.clear_irq();
+                self.read_4015_status()
 
-                let value = dmc_interrupt | frame_interrupt | dmc_active | noise_has_len | triangle_has_len | square2_has_len | square1_has_len;
-
-                //println!("$4015 read = {value:08b}");
-                (value, 0b0010_0000)
             }
             _ => (0, 0xff )
         }
+    }
 
+    // Returns: (value, undefined_bits)
+    pub fn peek(&mut self, address: u16) -> (u8, u8) {
+        match address {
+            0x4015 => self.read_4015_status(),
+            _ => (0, 0xff )
+        }
     }
 }
