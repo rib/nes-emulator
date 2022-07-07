@@ -168,12 +168,19 @@ pub struct EmulatorUi {
     audio_stream: cpal::Stream,
 
     nes: Nes,
+
+    fb_width: usize,
+    fb_height: usize,
     framebuffers: [Framebuffer; 2],
     front_framebuffer: usize,
     back_framebuffer: usize,
     framebuffer_texture: TextureHandle,
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
+
+    nametables_framebuffer: Vec<u8>,
+    nametables_texture: TextureHandle,
+    queue_nametable_fb_upload: bool,
 
     pub paused: bool,
     single_step: bool,
@@ -249,6 +256,20 @@ impl EmulatorUi {
             tex
         };
 
+        let nametables_fb_bpp = 3;
+        let nametables_fb_stride = fb_width * 2 * nametables_fb_bpp;
+        let nametables_framebuffer = vec![0u8; nametables_fb_stride * fb_height * 2];
+        let nametables_texture = {
+            //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
+            let blank = ColorImage {
+                size: [(fb_width * 2) as _, (fb_height * 2) as _],
+                pixels: vec![Color32::default(); fb_width * 2 * fb_height * 2],
+            };
+            let blank = ImageData::Color(blank);
+            let tex = ctx.load_texture("nametables_framebuffer", blank, egui::TextureFilter::Nearest);
+            tex
+        };
+
         let now = Instant::now();
 
         let mut emulator = Self {
@@ -262,12 +283,19 @@ impl EmulatorUi {
             audio_stream,
 
             nes,
+
+            fb_width,
+            fb_height,
             framebuffers: [framebuffer0, framebuffer1],
             back_framebuffer: 0,
             front_framebuffer: 1,
             framebuffer_texture,
             queue_framebuffer_upload: false,
             last_frame_time: now,
+
+            nametables_framebuffer,
+            nametables_texture,
+            queue_nametable_fb_upload: false,
 
             paused: false,
             single_step: false,
@@ -392,6 +420,24 @@ impl EmulatorUi {
         }
     }
 
+    pub fn update_nametable_framebuffer(&mut self) {
+        let fb_width = self.front_buffer().width();
+        let fb_height = self.front_buffer().height();
+        let bpp = 3;
+        let stride = fb_width * 2 * bpp;
+        for y in 0..(fb_height * 2) {
+            for x in 0..(fb_width * 2) {
+                let pix = self.nes.debug_sample_nametable(x, y);
+                let pos = y * stride + x * bpp;
+                self.nametables_framebuffer[pos + 0] = pix[0];
+                self.nametables_framebuffer[pos + 1] = pix[1];
+                self.nametables_framebuffer[pos + 2] = pix[2];
+            }
+        }
+
+        self.queue_nametable_fb_upload = true;
+    }
+
     pub fn update(&mut self) {
 
         if self.paused == false || self.single_step == true {
@@ -436,6 +482,7 @@ impl EmulatorUi {
                         self.front_framebuffer = self.back_framebuffer;
                         self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
                         self.queue_framebuffer_upload = true;
+                        self.update_nametable_framebuffer();
                         self.frame_no += 1;
                     },
                     ProgressStatus::ReachedTarget => {
@@ -493,74 +540,11 @@ impl EmulatorUi {
         self.framebuffers[self.front_framebuffer].clone()
     }
 
-    pub fn draw(&mut self, ctx: &egui::Context) -> Status {
-        let mut status = Status::Ok;
 
-        let front = self.front_buffer();
-
-        if self.queue_framebuffer_upload {
-            let rental = self.framebuffers[self.front_framebuffer].rent_data().unwrap();
-
-            // hmmm, redundant copy, grumble grumble...
-            let copy = ImageDelta::full(ImageData::Color(ColorImage {
-                size: [front.width() as _, front.height() as _],
-                pixels: rental.data.chunks_exact(4)
-                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
-                    .collect(),
-            }), egui::TextureFilter::Nearest);
-
-            ctx.tex_manager().write().set(self.framebuffer_texture.id(), copy);
-            self.queue_framebuffer_upload = false;
-        }
-
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            self.draw_notices_header(ui);
-            use egui::{menu, Button};
-
-            menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open").clicked() {
-                        self.open_dialog();
-                    }
-                });
-            });
-
-        });
-
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            if ui.button("Quit").clicked() {
-                status = Status::Quit;
-            }
-            if ui.button("Reset").clicked() {
-                self.nes.reset();
-            }
-            if !self.paused {
-                if ui.button("Break").clicked() {
-                    self.paused = true;
-                }
-            } else {
-                if ui.button("Step").clicked() {
-                    self.single_step = true;
-                }
-                if ui.button("Continue").clicked() {
-                    self.paused = false;
-                }
-
-                let ppu = self.nes.system_ppu();
-                let debug_val = self.nes.debug_read_ppu(0x2000);
-                //println!("PPU debug = {debug_val:x}");
-            }
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-
-            ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
-        });
-
+    pub fn draw_memory_view(&mut self, ctx: &egui::Context) {
         egui::Window::new("Memory View")
             .resizable(true)
             .show(ctx, |ui| {
-
 
                 let bytes_per_row = 16;
                 let num_rows: usize = (1<<16) / bytes_per_row;
@@ -639,8 +623,99 @@ impl EmulatorUi {
                             }
                         });
                     });
-
          });
+    }
+
+    pub fn draw_nametables_view(&mut self, ctx: &egui::Context) {
+        let width = self.fb_width * 2;
+        let height = self.fb_height * 2;
+        if self.queue_nametable_fb_upload {
+            let copy = ImageDelta::full(ImageData::Color(ColorImage {
+                size: [width as _, height as _],
+                pixels: self.nametables_framebuffer.chunks_exact(3)
+                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
+                    .collect(),
+            }), egui::TextureFilter::Nearest);
+
+            ctx.tex_manager().write().set(self.nametables_texture.id(), copy);
+            self.queue_framebuffer_upload = false;
+        }
+
+        egui::Window::new("Nametables")
+            .resizable(true)
+            .show(ctx, |ui| {
+
+                ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
+        });
+    }
+
+    pub fn draw(&mut self, ctx: &egui::Context) -> Status {
+        let mut status = Status::Ok;
+
+        let front = self.front_buffer();
+
+        if self.queue_framebuffer_upload {
+            let rental = self.framebuffers[self.front_framebuffer].rent_data().unwrap();
+
+            // hmmm, redundant copy, grumble grumble...
+            let copy = ImageDelta::full(ImageData::Color(ColorImage {
+                size: [front.width() as _, front.height() as _],
+                pixels: rental.data.chunks_exact(4)
+                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
+                    .collect(),
+            }), egui::TextureFilter::Nearest);
+
+            ctx.tex_manager().write().set(self.framebuffer_texture.id(), copy);
+            self.queue_framebuffer_upload = false;
+        }
+
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            self.draw_notices_header(ui);
+            use egui::{menu, Button};
+
+            menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open").clicked() {
+                        self.open_dialog();
+                    }
+                });
+            });
+
+        });
+
+        egui::SidePanel::left("side_panel").show(ctx, |ui| {
+            if ui.button("Quit").clicked() {
+                status = Status::Quit;
+            }
+            if ui.button("Reset").clicked() {
+                self.nes.reset();
+            }
+            if !self.paused {
+                if ui.button("Break").clicked() {
+                    self.paused = true;
+                }
+            } else {
+                if ui.button("Step").clicked() {
+                    self.single_step = true;
+                }
+                if ui.button("Continue").clicked() {
+                    self.paused = false;
+                }
+
+                let ppu = self.nes.system_ppu();
+                let debug_val = self.nes.debug_read_ppu(0x2000);
+                //println!("PPU debug = {debug_val:x}");
+            }
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+
+            ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
+        });
+
+        self.draw_nametables_view(ctx);
+        self.draw_memory_view(ctx);
+
         status
     }
 
