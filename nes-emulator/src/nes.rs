@@ -182,6 +182,10 @@ impl Nes {
         &mut self.system.apu
     }
 
+    pub fn peek_system_bus(&mut self, addr: u16) -> u8 {
+        self.system.peek(addr)
+    }
+
     pub fn debug_read_ppu(&mut self, addr: u16) -> u8 {
         self.system.ppu.read(&mut self.system.cartridge, addr)
     }

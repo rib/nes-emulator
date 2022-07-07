@@ -2,7 +2,7 @@
 name = "nes-emulator"
 version = "0.1.0"
 authors = ["Robert Bragg <robert@sixbynine.org>", "K <kamiyaowl@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 default = [ "unsafe-opt" ]
@@ -11,12 +11,12 @@ trace = []
 
 [lib]
 path = "src/lib.rs"
-#name = "rust_nes_emulator"
 
 [dependencies]
 log = "0.4"
-env_logger = "0.9"
 bytemuck = "1.9"
 bitflags = "1"
 anyhow = "1"
-image = "0.23"
+
+[dev-dependencies]
+inventory = "0.1"

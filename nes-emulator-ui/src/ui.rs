@@ -2,8 +2,9 @@
 // positives atm :(
 #![allow(dead_code)]
 
-use std::{collections::{HashSet, HashMap, VecDeque}, fmt::Debug, time::{Instant, Duration}, path::{Path, PathBuf}, fs::File, io::Read, num::NonZeroUsize};
+use std::{collections::{HashSet, HashMap, VecDeque}, fmt::Debug, time::{Instant, Duration}, path::{Path, PathBuf}, fs::File, io::Read, num::NonZeroUsize, u16::MAX};
 
+use egui_extras::Table;
 use log::{error, warn, info, debug, trace};
 use clap::Parser;
 
@@ -189,6 +190,8 @@ pub struct EmulatorUi {
 
     profiled_last_fps: f32, // Extrapolated from last frame duration
     profiled_aggregate_fps: f32, // Measured over stats update period
+
+    tmp_row_values: Vec<u8>,
 }
 
 #[derive(Parser, Debug)]
@@ -201,9 +204,6 @@ pub struct Args {
 
     #[clap(short='r', long="relative-time", help="Step emulator by relative time intervals, not necessarily keeping up with real time")]
     relative_time: Option<bool>,
-
-    #[clap(short='w', long="wav", help="Record audio to this WAV file")]
-    wav_output: Option<String>
 }
 
 impl EmulatorUi {
@@ -284,6 +284,8 @@ impl EmulatorUi {
 
             profiled_last_fps: 0.0,
             profiled_aggregate_fps: 0.0,
+
+            tmp_row_values: vec![],
         };
 
         if let Some(ref rom) = args.rom {
@@ -555,8 +557,94 @@ impl EmulatorUi {
             ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
         });
 
+        egui::Window::new("Memory View")
+            .resizable(true)
+            .show(ctx, |ui| {
+
+
+                let bytes_per_row = 16;
+                let num_rows: usize = (1<<16) / bytes_per_row;
+                let n_val_cols = bytes_per_row;
+
+
+                let addr_col_width = Size::exact(60.0);
+                let val_col_width = Size::exact(30.0);
+                let char_col_width = Size::exact(10.0);
+                let text_view_padding = Size::exact(100.0);
+                let row_height_sans_spacing = 30.0;
+                //let num_rows = 20;
+                use egui_extras::{TableBuilder, Size};
+                let mut tb = TableBuilder::new(ui)
+                    .column(addr_col_width);
+
+                for _ in 0..n_val_cols {
+                    tb = tb.column(val_col_width);
+                }
+
+                tb = tb.column(text_view_padding);
+
+                for _ in 0..n_val_cols {
+                    tb = tb.column(char_col_width);
+                }
+
+                tb
+                    .header(30.0, |mut header| {
+                        header.col(|ui| {
+                            ui.heading("    ");
+                        });
+
+                        for i in 0..n_val_cols {
+                            header.col(|ui| {
+                                ui.heading(format!("{i:02x}"));
+                            });
+                        }
+
+                        header.col(|ui| {
+                            ui.heading("     ");
+                        });
+
+                        for _ in 0..n_val_cols {
+                            header.col(|ui| {
+                                ui.heading(" ");
+                            });
+                        }
+                    })
+                    .body(|mut body| {
+                        body.rows(row_height_sans_spacing, num_rows, |row_index, mut row| {
+                            row.col(|ui| {
+                                ui.heading(format!("{:04x}", row_index * bytes_per_row));
+                            });
+
+                            self.tmp_row_values.clear();
+                            for i in 0..n_val_cols {
+                                let addr = row_index * bytes_per_row + i;
+                                let val = self.nes.peek_system_bus(addr as u16);
+                                self.tmp_row_values.push(val);
+                                row.col(|ui| {
+                                    ui.label(format!("{:02x}", val));
+                                });
+                            }
+                            row.col(|ui| {
+                                ui.label(" ");
+                            });
+                            for i in 0..n_val_cols {
+                                let val = self.tmp_row_values[i];
+                                row.col(|ui| {
+                                    if val.is_ascii_alphanumeric() {
+                                        ui.label(format!("{}", val as char));
+                                    } else {
+                                        ui.label(".");
+                                    }
+                                });
+                            }
+                        });
+                    });
+
+         });
         status
     }
+
+
 
     pub fn handle_window_event(&mut self, event: winit::event::WindowEvent) {
         match event {
