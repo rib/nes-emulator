@@ -1,7 +1,4 @@
-use crate::cartridge;
-
 use super::cartridge::*;
-use super::interface::*;
 
 pub const PATTERN_TABLE_BASE_ADDR: u16 = 0x0000;
 pub const NAME_TABLE_BASE_ADDR: u16 = 0x2000;

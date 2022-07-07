@@ -5,9 +5,6 @@ use anyhow::Result;
 
 use crate::binary::{self, NsfConfig, INesConfig};
 use crate::constants::*;
-use super::interface::*;
-
-
 
 
 pub const fn page_offset(page_no: usize, page_size: usize) -> usize {
@@ -32,10 +29,6 @@ pub enum MapperId {
 pub trait Mapper {
     fn id(&self) -> MapperId;
 
-    // FIXME: find a less hacky way of special casing the 031 mapper
-    // for NSF playback
-    //fn nsf_config(&self) -> Option<NsfConfig>;
-
     fn reset(&mut self);
 
     // Returns (value, undefined_bits)
@@ -50,7 +43,6 @@ pub trait Mapper {
 struct NoCartridge;
 impl Mapper for NoCartridge {
     fn id(&self) -> MapperId { MapperId::None }
-    //fn nsf_config(&self) -> Option<NsfConfig> { None }
     fn reset(&mut self) {}
     fn system_bus_read(&mut self, _addr: u16) -> (u8, u8) { (0, 0) }
     fn system_bus_peek(&mut self, _addr: u16) -> (u8, u8) { (0, 0) }

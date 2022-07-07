@@ -1,32 +1,13 @@
 use crate::apu::apu::Apu;
-//use crate::stash_apu::Apu;
-use crate::cartridge;
-use crate::cpu::Interrupt;
-use crate::ppu::OAM_SIZE;
 use crate::ppu::Ppu;
 use crate::ppu::PpuStatus;
-use crate::ppu_registers::APU_IO_OAM_DMA_OFFSET;
 
 use super::cartridge::*;
-use super::interface::*;
 use super::pad::*;
-use super::vram::*;
 use bitflags::bitflags;
 
 pub const WRAM_SIZE: usize = 0x0800;
-pub const PPU_REG_SIZE: usize = 0x0008;
-pub const APU_IO_REG_SIZE: usize = 0x0018;
-pub const EROM_SIZE: usize = 0x1FE0;
-pub const ERAM_SIZE: usize = 0x2000;
-pub const PROM_SIZE: usize = 0x8000; // 32KB
-
-pub const WRAM_BASE_ADDR: u16 = 0x0000;
-pub const PPU_REG_BASE_ADDR: u16 = 0x2000;
 pub const APU_IO_REG_BASE_ADDR: u16 = 0x4000;
-pub const CARTRIDGE_BASE_ADDR: u16 = 0x4020;
-
-/// Memory Access Dispatcher
-//#[derive(Clone)]
 
 bitflags! {
     pub struct WatchOps: u8 {
@@ -64,24 +45,12 @@ pub struct System {
     /// 0x0800 - 0x1f7ff: WRAM  Mirror x3
     pub wram: [u8; WRAM_SIZE],
 
-    //  0x4000 - 0x401f: APU I/O, PAD
-    pub io_reg: [u8; APU_IO_REG_SIZE],
-
     // If the CPU starts an OAM DMA then the CPU will be suspended for 513 or 514 clock cycles
     // If the CPU starts a DCM sample buffer DMA the CPU will be suspended for 4 clock cycles
     pub dma_cpu_suspend_cycles: u16,
 
-    /// The R / W request to the cassette is Emulation at the call destination,
-    /// and the addr passed to the argument that switches the actual machine
-    /// passes the address as it is from the CPU instruction
-    ///  0x4020 - 0x5fff: Extended ROM
-    ///  0x6000 - 0x7FFF: Extended RAM
-    ///  0x8000 - 0xbfff: PRG-ROM switchable
-    ///  0xc000 - 0xffff: PRG-ROM fixed to the last bank or switchable
     pub cartridge: Cartridge,
 
-    /// コントローラへのアクセスは以下のモジュールにやらせる
-    /// 0x4016, 0x4017
     pub pad1: Pad,
     pub pad2: Pad,
 
@@ -104,7 +73,6 @@ impl System {
             cartridge,
 
             wram: [0; WRAM_SIZE],
-            io_reg: [0; APU_IO_REG_SIZE],
 
             dma_cpu_suspend_cycles: 0,
 
@@ -164,7 +132,6 @@ impl System {
                     0x17 => (self.pad2.read(), 0b1110_0000), // pad2
                     _ => {
                         self.apu.read(addr)
-                        //arr_read!(self.io_reg, index),
                     }
                 }
             }
@@ -231,7 +198,7 @@ impl System {
 
         match addr {
             0x0000..=0x1fff => { // RAM
-                // mirror support
+                // mirror
                 let index = usize::from(addr) % self.wram.len();
                 arr_write!(self.wram, index, data);
             }
@@ -264,7 +231,6 @@ impl System {
                         self.apu.write(addr, data);
                     }
                 }
-                //arr_write!(self.io_reg, index, data);
             }
             _ => { // Cartridge
                 self.cartridge.system_bus_write(addr, data);

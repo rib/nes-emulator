@@ -1,6 +1,5 @@
 use bitflags::bitflags;
 
-use super::interface::*;
 use super::system::System;
 use super::cpu_instruction::{Instruction, Opcode, AddressingMode};
 

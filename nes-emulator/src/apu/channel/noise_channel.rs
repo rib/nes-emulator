@@ -3,6 +3,8 @@ use crate::apu::channel::volume_envelope::VolumeEnvelope;
 use super::frame_sequencer::FrameSequencerStatus;
 
 const NTSC_TIMER_PERIODS_TABLE: [u16; 16] = [ 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 ];
+
+#[allow(dead_code)]
 const PAL_TIMER_PERIODS_TABLE: [u16; 16] = [ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 ];
 
 pub struct NoiseChannel {

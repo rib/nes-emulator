@@ -1,12 +1,8 @@
-use crate::ppu_registers;
 use crate::ppu_registers::Control1Flags;
 use crate::ppu_registers::Control2Flags;
 use crate::ppu_registers::StatusFlags;
 use crate::prelude::Cartridge;
 
-use super::cpu::*;
-use super::interface::*;
-use super::system::*;
 use super::vram::*;
 
 pub const CPU_CYCLE_PER_LINE: usize = 341 / 3; // ppu cyc -> cpu cyc
@@ -298,7 +294,7 @@ impl Ppu {
         }
     }
 
-    pub fn data_write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    pub fn data_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         if let 0x3f00..=0x3fff = addr {
             //println!("palette write: addr={addr:x}, data={data:x}");
             self.pallet_write(addr, data);
@@ -487,7 +483,7 @@ impl Ppu {
             }
             0x2007 => { // PPU_DATA
                 //println!("data_write_u8: {:x}, {data:x}", self.shared_vram_addr);
-                self.data_write_u8(cartridge, self.shared_v_register, data);
+                self.data_write(cartridge, self.shared_v_register, data);
 
                 //arr_write!(self.ppu_reg, 7, data);
                 // PPUに書いてもらおう

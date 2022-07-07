@@ -4,6 +4,8 @@ use crate::system::DmcDmaRequest;
 // Ref: https://www.nesdev.org/wiki/APU_DMC
 // Measured in CPU clock cycles
 const DMC_PERIODS_TABLE_NTSC: [u16; 16] = [ 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106,  84,  72,  54 ];
+
+#[allow(dead_code)]
 const DMC_PERIODS_TABLE_PAL: [u16; 16] = [ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98,  78,  66,  50 ];
 
 pub struct DmcChannel {
@@ -121,7 +123,7 @@ impl DmcChannel {
         }
     }
 
-    pub fn completed_dma(&mut self, address: u16, value: u8) {
+    pub fn completed_dma(&mut self, _address: u16, value: u8) {
         self.sample_buffer = Some(value);
     }
 

@@ -2,15 +2,12 @@ use std::time::Duration;
 use std::time::Instant;
 
 use log::{warn};
-use anyhow::anyhow;
 use anyhow::Result;
 
-use crate::apu::AudioOutput;
 use crate::apu::apu::Apu;
 use crate::binary;
 use crate::binary::NesBinaryConfig;
 use crate::binary::NsfConfig;
-use crate::cartridge;
 use crate::constants::*;
 use crate::prelude::*;
 use crate::system::*;
@@ -51,8 +48,6 @@ pub struct Nes {
     nsf_step_period: u64,
     nsf_step_progress: u64,
     nsf_current_track: u8,
-
-    last_clocks_per_second: u32,
 }
 
 impl Nes {
@@ -60,13 +55,14 @@ impl Nes {
 
         let cpu = Cpu::default();
         let mut ppu = Ppu::default();
-        let mut apu = Apu::new(NTSC_CPU_CLOCK_HZ, audio_sample_rate);
         ppu.draw_option.fb_width = FRAMEBUFFER_WIDTH as u32;
         ppu.draw_option.fb_height = FRAMEBUFFER_HEIGHT as u32;
         ppu.draw_option.offset_x = 0;
         ppu.draw_option.offset_y = 0;
         ppu.draw_option.scale = 1;
         ppu.draw_option.pixel_format = pixel_format;
+
+        let apu = Apu::new(NTSC_CPU_CLOCK_HZ, audio_sample_rate);
 
         let system = System::new(ppu, apu, Cartridge::none());
         Nes {
@@ -82,8 +78,6 @@ impl Nes {
             nsf_step_period: 0,
             nsf_step_progress: 0,
             nsf_current_track: 0,
-
-            last_clocks_per_second: NTSC_CPU_CLOCK_HZ,
         }
     }
 

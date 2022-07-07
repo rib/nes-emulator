@@ -1,5 +1,3 @@
-use super::interface::*;
-
 #[derive(Copy, Clone)]
 pub enum PadButton {
     A,
@@ -55,6 +53,7 @@ pub struct StandardControllerState {
     pub controller_shift: u8,
 }
 
+#[allow(dead_code)]
 fn debug_print_buttons_pressed(buttons: u8) {
     if buttons & 1 != 0 { println!("> A pressed"); }
     if buttons & 2 != 0 { println!("> B pressed"); }

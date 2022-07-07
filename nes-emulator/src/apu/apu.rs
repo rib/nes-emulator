@@ -1,15 +1,10 @@
-use crate::apu::channel::frame_sequencer::FrameSequencer;
-//use crate::apu::channel::noise_channel::NoiseChannel;
+use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
 use crate::apu::channel::square_channel::SquareChannel;
-use crate::apu::mixer::Mixer;
-use crate::apu::{AudioOutput, Channel};
-use crate::system::DmcDmaRequest;
-//use crate::emulation::CPU_CLOCK_HZ;
-
-use super::channel::frame_sequencer::{FrameSequencerStatus, FrameSequencerMode};
-use super::channel::noise_channel::NoiseChannel;
 use super::channel::triangle_channel::TriangleChannel;
+use super::channel::noise_channel::NoiseChannel;
 use super::channel::dmc_channel::DmcChannel;
+use crate::apu::mixer::Mixer;
+
 
 pub struct Apu {
     pub sample_buffer: Vec<f32>,

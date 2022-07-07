@@ -1,15 +1,6 @@
 use crate::ppu::Ppu;
 
-use super::system::*;
-
 use bitflags::bitflags;
-
-pub const PPU_OAMADDR_OFFSET: usize = 0x03;
-pub const PPU_OAMDATA_OFFSET: usize = 0x04;
-pub const PPU_SCROLL_OFFSET: usize = 0x05;
-pub const PPU_ADDR_OFFSET: usize = 0x06;
-pub const PPU_DATA_OFFSET: usize = 0x07;
-pub const APU_IO_OAM_DMA_OFFSET: usize = 0x14;
 
 bitflags! {
     #[derive(Default)]

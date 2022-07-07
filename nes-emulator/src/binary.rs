@@ -1,4 +1,4 @@
-use log::{debug, trace};
+use log::{debug};
 use anyhow::anyhow;
 use anyhow::Result;
 

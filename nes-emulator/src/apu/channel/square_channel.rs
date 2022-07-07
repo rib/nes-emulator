@@ -79,7 +79,7 @@ impl SquareChannel {
     // second square channel, the inverted value is incremented by 1. The resulting
     // value is added with the channel's current period, yielding the final result."
     pub fn update_sweep_target_period(&mut self) {
-        let mut delta = self.timer >> self.sweep_shift;
+        let delta = self.timer >> self.sweep_shift;
 
         self.sweep_target_period = if self.sweep_negate {
             if self.twos_compliment_sweep_negate {
@@ -186,7 +186,10 @@ impl SquareChannel {
                 // "The duty cycle is changed, but the sequencer's current position isn't affected."
                 self.duty = value >> 6;
 
-                self.length_counter.set_halt((value & 0b0010_0000) != 0);
+                let len_halt = (value & 0b0010_0000) != 0;
+
+                self.length_counter.set_halt(len_halt);
+                self.volume_envelope.set_loop_flag(len_halt); // Dual-purpose flag
 
                 let constant_volume = (value & 0b0001_0000) != 0;
                 let envelope_volume = value & 0xf;
