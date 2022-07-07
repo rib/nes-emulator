@@ -192,9 +192,7 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
 
     let mut has_chr_ram = false;
     let n_prg_rom_pages = usize::from(ines[4]); // * 16KBしてあげる
-    debug!("iNes: {} PRG ROM pages", n_prg_rom_pages);
     let n_chr_rom_pages = usize::from(ines[5]); // * 8KBしてあげる
-    debug!("iNes: {} CHR ROM pages", n_chr_rom_pages);
 
     let mut n_chr_ram_pages = 0;
     if n_chr_rom_pages == 0 {
@@ -205,9 +203,9 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
 
     let flags6 = ines[6];
     let has_battery = (flags6 & 0x02) == 0x02; // 0x6000 - 0x7fffのRAMを使わせる
-    debug!("iNes: Has Battery {}", has_battery);
+    debug!("iNes: Has Battery: {}", has_battery);
     let has_trainer = (flags6 & 0x04) == 0x04; // 512byte trainer at 0x7000-0x71ff in ines file
-    debug!("iNes: Has Trainer {}", has_trainer);
+    debug!("iNes: Has Trainer: {}", has_trainer);
 
     let is_mirroring_vertical = (flags6 & 0x01) == 0x01;
 
@@ -236,7 +234,9 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
     let header_bytes = 16;
     let trainer_bytes = if has_trainer { 512 } else { 0 };
     let prg_rom_bytes = n_prg_rom_pages * PAGE_SIZE_16K;
+    debug!("iNes: {n_prg_rom_pages} PRG ROM pages x 16k = {prg_rom_bytes} bytes");
     let chr_rom_bytes = n_chr_rom_pages * PAGE_SIZE_8K;
+    debug!("iNes: {n_chr_rom_pages} CHR ROM pages x 8k = {chr_rom_bytes} bytes");
 
     let trainer_baseaddr = if has_trainer { Some(header_bytes) } else { None };
     let prg_rom_baseaddr = header_bytes + trainer_bytes;

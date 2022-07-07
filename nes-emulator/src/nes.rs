@@ -55,11 +55,6 @@ impl Nes {
 
         let cpu = Cpu::default();
         let mut ppu = Ppu::default();
-        ppu.draw_option.fb_width = FRAMEBUFFER_WIDTH as u32;
-        ppu.draw_option.fb_height = FRAMEBUFFER_HEIGHT as u32;
-        ppu.draw_option.offset_x = 0;
-        ppu.draw_option.offset_y = 0;
-        ppu.draw_option.scale = 1;
         ppu.draw_option.pixel_format = pixel_format;
 
         let apu = Apu::new(NTSC_CPU_CLOCK_HZ, audio_sample_rate);
@@ -362,5 +357,10 @@ impl Nes {
 
     pub fn cpu_clock(&self) -> u64 {
         self.cpu_clock
+    }
+
+
+    pub fn debug_sample_nametable(&mut self, x: usize, y: usize) -> [u8; 3] {
+        self.system.ppu.peek_nametable(x, y, &mut self.system.cartridge)
     }
 }

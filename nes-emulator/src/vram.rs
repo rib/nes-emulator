@@ -71,7 +71,7 @@ impl VRam {
         (table_index, offset)
     }
 
-    pub fn read_u8(&self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+    pub fn read(&self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         debug_assert!(addr < VIDEO_ADDRESS_SIZE);
 
         match addr {
@@ -87,7 +87,17 @@ impl VRam {
         }
     }
 
-    pub fn write_u8(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    pub fn peek(&self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+        debug_assert!(addr < VIDEO_ADDRESS_SIZE);
+        match addr {
+            0x0000..=0x1fff => {
+                cartridge.ppu_bus_peek(addr)
+            }
+            _ => self.read(cartridge, addr)
+        }
+    }
+
+    pub fn write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         debug_assert!(addr < VIDEO_ADDRESS_SIZE);
 
         match addr {
