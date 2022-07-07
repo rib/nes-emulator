@@ -94,7 +94,7 @@ impl Mapper for Mapper0 {
                 let addr = (addr - 0x8000) as usize;
                 self.prg_rom[addr]
             }
-            0xc00..=0xffff => { // Last 16 KB of ROM (NROM-256) or mirror of $8000-$BFFF (NROM-128)
+            0xc000..=0xffff => { // Last 16 KB of ROM (NROM-256) or mirror of $8000-$BFFF (NROM-128)
                 let addr = (addr - 0x8000) as usize;
                 if addr >= self.prg_rom.len() {
                     self.prg_rom[addr - self.prg_rom.len()]
