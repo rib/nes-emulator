@@ -510,64 +510,48 @@ impl Ppu {
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
-        //let raw_y = self.scroll_fine_y();
-        let four_screen_y = y as u16; //self.line + u16::from(self.current_scroll_y);
-        let offset_y = four_screen_y & 0x07;
-        let tile_base_y = four_screen_y >> 3;
-        let four_screen_tile_y = tile_base_y % (NAMETABLE_Y_TILES_COUNT * 2);
-        let nametable_tile_y = four_screen_tile_y % NAMETABLE_Y_TILES_COUNT;
-        let is_nametable_position_top = four_screen_tile_y < NAMETABLE_Y_TILES_COUNT;
-
-        // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
-        let four_screen_x = x as u16; // ((pixel_x as u16) + u16::from(self.current_scroll_x))
-        let offset_x = four_screen_x & 0x07;
-        let tile_base_x = four_screen_x >> 3;
-
-        // scroll reg shifts in tile conversion
-        let four_screen_tile_x = tile_base_x % (NAMETABLE_X_TILES_COUNT * 2);
-        let nametable_tile_x = four_screen_tile_x % NAMETABLE_X_TILES_COUNT;
-        let is_nametable_position_left = four_screen_tile_x < NAMETABLE_X_TILES_COUNT;
-
-        // Since we know which of the four faces, we will return the base address of that face
-        let target_nametable_base_addr = if is_nametable_position_top {
-            if is_nametable_position_left { 0x2000 } else { 0x2400 }
+        // Which nametable are we in
+        let nametable_base_addr = if y < VISIBLE_SCREEN_HEIGHT {
+            if x < VISIBLE_SCREEN_WIDTH { 0x2000 } else { 0x2400 }
         } else {
-            if is_nametable_position_left { 0x2800 } else { 0x2c00 }
+            if x < VISIBLE_SCREEN_WIDTH { 0x2800 } else { 0x2c00 }
         };
 
-        // Since the attribute table is 32 bytes after the nametable, the address is calculated and read.
-        // It is 1 attr with 4 * 4 tiles in height and width.
-        // Offset calculation uses global position for scroll support (maybe 1Nametable with clipping)
-        let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
-        let attribute_x_offset = (four_screen_tile_x >> 2) & 0x7;
-        let attribute_y_offset = four_screen_tile_y >> 2;
+        let nametable_y = y as u16 % VISIBLE_SCREEN_HEIGHT as u16; //self.line + u16::from(self.current_scroll_y);
+        let tile_y = nametable_y >> 3;
+        let tile_pixel_y = nametable_y & 0x07;
+
+        let nametable_x = x as u16 % VISIBLE_SCREEN_WIDTH as u16; // ((pixel_x as u16) + u16::from(self.current_scroll_x))
+        let tile_x = nametable_x >> 3;
+        let tile_pixel_x = nametable_x & 0x07;
+
+        let attribute_base_addr = nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
+        let attribute_x_offset = (tile_x >> 2) & 0x7;
+        let attribute_y_offset = tile_y >> 2;
         let attribute_addr =
             attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
-        // Used for attribute reading and BG palette selection.
-        // Change the palette information used at the 4 * 4 position
         let raw_attribute = cartridge.vram_read(attribute_addr);
-        let bg_palette_id = match (nametable_tile_x & 0x03 < 0x2, nametable_tile_y & 0x03 < 0x2) {
-            (true, true) => (raw_attribute >> 0) & 0x03,  // top left
+        let bg_palette_id = match (tile_x & 0x03 < 0x2, tile_y & 0x03 < 0x2) {
+            (true, true) => (raw_attribute >> 0) & 0x03, // top left
             (false, true) => (raw_attribute >> 2) & 0x03, // top right
             (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
             (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
         };
 
-        // Read tile_id from Name table-> Build data from pattern table
-        let nametable_addr = target_nametable_base_addr + (nametable_tile_y << 5) + nametable_tile_x;
+        let nametable_addr = nametable_base_addr + tile_y * NAMETABLE_X_TILES_COUNT + tile_x;
         let bg_tile_id = u16::from(cartridge.ppu_bus_peek(nametable_addr));
 
         // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
         let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
-        let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
+        let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + tile_pixel_y;
         let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
         let bg_data_lower = cartridge.ppu_bus_peek(bg_pattern_table_addr_lower);
         let bg_data_upper = cartridge.ppu_bus_peek(bg_pattern_table_addr_upper);
 
         // Make the drawing color of bg
-        let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
-            | ((bg_data_lower >> (7 - offset_x)) & 0x01);
+        let bg_palette_offset = (((bg_data_upper >> (7 - tile_pixel_x)) & 0x01) << 1)
+            | ((bg_data_lower >> (7 - tile_pixel_x)) & 0x01);
         let bg_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET) +   // 0x3f00
             (u16::from(bg_palette_id) << 2) + // Select BG Palette 0 ~ 3 in attribute
             u16::from(bg_palette_offset); // Color selection in palette
@@ -590,7 +574,7 @@ impl Ppu {
         }
 
         if is_monochrome {
-            let val = (draw_color.0 + draw_color.1 + draw_color.2) / 3;
+            let val = ((draw_color.0 as u16 + draw_color.1 as u16 + draw_color.2 as u16) / 3u16) as u8;
             draw_color.0 = val;
             draw_color.1 = val;
             draw_color.2 = val;
@@ -600,11 +584,6 @@ impl Ppu {
     }
 
     /// Draw one line
-    ///
-    /// `tile_base`   - Current tile position without scroll offset addition
-    /// `tile_global` - Tile position on 4 sides including scroll offset
-    /// `tile_local`  - Converted `tile_global` to the position on the tile on 1Namespace
-    /// All of the above should match without scroll
     fn draw_tile_span(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
         let nametable_base_addr = self.name_table_base_addr();
         let pattern_table_addr = self.bg_pattern_table_addr();
@@ -616,86 +595,63 @@ impl Ppu {
             PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
         ));
 
-        //let raw_y = self.scroll_fine_y();
-        let raw_y = self.line + u16::from(self.current_scroll_y);
-        let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
-        let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
-                                      // scroll reg shifts in tile conversion
-        let tile_global_y = tile_base_y % (NAMETABLE_Y_TILES_COUNT * 2); // y absolute coordinates in tile conversion
-        let tile_local_y = tile_global_y % NAMETABLE_Y_TILES_COUNT; // Absolute coordinates within 1 tile
-                                                               // Of the 4 sides, if it is approaching the lower side, it is false
-        let is_nametable_position_top = tile_global_y < NAMETABLE_Y_TILES_COUNT;
+        let screen_y = self.line;
+        let four_screen_y = (screen_y + self.current_scroll_y as u16) % (VISIBLE_SCREEN_HEIGHT as u16 * 2u16);
 
-        // pixel formatの決定
-        let pixel_indexes = match self.draw_option.pixel_format {
-            PixelFormat::RGBA8888 => (0, 1, 2, 3),
-            PixelFormat::BGRA8888 => (2, 1, 0, 3),
-            PixelFormat::ARGB8888 => (1, 2, 3, 0),
-        };
+        let nametable_y = four_screen_y as u16 % VISIBLE_SCREEN_HEIGHT as u16;
+        let tile_y = nametable_y >> 3;
+        let tile_pixel_y = nametable_y & 0x07;
 
-        //println!("scroll_x = {}, y = {}", self.current_scroll_x, self.current_scroll_y);
-        // Loop in the drawing coordinate system
-        let pixel_y = usize::from(self.line);
-        for pixel_x in 0..VISIBLE_SCREEN_WIDTH {
-            // Sprite: Get the data to draw from the searched temporary register
+        for screen_x in 0..VISIBLE_SCREEN_WIDTH {
+            let four_screen_x = ((screen_x as u16) + u16::from(self.current_scroll_x)) % (VISIBLE_SCREEN_WIDTH as u16 * 2u16);
+
             let (sprite_palette_data_back, sprite_palette_data_front) =
-                self.get_sprite_draw_data(cartridge, pixel_x, pixel_y);
+                self.get_sprite_draw_data(cartridge, screen_x, screen_y as usize);
 
-            //let offset_x = self.scroll_fine_x();
-            // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
-            let offset_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) & 0x07;
-            let tile_base_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) >> 3;
-            // scroll reg shifts in tile conversion
-            let tile_global_x = tile_base_x % (NAMETABLE_X_TILES_COUNT * 2); // X absolute coordinates in 4tile conversion
-            let tile_local_x = tile_global_x % NAMETABLE_X_TILES_COUNT; // Absolute coordinates within 1 tile
-            let is_nametable_position_left = tile_global_x < NAMETABLE_X_TILES_COUNT; // False if it is on the right side of the 4 sides
+            let nametable_x = four_screen_x as u16 % VISIBLE_SCREEN_WIDTH as u16;
+            let tile_x = nametable_x >> 3;
+            let tile_pixel_x = nametable_x & 0x07;
 
-            // Since we know which of the four faces, we will return the base address of that face
-            let target_nametable_base_addr = nametable_base_addr +
-                (if is_nametable_position_left { 0x0000 } else { 0x0400 }) + // Wide area offset on the left and right sides
-                (if is_nametable_position_top  { 0x0000 } else { 0x0800 }); // Wide area offset on top and bottom
+            // Which nametable are we in
+            let nametable_base_addr = if four_screen_y < VISIBLE_SCREEN_HEIGHT as u16 {
+                if four_screen_x < VISIBLE_SCREEN_WIDTH as u16 { 0x2000 } else { 0x2400 }
+            } else {
+                if four_screen_x < VISIBLE_SCREEN_WIDTH as u16 { 0x2800 } else { 0x2c00 }
+            };
 
-            // Since the attribute table is 32 bytes after the nametable, the address is calculated and read.
-            // It is 1 attr with 4 * 4 tiles in height and width.
-            // Offset calculation uses global position for scroll support (maybe 1Nametable with clipping)
-            let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET; // 23c0, 27c0, 2bc0, 2fc0のどれか
-            let attribute_x_offset = (tile_global_x >> 2) & 0x7;
-            let attribute_y_offset = tile_global_y >> 2;
+            let attribute_base_addr = nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
+            let attribute_x_offset = (tile_x >> 2) & 0x7;
+            let attribute_y_offset = tile_y >> 2;
             let attribute_addr =
                 attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
-            // Used for attribute reading and BG palette selection.
-            // Change the palette information used at the 4 * 4 position
             let raw_attribute = cartridge.vram_read(attribute_addr);
-            let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
-                (true, true) => (raw_attribute >> 0) & 0x03,  // top left
+            let bg_palette_id = match (tile_x & 0x03 < 0x2, tile_y & 0x03 < 0x2) {
+                (true, true) => (raw_attribute >> 0) & 0x03, // top left
                 (false, true) => (raw_attribute >> 2) & 0x03, // top right
                 (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
                 (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
             };
 
-            // Read tile_id from Name table-> Build data from pattern table
-            let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-            let bg_tile_id = u16::from(cartridge.vram_read(nametable_addr));
-
+            let nametable_addr = nametable_base_addr + tile_y * NAMETABLE_X_TILES_COUNT + tile_x;
+            let bg_tile_id = u16::from(cartridge.ppu_bus_peek(nametable_addr));
 
             // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
             let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
-            let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
+            let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + tile_pixel_y;
             let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
-            let bg_data_lower = cartridge.vram_read(bg_pattern_table_addr_lower);
-            let bg_data_upper = cartridge.vram_read(bg_pattern_table_addr_upper);
-
+            let bg_data_lower = cartridge.ppu_bus_peek(bg_pattern_table_addr_lower);
+            let bg_data_upper = cartridge.ppu_bus_peek(bg_pattern_table_addr_upper);
 
             // Make the drawing color of bg
-            let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
-                | ((bg_data_lower >> (7 - offset_x)) & 0x01);
+            let bg_palette_offset = (((bg_data_upper >> (7 - tile_pixel_x)) & 0x01) << 1)
+                | ((bg_data_lower >> (7 - tile_pixel_x)) & 0x01);
             let bg_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET) +   // 0x3f00
                 (u16::from(bg_palette_id) << 2) + // Select BG Palette 0 ~ 3 in attribute
                 u16::from(bg_palette_offset); // Color selection in palette
 
             // Create BG data considering the 8 pixel clip at the left end of BG
-            let is_bg_clipping = is_clip_bg_leftend && (pixel_x < 8);
+            let is_bg_clipping = is_clip_bg_leftend && (screen_x < 8);
             let is_bg_tranparent = (bg_palette_addr & 0x03) == 0x00; // If the background color is selected, it will be processed here
             let bg_palette_data: Option<u8> = if is_bg_clipping || !is_write_bg || is_bg_tranparent
             {
@@ -719,44 +675,38 @@ impl Ppu {
                 }
             }
 
-            let draw_base_y = pixel_y as i32;
-            let draw_base_x = pixel_x as i32;
-            // Coordinate calculation, 1 dot needs to be reflected in scale ** 2 pixel
-            let draw_y = draw_base_y;
-            if (draw_y < 0) || ((VISIBLE_SCREEN_HEIGHT as i32) <= draw_y) {
-                continue;
+            if is_monochrome {
+                let val = ((draw_color.0 as u16 + draw_color.1 as u16 + draw_color.2 as u16) / 3u16) as u8;
+                draw_color.0 = val;
+                draw_color.1 = val;
+                draw_color.2 = val;
             }
 
-            let draw_x = draw_base_x;
-            if (draw_x < 0) || ((VISIBLE_SCREEN_WIDTH as i32) <= draw_x) {
-                continue;
-            }
-
-            // Calculate the corresponding coordinates from the size of FrameBuffer
-            // Use the width of FrameBuffer instead of 256 for the width when
-            // calculating the index corresponding to the Y position.
-            let base_index = ((draw_y as isize) * (VISIBLE_SCREEN_WIDTH as isize)
-                + (draw_x as isize))
-                * (NUM_OF_COLOR as isize);
+            const BPP: isize = 4;
+            const STRIDE: isize = VISIBLE_SCREEN_WIDTH as isize * BPP;
+            let fb_off = screen_y as isize * STRIDE + screen_x as isize * BPP;
 
             unsafe {
-                let base_ptr = fb.offset(base_index);
-
-                *base_ptr.offset(pixel_indexes.0) = draw_color.0; // R
-                *base_ptr.offset(pixel_indexes.1) = draw_color.1; // G
-                *base_ptr.offset(pixel_indexes.2) = draw_color.2; // B
-                *base_ptr.offset(pixel_indexes.3) = 0xff; // alpha blending
-
-                // Supports monochrome output (total average for the time being)
-                if is_monochrome {
-                    let data = ((u16::from(*base_ptr.offset(pixel_indexes.0))
-                        + u16::from(*base_ptr.offset(pixel_indexes.1))
-                        + u16::from(*base_ptr.offset(pixel_indexes.2)))
-                        / 3) as u8;
-                    *base_ptr.offset(pixel_indexes.0) = data;
-                    *base_ptr.offset(pixel_indexes.1) = data;
-                    *base_ptr.offset(pixel_indexes.2) = data;
-                }
+                match self.draw_option.pixel_format {
+                    PixelFormat::RGBA8888 => {
+                        *fb.offset(fb_off + 0) = draw_color.0;
+                        *fb.offset(fb_off + 1) = draw_color.1;
+                        *fb.offset(fb_off + 2) = draw_color.2;
+                        *fb.offset(fb_off + 3) = 0xff;
+                    }
+                    PixelFormat::BGRA8888 => {
+                        *fb.offset(fb_off + 0) = draw_color.2;
+                        *fb.offset(fb_off + 1) = draw_color.1;
+                        *fb.offset(fb_off + 2) = draw_color.0;
+                        *fb.offset(fb_off + 3) = 0xff;
+                    },
+                    PixelFormat::ARGB8888 => {
+                        *fb.offset(fb_off + 0) = 0xff;
+                        *fb.offset(fb_off + 1) = draw_color.0;
+                        *fb.offset(fb_off + 2) = draw_color.1;
+                        *fb.offset(fb_off + 3) = draw_color.2;
+                    },
+                };
             }
         }
     }

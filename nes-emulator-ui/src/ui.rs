@@ -645,8 +645,10 @@ impl EmulatorUi {
                             self.tmp_row_values.clear();
                             for i in 0..n_val_cols {
                                 let addr = row_index * bytes_per_row + i;
-                                //let val = self.nes.peek_system_bus(addr as u16);
-                                let val = self.nes.peek_ppu_bus(addr as u16);
+                                let val = match self.memview_selected_space{
+                                    AddressSpace::System => self.nes.peek_system_bus(addr as u16),
+                                    AddressSpace::Ppu => self.nes.peek_ppu_bus(addr as u16),
+                                };
                                 self.tmp_row_values.push(val);
                                 row.col(|ui| {
                                     ui.label(format!("{:02x}", val));
@@ -696,6 +698,7 @@ impl EmulatorUi {
         }
 
         egui::Window::new("Nametables")
+            .default_width(900.0)
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
@@ -712,7 +715,8 @@ impl EmulatorUi {
                     .resizable(false)
                     .min_width(panels_width)
                     .show_inside(ui, |ui| {
-                        ui.label("Right Panel");
+                        ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_fine_x()));
+                        ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_fine_y()));
                 });
 
                 egui::TopBottomPanel::bottom("nametables_footer").show_inside(ui, |ui| {
@@ -746,12 +750,14 @@ impl EmulatorUi {
                             let y = ((hover_pos.y - img_pos.y) * img_to_nes_px) as usize;
                             self.nametables_hover_pos = [x, y];
 
+                            /*
                             let tile_x =
                             painter.rect_stroke(
                                 egui::Rect::from_min_size(response.rect.min + vec2(x_off as f32 * nes_px_to_img, y_off as f32 * nes_px_to_img),
                                                             vec2(self.fb_width as f32 * nes_px_to_img, self.fb_height as f32 * nes_px_to_img)),
                                 egui::Rounding::none(),
                                 egui::Stroke::new(1.0, Color32::RED));
+                                */
                             //painter.rect_filled(egui::Rect::from_min_size(response.rect.min, vec2(200.0, 200.0)),
                             //    egui::Rounding::none(), Color32::RED);
                         }
