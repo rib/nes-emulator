@@ -175,8 +175,8 @@ impl Nes {
         self.system.peek(addr)
     }
 
-    pub fn debug_read_ppu(&mut self, addr: u16) -> u8 {
-        self.system.ppu.read(&mut self.system.cartridge, addr)
+    pub fn peek_ppu_bus(&mut self, addr: u16) -> u8 {
+        self.system.ppu.ppu_bus_peek(&mut self.system.cartridge, addr)
     }
 
     pub fn allocate_framebuffer(&self) -> Framebuffer {
@@ -361,6 +361,6 @@ impl Nes {
 
 
     pub fn debug_sample_nametable(&mut self, x: usize, y: usize) -> [u8; 3] {
-        self.system.ppu.peek_nametable(x, y, &mut self.system.cartridge)
+        self.system.ppu.peek_vram_four_screens(x, y, &mut self.system.cartridge)
     }
 }

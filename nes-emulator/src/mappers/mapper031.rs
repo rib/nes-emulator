@@ -4,8 +4,12 @@ use log::{trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::NsfConfig;
+use crate::prelude::NameTableMirror;
+
+use super::mirror_vram_address;
 
 pub struct Mapper31 {
+    pub vram: [u8; 2048],
     pub prg_rom: Vec<u8>,
     pub prg_ram: Vec<u8>, // 32k
     pub chr_ram: Vec<u8>, // 8k
@@ -43,6 +47,7 @@ impl Mapper31 {
         println!("NSF BIOS = {nsf_bios:x?}");
 
         Mapper31 {
+            vram: [0u8; 2048],
             prg_rom,
             prg_ram: vec![0u8; 2 * PAGE_SIZE_16K],
             chr_ram: vec![0u8; 1 * PAGE_SIZE_8K],
@@ -121,6 +126,9 @@ impl Mapper for Mapper31 {
                 let index = addr as usize;
                 arr_read!(self.chr_ram, index)
             }
+            0x2000..=0x3fff => { // VRAM
+                arr_read!(self.vram, mirror_vram_address(addr, NameTableMirror::Vertical))
+            }
             _ => {
                 trace!("Unexpected PPU read via mapper, address = {}", addr);
                 0
@@ -138,11 +146,15 @@ impl Mapper for Mapper31 {
                 let index = addr as usize;
                 arr_write!(self.chr_ram, index, data);
             },
+            0x2000..=0x3fff => { // VRAM
+                arr_write!(self.vram, mirror_vram_address(addr, NameTableMirror::Vertical), data);
+            }
             _ => {
                 trace!("Unexpected PPU write via mapper, address = {}", addr);
             }
         }
     }
 
+    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::Vertical }
     fn irq(&self) -> bool { false }
 }

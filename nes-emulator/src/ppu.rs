@@ -3,8 +3,6 @@ use crate::ppu_registers::Control2Flags;
 use crate::ppu_registers::StatusFlags;
 use crate::prelude::Cartridge;
 
-use super::vram::*;
-
 pub const CPU_CYCLE_PER_LINE: usize = 341 / 3; // ppu cyc -> cpu cyc
 pub const NUM_OF_COLOR: usize = 4;
 pub const VISIBLE_SCREEN_WIDTH: usize = 256;
@@ -12,10 +10,10 @@ pub const VISIBLE_SCREEN_HEIGHT: usize = 240;
 pub const RENDER_SCREEN_WIDTH: u16 = VISIBLE_SCREEN_WIDTH as u16;
 pub const RENDER_N_LINES: u16 = 262;
 pub const PIXEL_PER_TILE: u16 = 8; // 1tile=8*8
-pub const SCREEN_TILE_WIDTH: u16 = (VISIBLE_SCREEN_WIDTH as u16) / PIXEL_PER_TILE; // 256/8=32
-pub const SCREEN_TILE_HEIGHT: u16 = (VISIBLE_SCREEN_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
+pub const NAMETABLE_X_TILES_COUNT: u16 = (VISIBLE_SCREEN_WIDTH as u16) / PIXEL_PER_TILE; // 256/8=32
+pub const NAMETABLE_Y_TILES_COUNT: u16 = (VISIBLE_SCREEN_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
 pub const BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY: u16 = 4;
-pub const ATTRIBUTE_TABLE_WIDTH: u16 = SCREEN_TILE_WIDTH / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
+pub const ATTRIBUTE_TABLE_WIDTH: u16 = NAMETABLE_X_TILES_COUNT / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
 
 pub const OAM_SIZE: usize = 0x100;
 pub const PATTERN_TABLE_ENTRY_BYTE: u16 = 16;
@@ -27,6 +25,22 @@ pub const SPRITE_WIDTH: usize = 8;
 pub const SPRITE_NORMAL_HEIGHT: usize = 8;
 pub const SPRITE_LARGE_HEIGHT: usize = 16;
 pub const CYCLE_PER_DRAW_FRAME: usize = CPU_CYCLE_PER_LINE * ((RENDER_N_LINES + 1) as usize);
+
+pub const PATTERN_TABLE_BASE_ADDR: u16 = 0x0000;
+pub const NAME_TABLE_BASE_ADDR: u16 = 0x2000;
+pub const NAME_TABLE_MIRROR_BASE_ADDR: u16 = 0x3000;
+pub const PALETTE_TABLE_BASE_ADDR: u16 = 0x3f00;
+pub const VIDEO_ADDRESS_SIZE: u16 = 0x4000;
+
+pub const NAME_TABLE_SIZE: usize = 0x0400;
+pub const NUM_OF_NAME_TABLE: usize = 2;
+pub const ATTRIBUTE_TABLE_SIZE: u16 = 64;
+pub const ATTRIBUTE_TABLE_OFFSET: u16 = 960; // 30x32 tiles
+
+pub const PALETTE_SIZE: usize = 0x20;
+pub const PALETTE_ENTRY_SIZE: u16 = 0x04;
+pub const PALETTE_BG_OFFSET: u16 = 0x00;
+pub const PALETTE_SPRITE_OFFSET: u16 = 0x10;
 
 #[derive(Copy, Clone)]
 pub struct Position(pub u8, pub u8);
@@ -196,8 +210,6 @@ pub struct Ppu {
 
     pub scroll_x_fine3: u8,
 
-    pub vram: VRam,
-
     pub oam: [u8; OAM_SIZE],
     pub oam_offset: u8,
 
@@ -231,8 +243,6 @@ impl Default for Ppu {
             shared_t_register: 0,
             shared_v_register: 0,
             scroll_x_fine3: 0,
-
-            vram: Default::default(),
 
             oam: [0; OAM_SIZE],
             oam_offset: 0,
@@ -272,24 +282,28 @@ impl Ppu {
     }
 
     /// Returns (value, undefined_bit_mask)
-    pub fn data_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+    fn ppu_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
         if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
-            self.read_buffer = self.vram.read(cartridge, addr);
+            self.read_buffer = cartridge.vram_read(addr);
             (self.pallet_read(addr), 0xc0)
         } else {
             let buffered = self.read_buffer;
-            self.read_buffer = self.vram.read(cartridge, addr);
+            self.read_buffer = cartridge.vram_read(addr);
             (buffered, 0)
         }
     }
 
-    pub fn data_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    pub fn ppu_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+        self.ppu_bus_read(cartridge, addr).0
+    }
+
+    pub fn ppu_bus_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         if let 0x3f00..=0x3fff = addr {
             //println!("palette write: addr={addr:x}, data={data:x}");
             self.pallet_write(addr, data);
         } else {
             //println!("data write: addr={addr:x}, data={data:x}");
-            self.vram.write(cartridge, addr, data);
+            cartridge.vram_write(addr, data);
         }
     }
 
@@ -357,7 +371,7 @@ impl Ppu {
                 (0, 0xff)
             }
             0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.data_read(cartridge, self.shared_v_register);
+                let (data, undefined_mask) = self.ppu_bus_read(cartridge, self.shared_v_register);
                 self.increment_data_addr();
                 (data, undefined_mask)
             }
@@ -365,12 +379,12 @@ impl Ppu {
         }
     }
 
-    pub fn read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+    pub fn system_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
         self.finish_read_with_latch(value, undefined_bits)
     }
 
-    pub fn peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+    pub fn system_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         let (value, undefined_bits) = match addr {
@@ -379,7 +393,7 @@ impl Ppu {
                 (data, StatusFlags::UNDEFINED_BITS.bits())
             }
             0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.data_read(cartridge, self.shared_v_register);
+                let (data, undefined_mask) = self.ppu_bus_read(cartridge, self.shared_v_register);
                 (data, undefined_mask)
             }
             _ => self.read_without_openbus(cartridge, addr)
@@ -388,7 +402,7 @@ impl Ppu {
         self.finish_peek_with_latch(value, undefined_bits)
     }
 
-    pub fn write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    pub fn system_bus_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         // mirror support
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         self.io_latch_value = data;
@@ -472,7 +486,7 @@ impl Ppu {
             }
             0x2007 => { // PPU_DATA
                 //println!("data_write_u8: {:x}, {data:x}", self.shared_vram_addr);
-                self.data_write(cartridge, self.shared_v_register, data);
+                self.ppu_bus_write(cartridge, self.shared_v_register, data);
 
                 //arr_write!(self.ppu_reg, 7, data);
                 // PPUに書いてもらおう
@@ -483,9 +497,10 @@ impl Ppu {
         };
     }
 
-    pub fn peek_nametable(&self, x: usize, y: usize, cartridge: &mut Cartridge) -> [u8; 3] {
+    /// Treating VRAM as a 2x2 grid of nametables / screens this samples a single (background) pixel
+    pub fn peek_vram_four_screens(&self, x: usize, y: usize, cartridge: &mut Cartridge) -> [u8; 3] {
 
-        let nametable_base_addr = self.name_table_base_addr();
+        //let nametable_base_addr = self.name_table_base_addr();
         let pattern_table_addr = self.bg_pattern_table_addr();
         //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
         let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
@@ -496,44 +511,43 @@ impl Ppu {
         ));
 
         //let raw_y = self.scroll_fine_y();
-        let raw_y = y as u16; //self.line + u16::from(self.current_scroll_y);
-        let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
-        let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
-                                      // scroll reg shifts in tile conversion
-        let tile_global_y = tile_base_y % (SCREEN_TILE_HEIGHT * 2); // y absolute coordinates in tile conversion
-        let tile_local_y = tile_global_y % SCREEN_TILE_HEIGHT; // Absolute coordinates within 1 tile
-                                                               // Of the 4 sides, if it is approaching the lower side, it is false
-        let is_nametable_position_top = tile_global_y < SCREEN_TILE_HEIGHT;
+        let four_screen_y = y as u16; //self.line + u16::from(self.current_scroll_y);
+        let offset_y = four_screen_y & 0x07;
+        let tile_base_y = four_screen_y >> 3;
+        let four_screen_tile_y = tile_base_y % (NAMETABLE_Y_TILES_COUNT * 2);
+        let nametable_tile_y = four_screen_tile_y % NAMETABLE_Y_TILES_COUNT;
+        let is_nametable_position_top = four_screen_tile_y < NAMETABLE_Y_TILES_COUNT;
 
-
-        //let offset_x = self.scroll_fine_x();
         // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
-        let raw_x = x as u16; // ((pixel_x as u16) + u16::from(self.current_scroll_x))
-        let offset_x = raw_x & 0x07;
-        let tile_base_x = raw_x >> 3;
+        let four_screen_x = x as u16; // ((pixel_x as u16) + u16::from(self.current_scroll_x))
+        let offset_x = four_screen_x & 0x07;
+        let tile_base_x = four_screen_x >> 3;
+
         // scroll reg shifts in tile conversion
-        let tile_global_x = tile_base_x % (SCREEN_TILE_WIDTH * 2); // X absolute coordinates in 4tile conversion
-        let tile_local_x = tile_global_x % SCREEN_TILE_WIDTH; // Absolute coordinates within 1 tile
-        let is_nametable_position_left = tile_global_x < SCREEN_TILE_WIDTH; // False if it is on the right side of the 4 sides
+        let four_screen_tile_x = tile_base_x % (NAMETABLE_X_TILES_COUNT * 2);
+        let nametable_tile_x = four_screen_tile_x % NAMETABLE_X_TILES_COUNT;
+        let is_nametable_position_left = four_screen_tile_x < NAMETABLE_X_TILES_COUNT;
 
         // Since we know which of the four faces, we will return the base address of that face
-        let target_nametable_base_addr = nametable_base_addr +
-            (if is_nametable_position_left { 0x0000 } else { 0x0400 }) + // Wide area offset on the left and right sides
-            (if is_nametable_position_top  { 0x0000 } else { 0x0800 }); // Wide area offset on top and bottom
+        let target_nametable_base_addr = if is_nametable_position_top {
+            if is_nametable_position_left { 0x2000 } else { 0x2400 }
+        } else {
+            if is_nametable_position_left { 0x2800 } else { 0x2c00 }
+        };
 
         // Since the attribute table is 32 bytes after the nametable, the address is calculated and read.
         // It is 1 attr with 4 * 4 tiles in height and width.
         // Offset calculation uses global position for scroll support (maybe 1Nametable with clipping)
-        let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET; // 23c0, 27c0, 2bc0, 2fc0のどれか
-        let attribute_x_offset = (tile_global_x >> 2) & 0x7;
-        let attribute_y_offset = tile_global_y >> 2;
+        let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
+        let attribute_x_offset = (four_screen_tile_x >> 2) & 0x7;
+        let attribute_y_offset = four_screen_tile_y >> 2;
         let attribute_addr =
             attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
         // Used for attribute reading and BG palette selection.
         // Change the palette information used at the 4 * 4 position
-        let raw_attribute = self.vram.read(cartridge, attribute_addr);
-        let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
+        let raw_attribute = cartridge.vram_read(attribute_addr);
+        let bg_palette_id = match (nametable_tile_x & 0x03 < 0x2, nametable_tile_y & 0x03 < 0x2) {
             (true, true) => (raw_attribute >> 0) & 0x03,  // top left
             (false, true) => (raw_attribute >> 2) & 0x03, // top right
             (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
@@ -541,21 +555,15 @@ impl Ppu {
         };
 
         // Read tile_id from Name table-> Build data from pattern table
-        let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-        let bg_tile_id = u16::from(self.vram.peek(cartridge, nametable_addr));
-
+        let nametable_addr = target_nametable_base_addr + (nametable_tile_y << 5) + nametable_tile_x;
+        let bg_tile_id = u16::from(cartridge.ppu_bus_peek(nametable_addr));
 
         // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
         let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
         let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
         let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
-        let bg_data_lower = self
-            .vram
-            .peek(cartridge, bg_pattern_table_addr_lower);
-        let bg_data_upper = self
-            .vram
-            .peek(cartridge, bg_pattern_table_addr_upper);
-
+        let bg_data_lower = cartridge.ppu_bus_peek(bg_pattern_table_addr_lower);
+        let bg_data_upper = cartridge.ppu_bus_peek(bg_pattern_table_addr_upper);
 
         // Make the drawing color of bg
         let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
@@ -613,10 +621,10 @@ impl Ppu {
         let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
         let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
                                       // scroll reg shifts in tile conversion
-        let tile_global_y = tile_base_y % (SCREEN_TILE_HEIGHT * 2); // y absolute coordinates in tile conversion
-        let tile_local_y = tile_global_y % SCREEN_TILE_HEIGHT; // Absolute coordinates within 1 tile
+        let tile_global_y = tile_base_y % (NAMETABLE_Y_TILES_COUNT * 2); // y absolute coordinates in tile conversion
+        let tile_local_y = tile_global_y % NAMETABLE_Y_TILES_COUNT; // Absolute coordinates within 1 tile
                                                                // Of the 4 sides, if it is approaching the lower side, it is false
-        let is_nametable_position_top = tile_global_y < SCREEN_TILE_HEIGHT;
+        let is_nametable_position_top = tile_global_y < NAMETABLE_Y_TILES_COUNT;
 
         // pixel formatの決定
         let pixel_indexes = match self.draw_option.pixel_format {
@@ -638,9 +646,9 @@ impl Ppu {
             let offset_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) & 0x07;
             let tile_base_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) >> 3;
             // scroll reg shifts in tile conversion
-            let tile_global_x = tile_base_x % (SCREEN_TILE_WIDTH * 2); // X absolute coordinates in 4tile conversion
-            let tile_local_x = tile_global_x % SCREEN_TILE_WIDTH; // Absolute coordinates within 1 tile
-            let is_nametable_position_left = tile_global_x < SCREEN_TILE_WIDTH; // False if it is on the right side of the 4 sides
+            let tile_global_x = tile_base_x % (NAMETABLE_X_TILES_COUNT * 2); // X absolute coordinates in 4tile conversion
+            let tile_local_x = tile_global_x % NAMETABLE_X_TILES_COUNT; // Absolute coordinates within 1 tile
+            let is_nametable_position_left = tile_global_x < NAMETABLE_X_TILES_COUNT; // False if it is on the right side of the 4 sides
 
             // Since we know which of the four faces, we will return the base address of that face
             let target_nametable_base_addr = nametable_base_addr +
@@ -658,7 +666,7 @@ impl Ppu {
 
             // Used for attribute reading and BG palette selection.
             // Change the palette information used at the 4 * 4 position
-            let raw_attribute = self.vram.read(cartridge, attribute_addr);
+            let raw_attribute = cartridge.vram_read(attribute_addr);
             let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
                 (true, true) => (raw_attribute >> 0) & 0x03,  // top left
                 (false, true) => (raw_attribute >> 2) & 0x03, // top right
@@ -668,19 +676,15 @@ impl Ppu {
 
             // Read tile_id from Name table-> Build data from pattern table
             let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-            let bg_tile_id = u16::from(self.vram.read(cartridge, nametable_addr));
+            let bg_tile_id = u16::from(cartridge.vram_read(nametable_addr));
 
 
             // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
             let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
             let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
             let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
-            let bg_data_lower = self
-                .vram
-                .read(cartridge, bg_pattern_table_addr_lower);
-            let bg_data_upper = self
-                .vram
-                .read(cartridge, bg_pattern_table_addr_upper);
+            let bg_data_lower = cartridge.vram_read(bg_pattern_table_addr_lower);
+            let bg_data_upper = cartridge.vram_read(bg_pattern_table_addr_upper);
 
 
             // Make the drawing color of bg
@@ -715,8 +719,8 @@ impl Ppu {
                 }
             }
 
-            let draw_base_y = (pixel_y as i32);
-            let draw_base_x = (pixel_x as i32);
+            let draw_base_y = pixel_y as i32;
+            let draw_base_x = pixel_x as i32;
             // Coordinate calculation, 1 dot needs to be reflected in scale ** 2 pixel
             let draw_y = draw_base_y;
             if (draw_y < 0) || ((VISIBLE_SCREEN_HEIGHT as i32) <= draw_y) {
@@ -828,12 +832,8 @@ impl Ppu {
                     let sprite_pattern_table_addr_lower =
                         sprite_pattern_table_base_addr + (tile_offset_y as u16);
                     let sprite_pattern_table_addr_upper = sprite_pattern_table_addr_lower + 8;
-                    let sprite_data_lower = self
-                        .vram
-                        .read(cartridge, sprite_pattern_table_addr_lower);
-                    let sprite_data_upper = self
-                        .vram
-                        .read(cartridge, sprite_pattern_table_addr_upper);
+                    let sprite_data_lower = cartridge.vram_read(sprite_pattern_table_addr_lower);
+                    let sprite_data_upper = cartridge.vram_read(sprite_pattern_table_addr_upper);
                     // Create a pixel pattern at the corresponding x position
                     let sprite_palette_offset =
                         (((sprite_data_upper >> (7 - tile_offset_x)) & 0x01) << 1)

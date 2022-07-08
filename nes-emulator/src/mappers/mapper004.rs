@@ -4,11 +4,14 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
+use crate::prelude::NameTableMirror;
 
 
 /// iNES Mapper 004: AKA MMC3
 /// TODO
 pub struct Mapper4 {
+    vram_mirror: NameTableMirror,
+    vram: [u8; 2048],
     prg_rom: Vec<u8>,
     prg_ram: Vec<u8>,
     chr_data: Vec<u8>,
@@ -17,6 +20,8 @@ pub struct Mapper4 {
 impl Mapper4 {
     pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
         Self {
+            vram_mirror: config.nametable_mirror,
+            vram: [0u8; 2048],
             prg_rom,
             prg_ram: vec![0u8; config.n_prg_ram_pages * PAGE_SIZE_16K],
             chr_data,
@@ -65,6 +70,7 @@ impl Mapper for Mapper4 {
         todo!()
     }
 
+    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
     fn irq(&self) -> bool {
         todo!()
     }

@@ -19,6 +19,11 @@ pub enum TVSystem {
     Dual,
     Unknown
 }
+impl Default for TVSystem {
+    fn default() -> Self {
+        TVSystem::Ntsc
+    }
+}
 
 struct NoCartridge;
 impl Mapper for NoCartridge {
@@ -29,6 +34,7 @@ impl Mapper for NoCartridge {
     fn ppu_bus_read(&mut self, _addr: u16) -> u8 { 0 }
     fn ppu_bus_peek(&mut self, _addr: u16) -> u8 { 0 }
     fn ppu_bus_write(&mut self, _addr: u16, _data: u8) { }
+    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::Vertical }
     fn irq(&self) -> bool { false }
 }
 
@@ -42,9 +48,14 @@ pub enum NameTableMirror {
     FourScreen,
 }
 
+impl Default for NameTableMirror {
+    fn default() -> Self {
+        NameTableMirror::Vertical
+    }
+}
+
 pub struct Cartridge {
     pub mapper: Box<dyn Mapper>,
-    pub nametable_mirror: NameTableMirror,
 }
 
 impl Cartridge {
@@ -63,7 +74,6 @@ impl Cartridge {
         let mapper = Box::new(Mapper31::new(&config, &nsf[128..(prg_len as usize)]));
         Ok(Cartridge{
             mapper,
-            nametable_mirror: NameTableMirror::Vertical, // Arbitrary
         })
     }
 
@@ -102,7 +112,7 @@ impl Cartridge {
         }
 
         let mut mapper: Box<dyn Mapper> = match config.mapper_number {
-            0 => Box::new(Mapper0::new_from_ines(config, prg_rom, chr_data)),
+            0 => Box::new(Mapper0::new(config, prg_rom, chr_data)),
             1 => Box::new(Mapper1::new(config, prg_rom, chr_data)),
             3 => Box::new(Mapper3::new(config, prg_rom, chr_data)),
             4 => Box::new(Mapper4::new(config, prg_rom, chr_data)),
@@ -124,14 +134,12 @@ impl Cartridge {
 
         Ok(Cartridge {
             mapper,
-            nametable_mirror: config.nametable_mirror
         })
     }
 
     pub fn none() -> Cartridge {
         Cartridge {
             mapper: Box::new(NoCartridge),
-            nametable_mirror: NameTableMirror::Horizontal
         }
     }
 
@@ -152,6 +160,20 @@ impl Cartridge {
         self.mapper.ppu_bus_peek(addr)
     }
     pub fn ppu_bus_write(&mut self, addr: u16, data: u8) {
+        self.mapper.ppu_bus_write(addr, data);
+    }
+    pub fn vram_read(&mut self, addr: u16) -> u8 {
+        let val = self.mapper.ppu_bus_read(addr);
+
+        //if addr < 0x2400 {
+        //    println!("read {val} from {addr}");
+        //}
+        val
+    }
+    pub fn vram_write(&mut self, addr: u16, data: u8) {
+        //if addr < 0x2400 {
+        //    println!("writing {data} to {addr}");
+        //}
         self.mapper.ppu_bus_write(addr, data);
     }
 }

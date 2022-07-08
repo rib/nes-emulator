@@ -4,8 +4,13 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
+use crate::prelude::NameTableMirror;
+
+use super::mirror_vram_address;
 
 pub struct Mapper0 {
+    pub vram_mirror: NameTableMirror,
+    pub vram: [u8; 2048],
     pub prg_rom: Vec<u8>,
     pub prg_ram: Vec<u8>,
     pub has_chr_ram: bool,
@@ -13,16 +18,15 @@ pub struct Mapper0 {
 }
 
 impl Mapper0 {
-    pub fn new(n_prg_ram_pages: usize, has_chr_ram: bool, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
-        Mapper0 {
+    pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
+        Self {
+            vram_mirror: config.nametable_mirror,
+            vram: [0u8; 2048],
             prg_rom,
-            prg_ram: vec![0u8; n_prg_ram_pages * PAGE_SIZE_16K],
-            has_chr_ram: has_chr_ram,
+            prg_ram: vec![0u8; config.n_prg_ram_pages * PAGE_SIZE_16K],
+            has_chr_ram: config.has_chr_ram,
             chr_data,
          }
-    }
-    pub fn new_from_ines(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
-        Self::new(config.n_prg_ram_pages, config.has_chr_ram, prg_rom, chr_data)
     }
 }
 
@@ -76,6 +80,10 @@ impl Mapper for Mapper0 {
                 let index = addr as usize;
                 arr_read!(self.chr_data, index)
             }
+            0x2000..=0x3fff => { // VRAM
+                let off = mirror_vram_address(addr, self.vram_mirror);
+                arr_read!(self.vram, off)
+            }
             _ => {
                 trace!("Unexpected PPU read via mapper, address = {}", addr);
                 0
@@ -88,18 +96,68 @@ impl Mapper for Mapper0 {
     }
 
     fn ppu_bus_write(&mut self, addr: u16, data: u8) {
-        if self.has_chr_ram {
-            match addr {
-                0x0000..=0x1fff => {
+        match addr {
+            0x0000..=0x1fff => {
+                if self.has_chr_ram {
                     let index = addr as usize;
                     arr_write!(self.chr_data, index, data);
-                },
-                _ => {
-                    trace!("Unexpected PPU write via mapper, address = {}", addr);
                 }
+            },
+            0x2000..=0x3fff => { // VRAM
+                let off = mirror_vram_address(addr, self.vram_mirror);
+                arr_write!(self.vram, off, data);
+            }
+            _ => {
+                trace!("Unexpected PPU write via mapper, address = {}", addr);
             }
         }
     }
 
+    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
     fn irq(&self) -> bool { false }
+}
+
+
+#[test]
+fn test_mapper0_vram_mirroring() {
+
+    let cfg = INesConfig {
+        version: 1,
+        mapper_number: 0,
+        tv_system: crate::prelude::TVSystem::Ntsc,
+        n_prg_rom_pages: 2,
+        n_prg_ram_pages: 2,
+        n_chr_rom_pages: 2,
+        n_chr_ram_pages: 0,
+        has_chr_ram: true,
+        has_battery: false,
+        has_trainer: false,
+        nametable_mirror: NameTableMirror::Vertical,
+        four_screen_vram: false,
+        trainer_baseaddr: None,
+        prg_rom_baseaddr: 0,
+        chr_rom_baseaddr: 0
+    };
+    let prg_rom = vec![0u8; cfg.prg_rom_bytes()];
+    let chr_data = vec![0u8; cfg.chr_rom_bytes()];
+
+    let mut mapper = Mapper0::new(&cfg, prg_rom, chr_data);
+
+    mapper.vram = [0u8; 2048];
+    mapper.vram_mirror = NameTableMirror::Vertical;
+    mapper.ppu_bus_write(0x2001, 1);
+    mapper.ppu_bus_write(0x2401, 2);
+    debug_assert_eq!(mapper.vram[1], 1);
+    debug_assert_eq!(mapper.ppu_bus_read(0x2801), 1);
+    debug_assert_eq!(mapper.vram[1025], 2);
+    debug_assert_eq!(mapper.ppu_bus_read(0x2c01), 2);
+
+    mapper.vram = [0u8; 2048];
+    mapper.vram_mirror = NameTableMirror::Vertical;
+    mapper.ppu_bus_write(0x2801, 1);
+    mapper.ppu_bus_write(0x2c01, 2);
+    debug_assert_eq!(mapper.vram[1], 1);
+    debug_assert_eq!(mapper.ppu_bus_read(0x2001), 1);
+    debug_assert_eq!(mapper.vram[1025], 2);
+    debug_assert_eq!(mapper.ppu_bus_read(0x2401), 2);
 }

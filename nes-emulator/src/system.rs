@@ -120,7 +120,7 @@ impl System {
             0x2000..=0x3fff => { // PPU I/O
                 // PPU read handles open bus behaviour, so we assume there
                 // are no undefined bits at this point
-                (self.ppu.read(&mut self.cartridge, addr), 0)
+                (self.ppu.system_bus_read(&mut self.cartridge, addr), 0)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
@@ -162,7 +162,7 @@ impl System {
             0x2000..=0x3fff => { // PPU I/O
                 // PPU read handles open bus behaviour, so we assume there
                 // are no undefined bits at this point
-                (self.ppu.peek(&mut self.cartridge, addr), 0)
+                (self.ppu.system_bus_peek(&mut self.cartridge, addr), 0)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - APU_IO_REG_BASE_ADDR);
@@ -203,7 +203,7 @@ impl System {
                 arr_write!(self.wram, index, data);
             }
             0x2000..=0x3fff => { // PPU I/O
-                self.ppu.write(&mut self.cartridge, addr, data);
+                self.ppu.system_bus_write(&mut self.cartridge, addr, data);
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
@@ -244,7 +244,7 @@ impl System {
         for offset in 0..256 {
             let cpu_addr = cpu_start_addr.wrapping_add(offset);
             let cpu_data = self.read(cpu_addr);
-            self.ppu.write(&mut self.cartridge, 0x2004 /* OAMDATA */, cpu_data);
+            self.ppu.system_bus_write(&mut self.cartridge, 0x2004 /* OAMDATA */, cpu_data);
         }
     }
 
