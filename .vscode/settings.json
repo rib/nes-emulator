@@ -3,7 +3,8 @@
         "map": "cpp",
         "utility": "cpp",
         "tuple": "cpp",
-        "ostream": "cpp"
+        "ostream": "cpp",
+        "memory": "cpp"
     },
     "rust-analyzer.cargo.features": [
         "trace"

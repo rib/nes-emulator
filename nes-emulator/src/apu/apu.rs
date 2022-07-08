@@ -1,5 +1,6 @@
 use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
 use crate::apu::channel::square_channel::SquareChannel;
+use crate::system::DmcDmaRequest;
 use super::channel::triangle_channel::TriangleChannel;
 use super::channel::noise_channel::NoiseChannel;
 use super::channel::dmc_channel::DmcChannel;
@@ -7,6 +8,7 @@ use crate::apu::mixer::Mixer;
 
 
 pub struct Apu {
+    pub clock: u64,
     pub sample_buffer: Vec<f32>,
     frame_sequencer: FrameSequencer,
     square_channel1: SquareChannel,
@@ -23,6 +25,7 @@ impl Apu {
     pub fn new(cpu_clock_hz: u32, sample_rate: u32) -> Self {
         let output_step = (cpu_clock_hz / sample_rate) as u16;
         Apu {
+            clock: 0,
             sample_buffer: vec![],
             frame_sequencer: FrameSequencer::new(),
             square_channel1: SquareChannel::new(false),
@@ -47,15 +50,16 @@ impl Apu {
 
     // NB: we clock the APU with the CPU clock but many aspects of the APU
     // are only clocked every other CPU cycle
-    // Returns: number of cycles to pause the CPU (for DMC sample buffer DMA)
-    pub fn step(&mut self, apu_clock: u64) {
+    pub fn step(&mut self)  -> Option<DmcDmaRequest> {
         self.output_timer += 1;
 
         //println!("APU step: {}", apu_clock);
 
-        let frame_sequencer_output = self.frame_sequencer.step(apu_clock);
+        let dma_request = self.dmc_channel.step_dma_reader();
+
+        let frame_sequencer_output = self.frame_sequencer.step(self.clock);
         if !matches!(frame_sequencer_output, FrameSequencerStatus::None) {
-            debug_assert!(apu_clock % 2 == 1);
+            debug_assert!(self.clock % 2 == 1);
         }
 
         // "The triangle channel's timer is clocked on every CPU cycle, but the pulse, noise, and DMC timers
@@ -63,7 +67,7 @@ impl Apu {
 
         self.triangle_channel.step(frame_sequencer_output);
 
-        if apu_clock % 2 == 1 {
+        if self.clock % 2 == 1 {
             //println!("apu cycle: {apu_clock}");
             // "this timer is updated every APU cycle (i.e., every second CPU cycle)"
             self.square_channel1.odd_step(frame_sequencer_output);
@@ -91,6 +95,10 @@ impl Apu {
             self.sample_buffer.push(output);
             self.output_timer -= self.output_step;
         }
+
+        self.clock += 1;
+
+        dma_request
     }
 
     pub fn irq(&self) -> bool {

@@ -12,6 +12,8 @@ pub struct DmcChannel {
     interrupt_enable: bool,
     pub interrupt_flagged: bool,
 
+    dma_in_progress: bool,
+
     loop_flag: bool,
 
     pending_sample_address: u16,
@@ -37,6 +39,8 @@ impl DmcChannel {
         DmcChannel {
             interrupt_enable: false,
             interrupt_flagged: false,
+
+            dma_in_progress: false,
 
             loop_flag: false,
 
@@ -89,6 +93,10 @@ impl DmcChannel {
     }
 
     pub fn step_dma_reader(&mut self) -> Option<DmcDmaRequest> {
+        if self.dma_in_progress {
+            return None;
+        }
+
         if self.sample_buffer.is_none() && self.sample_bytes_remaining > 0 {
             let dma_addr = self.sample_address;
 
@@ -123,8 +131,13 @@ impl DmcChannel {
         }
     }
 
+    /// After we request a DMC DMA we will get a `completed_dma` callback after 2-4 clock cycles
+    /// with the read sample `value`
     pub fn completed_dma(&mut self, _address: u16, value: u8) {
+        debug_assert_eq!(self.dma_in_progress, true);
+
         self.sample_buffer = Some(value);
+        self.dma_in_progress = false;
     }
 
     fn start_output_cycle(&mut self)

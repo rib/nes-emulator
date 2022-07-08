@@ -1,9 +1,12 @@
+use anyhow::Result;
+use anyhow::anyhow;
+
 use crate::ppu_registers::Control1Flags;
 use crate::ppu_registers::Control2Flags;
 use crate::ppu_registers::StatusFlags;
 use crate::prelude::Cartridge;
-
-use super::vram::*;
+use crate::prelude::Framebuffer;
+use crate::prelude::FramebufferDataRental;
 
 pub const CPU_CYCLE_PER_LINE: usize = 341 / 3; // ppu cyc -> cpu cyc
 pub const NUM_OF_COLOR: usize = 4;
@@ -12,12 +15,15 @@ pub const VISIBLE_SCREEN_HEIGHT: usize = 240;
 pub const RENDER_SCREEN_WIDTH: u16 = VISIBLE_SCREEN_WIDTH as u16;
 pub const RENDER_N_LINES: u16 = 262;
 pub const PIXEL_PER_TILE: u16 = 8; // 1tile=8*8
-pub const SCREEN_TILE_WIDTH: u16 = (VISIBLE_SCREEN_WIDTH as u16) / PIXEL_PER_TILE; // 256/8=32
-pub const SCREEN_TILE_HEIGHT: u16 = (VISIBLE_SCREEN_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
+pub const NAMETABLE_X_TILES_COUNT: u16 = (VISIBLE_SCREEN_WIDTH as u16) / PIXEL_PER_TILE; // 256/8=32
+pub const NAMETABLE_Y_TILES_COUNT: u16 = (VISIBLE_SCREEN_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
 pub const BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY: u16 = 4;
-pub const ATTRIBUTE_TABLE_WIDTH: u16 = SCREEN_TILE_WIDTH / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
+pub const ATTRIBUTE_TABLE_WIDTH: u16 = NAMETABLE_X_TILES_COUNT / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
 
-pub const OAM_SIZE: usize = 0x100;
+const VT_HORIZONTAL_SCROLL_BITS_MASK: u16 = 0b0000_0100_0001_1111;
+const VT_VERTICAL_SCROLL_BITS_MASK: u16 = 0b0111_1011_1110_0000;
+
+pub const OAM_SIZE: usize = 64 * 4;
 pub const PATTERN_TABLE_ENTRY_BYTE: u16 = 16;
 
 pub const SPRITE_TEMP_SIZE: usize = 8;
@@ -27,6 +33,38 @@ pub const SPRITE_WIDTH: usize = 8;
 pub const SPRITE_NORMAL_HEIGHT: usize = 8;
 pub const SPRITE_LARGE_HEIGHT: usize = 16;
 pub const CYCLE_PER_DRAW_FRAME: usize = CPU_CYCLE_PER_LINE * ((RENDER_N_LINES + 1) as usize);
+
+pub const PATTERN_TABLE_BASE_ADDR: u16 = 0x0000;
+pub const NAME_TABLE_BASE_ADDR: u16 = 0x2000;
+pub const NAME_TABLE_MIRROR_BASE_ADDR: u16 = 0x3000;
+pub const PALETTE_TABLE_BASE_ADDR: u16 = 0x3f00;
+pub const VIDEO_ADDRESS_SIZE: u16 = 0x4000;
+
+pub const NAME_TABLE_SIZE: usize = 0x0400;
+pub const NUM_OF_NAME_TABLE: usize = 2;
+pub const ATTRIBUTE_TABLE_SIZE: u16 = 64;
+pub const ATTRIBUTE_TABLE_OFFSET: u16 = 960; // 30x32 tiles
+
+pub const PALETTE_SIZE: usize = 32;
+pub const PALETTE_ENTRY_SIZE: u16 = 0x04;
+pub const PALETTE_SPRITE_OFFSET: u16 = 0x10;
+
+const FRAMEBUFFER_BPP: isize = 4;
+const FRAMEBUFFER_STRIDE: isize = VISIBLE_SCREEN_WIDTH as isize * FRAMEBUFFER_BPP;
+
+#[derive(Debug, Clone)]
+pub enum PpuTraceEvent {
+    ControlWrite { val: u8 }, // $2000
+    MaskWrite { val: u8 }, // $2001
+    StatusRead { val: u8 }, // $2002
+    OamAddrWrite { val: u8 }, // $2003
+    OamDataWrite { val: u8 }, // $2004
+    ScrollWrite { val: u8 }, // $2005
+    DataAddrWrite { val: u8 }, // $2006
+    DataWrite { val: u8 }, // $2007
+
+    //OamDmaWrite,
+}
 
 #[derive(Copy, Clone)]
 pub struct Position(pub u8, pub u8);
@@ -45,85 +83,7 @@ impl Color {
     }
 }
 
-/// Convert from u8 in sprite.tile_id
-#[derive(Copy, Clone)]
-pub enum TileId {
-    /// 8*8 spriteの場合
-    Normal { id: u8 },
-    /// 8*16 spriteの場合
-    /// TTTTTTTP
-    /// P - pattern table addr(0:0x0000, 1: 0x1000)
-    /// T - Tile Id
-    Large {
-        /// P
-        pattern_table_addr: u16,
-        /// 2*T
-        upper_tile_id: u8,
-        /// 2*T+1
-        lower_tile_id: u8,
-    },
-}
-impl TileId {
-    pub fn normal(src: u8) -> TileId {
-        TileId::Normal { id: src }
-    }
-    pub fn large(src: u8) -> TileId {
-        TileId::Large {
-            pattern_table_addr: (if (src & 0x01) == 0x01 {
-                0x1000
-            } else {
-                0x0000u16
-            }),
-            upper_tile_id: src & 0xfe,
-            lower_tile_id: (src & 0xfe) + 1,
-        }
-    }
-}
-#[derive(Copy, Clone)]
-pub struct SpriteAttr {
-    is_vert_flip: bool,
-    is_hor_flip: bool,
-    is_draw_front: bool,
-    palette_id: u8,
-}
-impl SpriteAttr {
-    pub fn from(src: u8) -> SpriteAttr {
-        SpriteAttr {
-            is_vert_flip: (src & 0x80) == 0x80,
-            is_hor_flip: (src & 0x40) == 0x40,
-            is_draw_front: (src & 0x20) != 0x20,
-            palette_id: (src & 0x03),
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct Sprite {
-    /// Actually, it is displayed in the place where +1 is added
-    y: u8,
-    tile_id: TileId,
-    attr: SpriteAttr,
-    x: u8,
-}
-
-impl Sprite {
-    /// Generate Sprite from OAM information
-    /// `is_large` -true if sprite size is 8 * 16, false if 8 * 8
-    pub fn from(is_large: bool, byte0: u8, byte1: u8, byte2: u8, byte3: u8) -> Sprite {
-        Sprite {
-            y: byte0,
-            tile_id: (if is_large {
-                TileId::large(byte1)
-            } else {
-                TileId::normal(byte1)
-            }),
-            attr: SpriteAttr::from(byte2),
-            x: byte3,
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum LineStatus {
     Visible,            // 0~239
     PostRender,         // 240
@@ -147,6 +107,13 @@ impl LineStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpriteEvalState {
+    Copying,
+    LookingForOverflow,
+    Done
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum PixelFormat {
     RGBA8888,
@@ -154,27 +121,42 @@ pub enum PixelFormat {
     ARGB8888,
 }
 
-#[derive(Copy, Clone)]
-pub struct DrawOption {
-    pub pixel_format: PixelFormat,
+impl PixelFormat {
+    /// Returns the number of bytes per pixel for the format
+    pub fn bpp(&self) -> usize { 4 }
 }
 
-impl Default for DrawOption {
-    fn default() -> Self {
-        Self {
-            pixel_format: PixelFormat::RGBA8888,
-        }
-    }
-}
-
-pub enum PpuStatus {
-    None,
-    FinishedFrame,
-    RaiseNmi,
-}
 
 #[derive(Clone)]
 pub struct Ppu {
+    pub clock: u64,
+
+    pub is_rendering: bool,
+    pub framebuffer: FramebufferDataRental,
+
+    pub control1: Control1Flags,
+    pub nmi_enable: bool,
+    pub nmi_interrupt_raised: bool,
+
+    pub frame_ready: bool,
+
+    pub control2: Control2Flags,
+    pub show_background: bool,
+    pub show_sprites: bool,
+
+    /// nesdev: "(i.e., when either background or sprite rendering is enabled in $2001:3-4)"
+    pub rendering_enabled: bool,
+    pub show_sprites_in_left_margin: bool,
+    pub show_background_in_left_margin: bool,
+    pub monochrome: bool,
+    pub emphasize_red: bool,
+    pub emphasize_green: bool,
+    pub emphasize_blue: bool,
+
+    pub status: StatusFlags,
+
+    pub universal_background_color: Color,
+
     pub dot: u16, // wraps every 341 clock cycles
     pub line: u16,
     pub line_status: LineStatus,
@@ -185,9 +167,6 @@ pub struct Ppu {
 
     pub read_buffer: u8,
 
-    pub status: StatusFlags,
-    pub control1: Control1Flags,
-    pub control2: Control2Flags,
 
     pub shared_w_toggle: bool, // Latch for PPU_SCROLL and PPU_ADDR
     pub shared_t_register: u16, // Shared temp for PPU_SCROLL and PPU_ADDR
@@ -196,23 +175,99 @@ pub struct Ppu {
 
     pub scroll_x_fine3: u8,
 
-    pub vram: VRam,
-
     pub oam: [u8; OAM_SIZE],
     pub oam_offset: u8,
 
-    pub sprite_temps: [Option<Sprite>; SPRITE_TEMP_SIZE],
+    /// The current state of OAM sprite evaluation
+    oam_evaluate_state: SpriteEvalState,
+
+    /// Last value read on each odd cycle
+    oam_evaluate_read: u8,
+
+    /// Write offset into secondary OAM while evaluating sprites
+    secondary_oam_offset: usize,
+
+    /// Number of in-range sprites found for the current line, added to secondary OAM
+    oam_evaluate_n_sprites: u8,
+    /// The current sprite index being evaluated
+    oam_evaluate_n: usize,
+    /// sprite byte offset for tracking completion of secondary oam copy and handling (buggy) overflow emulation
+    oam_evaluate_m: usize,
+    /// Is the sprite currently being read / evaluated from OAM in range
+    oam_evaluate_sprite_in_range: bool,
+    oam_evaluate_sprite_zero_in_range: bool,
+
+    /// The index of the sprite currently being fetched
+    sprite_fetch_index: usize,
+
+    /// The pattern table row address (lower plane) for the current sprite, cached
+    /// between reads of the low and high byte
+    sprite_pattern_addr_lo: u16,
+
+    //oam_evaluate_copy_remainder: usize, // How many evaluation steps to skip to account for copying 3 bytes of in-range sprites
+    //oam_evaluate_done: bool,
+    //secondary_oam_evaluate_write_pos: usize,
+    pub secondary_oam_being_cleared: bool,
+    //pub secondary_oam: Vec<Sprite>,
+    pub secondary_oam: [u8; 4 * 8],
+
+    /// A composed scanline of sprite pixels to be combined with the background, with priority rules
+    /// Each pixel contains:
+    /// bits 0-1 = pattern
+    /// bits 2-3 = palette
+    /// bit 4 = background priority
+    /// bit 5 = is zero sprite
+    sprite_line_back: [u8; 256],
+    sprite_line_front: [u8; 256],
 
 
-    pub current_scroll_x: u8,
-    pub current_scroll_y: u8,
+    //pub current_scroll_x: u16,
+    //pub current_scroll_y: u16,
 
-    pub draw_option: DrawOption,
+    // State latches that feed into the shift registers
+    pub nametable_latch: u8,
+    pub palette_latch: u8,
+    pub pattern_table0_latch: u8,
+    pub pattern_table1_latch: u8,
+
+    // Every 8 pixels we load the pattern table bits for the next tile
+    // into the lsb of these shift registers and the registers are
+    // left shifted after each pixel
+    // "The shifters are reloaded during ticks 9, 17, 25, ..., 257."
+    pub pattern_table0_shift: u16,
+    pub pattern_table1_shift: u16,
+
+    // For consistency / simplicity we extend the 1bit latch values
+    // across 8 bits so we get a 16bit shift register, the same
+    // as for the pattern table bits.
+    pub palette0_shift: u16,
+    pub palette1_shift: u16,
+
+    /// Which sub-tile pixel will be rendered next (wraps every 8 pixels)
+    pub shift_pixel_x: u8,
+
+    /// The offset for outputting the next pixel
+    pub framebuffer_offset: isize,
+
+    pub trace_events: [Vec<PpuTraceEvent>; 2],
+
+    /// Which [`Self::trace_events`] vector corresponds to the current frame?
+    pub trace_events_back: usize,
 }
 
 impl Default for Ppu {
     fn default() -> Self {
+        let framebuffer = Framebuffer::new(256, 240, PixelFormat::RGBA8888);
+        let framebuffer = framebuffer.rent_data().unwrap();
         Self {
+            framebuffer,
+            frame_ready: false,
+
+            is_rendering: false,
+
+            universal_background_color: Color::from(0),
+
+            clock: 0,
             dot: 0,
             line: 241,
             line_status: LineStatus::from(241),
@@ -224,44 +279,144 @@ impl Default for Ppu {
             read_buffer: 0,
 
             status: StatusFlags::empty(),
+
+            // TODO: avoid this duplication of state
             control1: Control1Flags::empty(),
+            nmi_enable: false,
+            nmi_interrupt_raised: false,
+
+            // TODO: avoid this duplication of state
             control2: Control2Flags::empty(),
+            show_background: false,
+            show_sprites: false,
+            rendering_enabled: false,
+            show_sprites_in_left_margin: false,
+            show_background_in_left_margin: false,
+            monochrome: false,
+            emphasize_red: false,
+            emphasize_green: false,
+            emphasize_blue: false,
 
             shared_w_toggle: false,
             shared_t_register: 0,
             shared_v_register: 0,
             scroll_x_fine3: 0,
 
-            vram: Default::default(),
-
             oam: [0; OAM_SIZE],
             oam_offset: 0,
-            sprite_temps: [None; SPRITE_TEMP_SIZE],
 
-            current_scroll_x: 0,
-            current_scroll_y: 0,
+            oam_evaluate_state: SpriteEvalState::Copying,
+            oam_evaluate_n_sprites: 0,
+            oam_evaluate_read: 0,
+            secondary_oam_offset: 0,
+            oam_evaluate_n: 0,
+            oam_evaluate_m: 0,
+            oam_evaluate_sprite_in_range: false,
+            oam_evaluate_sprite_zero_in_range: false,
+            //oam_evaluate_done: false,
+            secondary_oam_being_cleared: false,
+            //secondary_oam: vec![],
+            secondary_oam: [0; 4 * 8],
 
-            draw_option: DrawOption::default(),
+            sprite_fetch_index: 0,
+            sprite_pattern_addr_lo: 0,
+
+            nametable_latch: 0,
+            palette_latch: 0,
+            pattern_table0_latch: 0,
+            pattern_table1_latch: 0,
+            pattern_table0_shift: 0,
+            pattern_table1_shift: 0,
+            palette0_shift: 0,
+            palette1_shift: 0,
+            shift_pixel_x: 0,
+
+            framebuffer_offset: 0,
+
+            trace_events: [vec![], vec![]],
+            trace_events_back: 0,
+
+            sprite_line_back: [0; 256],
+            sprite_line_front: [0; 256],
         }
     }
 }
 
 impl Ppu {
 
-    pub fn pallet_read(&self, addr: u16) -> u8 {
-        let index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
-        match index {
+    /// Allocate a framebuffer that can be used as a PPU render target.
+    ///
+    /// Returns a new framebuffer that can later be associated with the PPU via [`Self::swap_framebuffer`]
+    pub fn alloc_framebuffer(&self) -> Framebuffer {
+        Framebuffer::new(256, 240, PixelFormat::RGBA8888)
+    }
+
+    /// Associate a new framebuffer with the PPU for rendering
+    ///
+    /// While the framebuffer is associated with the PPU the PPU will rent access to the underlying data
+    /// and so you must swap with a new framebuffer before being able to rent access to the data
+    /// for presenting
+    pub fn swap_framebuffer(&mut self, framebuffer: Framebuffer) -> Result<Framebuffer> {
+        if let Some(rental) = framebuffer.rent_data() {
+            let old = self.framebuffer.owner();
+            self.framebuffer = rental;
+            Ok(old)
+        } else {
+            Err(anyhow!("Failed to rent access to framebuffer data for rendering"))
+        }
+    }
+
+    /// Records an internal event into the back trace buffer
+    ///
+    /// This is a debug mechanism for being able to track mid-frame events which a
+    /// debug tool can plot onto an expanded (341 x 262) framebuffer view covering
+    /// the full dot clock range for a frame
+    #[inline]
+    fn trace(&mut self, event: PpuTraceEvent) {
+        self.trace_events[self.trace_events_back].push(event);
+    }
+
+    /// Start tracing a new frame by swapping the back and front trace buffers
+    fn trace_new_frame(&mut self) {
+        self.trace_events_back = (self.trace_events_back + 1) % 2;
+        self.trace_events[self.trace_events_back].clear();
+    }
+
+    pub fn palette_read(&self, addr: u16) -> u8 {
+        let mut index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
+
+        // "Bit 0 controls a greyscale mode, which causes the palette to use
+        // only the colors from the grey column: $00, $10, $20, $30. This is
+        // implemented as a bitwise AND with $30 on any value read from PPU
+        // $3F00-$3FFF, both on the display and through PPUDATA. Writes to the
+        // palette through PPUDATA are not affected. Also note that black
+        // colours like $0F will be replaced by a non-black grey $00."
+        if self.monochrome {
+            index &= 0x30;
+        }
+
+        // "Addresses $3F10/$3F14/$3F18/$3F1C are mirrors of
+        // $3F00/$3F04/$3F08/$3F0C. Note that this goes for writing as well as
+        // reading. A symptom of not having implemented this correctly in an
+        // emulator is the sky being black in Super Mario Bros., which writes
+        // the backdrop color through $3F10."
+        let value = match index {
             0x10 => self.palette[0x00],
             0x14 => self.palette[0x04],
             0x18 => self.palette[0x08],
             0x1c => self.palette[0x0c],
             _ => arr_read!(self.palette, index),
-        }
+        };
+
+        value
     }
 
-    pub fn pallet_write(&mut self, addr: u16, data: u8) {
+    pub fn palette_write(&mut self, addr: u16, data: u8) {
         // Palette with mirroring
         let index = usize::from(addr - PALETTE_TABLE_BASE_ADDR) % PALETTE_SIZE;
+        if addr == 0x3f00 || addr == 0x3f10 {
+            self.universal_background_color = Color::from(data);
+        }
         match index {
             0x10 => self.palette[0x00] = data,
             0x14 => self.palette[0x04] = data,
@@ -271,26 +426,54 @@ impl Ppu {
         };
     }
 
+    /// Perform a buffered ppu data read for register $2007
+    ///
+    /// This will also update the the internal buffer, ready for the next read
+    ///
     /// Returns (value, undefined_bit_mask)
-    pub fn data_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+    fn buffered_ppu_data_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
         if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
-            self.read_buffer = self.vram.read(cartridge, addr);
-            (self.pallet_read(addr), 0xc0)
+            self.read_buffer = cartridge.vram_read(addr);
+            (self.palette_read(addr), 0xc0)
         } else {
             let buffered = self.read_buffer;
-            self.read_buffer = self.vram.read(cartridge, addr);
+            self.read_buffer = cartridge.vram_read(addr);
             (buffered, 0)
         }
     }
 
-    pub fn data_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    /// Peek what a buffered ppu data read (via $2007) would fetch without any side effects
+    pub fn buffered_ppu_data_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+        if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
+            (self.palette_read(addr), 0xc0)
+        } else {
+            (self.read_buffer, 0)
+        }
+    }
+
+    /// Perform a ppu data write (via $2007)
+    pub fn ppu_data_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         if let 0x3f00..=0x3fff = addr {
             //println!("palette write: addr={addr:x}, data={data:x}");
-            self.pallet_write(addr, data);
+            self.palette_write(addr, data);
         } else {
             //println!("data write: addr={addr:x}, data={data:x}");
-            self.vram.write(cartridge, addr, data);
+            cartridge.vram_write(addr, data);
         }
+    }
+
+    /// Perform an unbuffered ppu bus read
+    fn unbuffered_ppu_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+        if let 0x3f00..=0x3fff = addr {
+            self.palette_read(addr)
+        } else {
+            cartridge.vram_read(addr)
+        }
+    }
+
+    /// Peek what an unbuffered ppu bus read would fetch without any side effects
+    pub fn unbuffered_ppu_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+        self.unbuffered_ppu_bus_read(cartridge, addr) // reading currently has no side effects
     }
 
     pub fn increment_data_addr(&mut self) {
@@ -309,6 +492,7 @@ impl Ppu {
         // inputs are set up to linearly increment v by either 1 or 32)
 
         self.shared_v_register = self.shared_v_register.wrapping_add(self.address_increment());
+        //println!("inc data address: scroll_tile_x = {}, scroll_tile_y = {}", self.scroll_tile_x(), self.scroll_tile_y());
     }
 
     // TODO: decay the latch value over time
@@ -323,6 +507,50 @@ impl Ppu {
         read
     }
 
+    /// Directly read OAM data from the current OAMADDR offset
+    #[inline]
+    fn read_oam_data(&self, offset: u8) -> u8 {
+        //"The three unimplemented bits of each sprite's byte 2 do not exist in the PPU and always read back as
+        // 0 on PPU revisions that allow reading PPU OAM through OAMDATA ($2004)"
+        arr_read!(self.oam, offset as usize)
+    }
+
+    /// Directly write OAM data to the current OAMADDR offset
+    #[inline]
+    fn write_oam_data(&mut self, offset: u8, val: u8) {
+        //"The three unimplemented bits of each sprite's byte 2 do not exist in the PPU and always read back as
+        // 0 on PPU revisions that allow reading PPU OAM through OAMDATA ($2004)"
+        //
+        // Since we read more-often than we write then we emulate this on writes instead of reads
+        if offset & 0b11 == 2 {
+            let masked_val = val & 0b1110_0011;
+            //println!("OAM[{offset}] = {masked_val:02x} (masked from {val:02x})");
+            arr_write!(self.oam, offset as usize, masked_val);
+        } else {
+            //println!("OAM[{offset}] = {val:02x}");
+            arr_write!(self.oam, offset as usize, val);
+        }
+    }
+
+    /// Read OAM data via $2004 register
+    fn read_oam_data_register(&self) -> u8 {
+        // "Cycles 1-64: Secondary OAM (32-byte buffer for current
+        // sprites on scanline) is initialized to $FF - attempting to
+        // read $2004 will return $FF. Internally, the clear operation
+        // is implemented by reading from the OAM and writing into the
+        // secondary OAM as usual, only a signal is active that makes
+        // the read always return $FF."
+        if self.secondary_oam_being_cleared {
+            0xff
+        } else {
+            self.read_oam_data(self.oam_offset)
+        }
+    }
+
+    pub fn peek_oam_data(&self, offset: u8) -> u8 {
+        self.read_oam_data(offset)
+    }
+
     /// Read without applying open bus latch value
     ///
     /// Returns (value, undefined bits mask)
@@ -330,10 +558,10 @@ impl Ppu {
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         match addr {
-            0x2000 => { // Control 1 (Write-only)
+            0x2000 => { // Control (Write-only)
                 (0, 0xff)
             }
-            0x2001 => {  // Control 2 (Write-only)
+            0x2001 => {  // Mask (Write-only)
                 (0, 0xff)
             }
             // PPU_STATUS (read-only) Resets double-write register status, clears VBLANK flag
@@ -348,7 +576,7 @@ impl Ppu {
                 (0, 0xff)
             }
             0x2004 => { // OAMDATA (Read/Write)
-                (self.oam[self.oam_offset as usize], 0x0)
+                (self.read_oam_data_register(), 0x0)
             }
             0x2005 => { // PPU_SCROLL (Write-only)
                 (0, 0xff)
@@ -357,7 +585,7 @@ impl Ppu {
                 (0, 0xff)
             }
             0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.data_read(cartridge, self.shared_v_register);
+                let (data, undefined_mask) = self.buffered_ppu_data_read(cartridge, self.shared_v_register);
                 self.increment_data_addr();
                 (data, undefined_mask)
             }
@@ -365,12 +593,12 @@ impl Ppu {
         }
     }
 
-    pub fn read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+    pub fn system_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
         self.finish_read_with_latch(value, undefined_bits)
     }
 
-    pub fn peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+    pub fn system_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         let (value, undefined_bits) = match addr {
@@ -378,29 +606,45 @@ impl Ppu {
                 let data = self.status.bits();
                 (data, StatusFlags::UNDEFINED_BITS.bits())
             }
-            0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.data_read(cartridge, self.shared_v_register);
-                (data, undefined_mask)
+            0x2004 => { // OamData
+                (self.read_oam_data_register(), 0x0)
             }
-            _ => self.read_without_openbus(cartridge, addr)
+            0x2007 => { // PPU_DATA (Read/Write)
+                self.buffered_ppu_data_peek(cartridge, self.shared_v_register)
+            }
+            _ => (0, 0xff)
         };
 
         self.finish_peek_with_latch(value, undefined_bits)
     }
 
-    pub fn write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+    pub fn system_bus_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         // mirror support
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         self.io_latch_value = data;
         match addr {
             0x2000 => { // Control 1
                 self.control1 = Control1Flags::from_bits_truncate(data);
+                self.nmi_enable = self.control1.contains(Control1Flags::NMI_ENABLE);
+
                 // The lower nametable bits become 10-11 of the shared (15 bit) temp register that's
                 // used by PPU_SCROLL and PPU_ADDR
                 self.shared_t_register = (self.shared_t_register & 0b0111_0011_1111_1111) | ((data as u16 & 0b11) << 10);
             }
             0x2001 => {  // Control 2
+
                 self.control2 = Control2Flags::from_bits_truncate(data);
+                self.show_background = self.control2.contains(Control2Flags::SHOW_BG);
+                self.show_sprites = self.control2.contains(Control2Flags::SHOW_SPRITES);
+                self.rendering_enabled = self.show_background || self.show_sprites;
+                self.show_sprites_in_left_margin = self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW);
+                self.show_background_in_left_margin = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW);
+                self.monochrome = self.control2.contains(Control2Flags::MONOCHROME);
+                //self.monochrome = true;
+                self.emphasize_red = self.control2.contains(Control2Flags::EMPHASIZE_RED);
+                self.emphasize_green = self.control2.contains(Control2Flags::EMPHASIZE_GREEN);
+                self.emphasize_blue = self.control2.contains(Control2Flags::EMPHASIZE_BLUE);
+                //println!("PPU Control2 write = {:08b}: rendering_enabled = {:?}", data, self.rendering_enabled);
             }
             0x2002 => { // Status
                 // Read Only
@@ -428,8 +672,27 @@ impl Ppu {
                 //self.written_oam_data = true;
                 //arr_write!(self.ppu_reg, 4, data);
                 //println!("oam write {:x} = {data:x}", self.oam_offset);
-                self.oam[self.oam_offset as usize] = data;
-                self.oam_offset = self.oam_offset.wrapping_add(1);
+
+                // nesdev:
+                //
+                // "Writes to OAMDATA during rendering (on the pre-render line
+                // and the visible lines 0-239, provided either sprite or
+                // background rendering is enabled) do not modify values in OAM,
+                // but do perform a glitchy increment of OAMADDR, bumping only
+                // the high 6 bits (i.e., it bumps the [n] value in PPU sprite
+                // evaluation - it's plausible that it could bump the low bits
+                // instead depending on the current status of sprite
+                // evaluation). This extends to DMA transfers via OAMDMA, since
+                // that uses writes to $2004"
+                //
+                // "For emulation purposes, it is probably best to completely ignore
+                //  writes during rendering."
+                if !self.is_rendering {
+                    self.write_oam_data(self.oam_offset, data);
+                    self.oam_offset = self.oam_offset.wrapping_add(1);
+                } else {
+                    self.oam_offset = self.oam_offset.wrapping_add(4);
+                }
             }
             0x2005 => { // PPU_SCROLL
                 // NB: This is the layout of the (15bit) shared temp register when used
@@ -445,7 +708,7 @@ impl Ppu {
                     self.shared_t_register = (self.shared_t_register & 0b0000_1100_0001_1111) | (fine3_y << 12) | (coarse5_y << 5);
 
                     // TODO: supporting mid-frame updates from t -> v
-                    self.update_scroll_xy();
+                    //self.update_scroll_xy();
                 } else {
                     self.scroll_x_fine3 = data & 0b111;
                     self.shared_t_register = (self.shared_t_register & 0b0111_1111_1110_0000) | (((data >> 3) as u16) & 0b1_1111);
@@ -457,7 +720,9 @@ impl Ppu {
                     let lsb = data;
                     self.shared_t_register = (self.shared_t_register & 0xff00) | (lsb as u16);
                     self.shared_v_register = self.shared_t_register;
+                    //println!("PPU ADDR write 2 = {data:02x}, new PPU DATA address = 0x{:04x}, scroll_tile_x = {}, scroll_tile_y = {}", self.shared_v_register, self.scroll_tile_x(), self.scroll_tile_y());
                 } else {
+                    //println!("PPU ADDR write 1 = {data:02x}");
                     // NB: shared_temp (t) is a 15 bit register that's shared between
                     // PPU_ADDR and PPU_SCROLL. Also note the PPU only has a 14bit address
                     // space for vram and the first write to $2006 will set the upper
@@ -472,556 +737,506 @@ impl Ppu {
             }
             0x2007 => { // PPU_DATA
                 //println!("data_write_u8: {:x}, {data:x}", self.shared_vram_addr);
-                self.data_write(cartridge, self.shared_v_register, data);
-
-                //arr_write!(self.ppu_reg, 7, data);
-                // PPUに書いてもらおう
-                //self.written_ppu_data = true;
+                //debug_assert!(self.line >239);
+                //println!("ppu data: writing = {:02x} to {:04x}", data, self.shared_v_register);
+                self.ppu_data_write(cartridge, self.shared_v_register, data);
                 self.increment_data_addr();
             }
             _ => unreachable!()
         };
     }
 
-    pub fn peek_nametable(&self, x: usize, y: usize, cartridge: &mut Cartridge) -> [u8; 3] {
+    fn clear_secondary_oam(&mut self) {
+        self.secondary_oam = [0xff; 32];
+    }
 
-        let nametable_base_addr = self.name_table_base_addr();
-        let pattern_table_addr = self.bg_pattern_table_addr();
-        //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
-        let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
-        let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
-        let is_monochrome = self.control2.contains(Control2Flags::MONOCHROME);
-        let master_bg_color = Color::from(self.pallet_read(
-            PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
-        ));
+    fn start_sprite_evaluation(&mut self) {
+        //println!("Starting sprite evaluation, secondary OAM = {:x?}", self.secondary_oam);
+        //println!("Starting sprite evaluation, OAM = {:x?}", self.oam);
 
-        //let raw_y = self.scroll_fine_y();
-        let raw_y = y as u16; //self.line + u16::from(self.current_scroll_y);
-        let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
-        let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
-                                      // scroll reg shifts in tile conversion
-        let tile_global_y = tile_base_y % (SCREEN_TILE_HEIGHT * 2); // y absolute coordinates in tile conversion
-        let tile_local_y = tile_global_y % SCREEN_TILE_HEIGHT; // Absolute coordinates within 1 tile
-                                                               // Of the 4 sides, if it is approaching the lower side, it is false
-        let is_nametable_position_top = tile_global_y < SCREEN_TILE_HEIGHT;
+        // The value of OAMADDR when sprite evaluation starts at tick 65 of the
+        // visible scanlines will determine where in OAM sprite evaluation
+        // starts, and hence which sprite gets treated as sprite 0. The first
+        // OAM entry to be checked during sprite evaluation is the one starting
+        // at OAM[OAMADDR]. If OAMADDR is unaligned and does not point to the y
+        // position (first byte) of an OAM entry, then whatever it points to
+        // (tile index, attribute, or x coordinate) will be reinterpreted as a y
+        // position, and the following bytes will be similarly reinterpreted. No
+        // more sprites will be found once the end of OAM is reached,
+        // effectively hiding any sprites before OAM[OAMADDR].
 
+        self.secondary_oam_offset = 0;
+        self.oam_evaluate_state = SpriteEvalState::Copying;
+        self.oam_evaluate_n = (self.oam_offset >> 2) as usize;
+        self.oam_evaluate_m = (self.oam_offset & 0b11) as usize;
+        self.oam_evaluate_sprite_in_range = false;
+        self.oam_evaluate_sprite_zero_in_range = false;
+        self.oam_evaluate_n_sprites = 0;
+    }
 
-        //let offset_x = self.scroll_fine_x();
-        // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
-        let raw_x = x as u16; // ((pixel_x as u16) + u16::from(self.current_scroll_x))
-        let offset_x = raw_x & 0x07;
-        let tile_base_x = raw_x >> 3;
-        // scroll reg shifts in tile conversion
-        let tile_global_x = tile_base_x % (SCREEN_TILE_WIDTH * 2); // X absolute coordinates in 4tile conversion
-        let tile_local_x = tile_global_x % SCREEN_TILE_WIDTH; // Absolute coordinates within 1 tile
-        let is_nametable_position_left = tile_global_x < SCREEN_TILE_WIDTH; // False if it is on the right side of the 4 sides
+    #[inline]
+    fn is_sprite_in_range(&self, sprite_y: u8) -> bool {
+        let line = self.line as u8;
+        line >= sprite_y && line < (sprite_y + self.sprite_height())
+    }
 
-        // Since we know which of the four faces, we will return the base address of that face
-        let target_nametable_base_addr = nametable_base_addr +
-            (if is_nametable_position_left { 0x0000 } else { 0x0400 }) + // Wide area offset on the left and right sides
-            (if is_nametable_position_top  { 0x0000 } else { 0x0800 }); // Wide area offset on top and bottom
+    fn step_sprite_evaluation(&mut self) {
 
-        // Since the attribute table is 32 bytes after the nametable, the address is calculated and read.
-        // It is 1 attr with 4 * 4 tiles in height and width.
-        // Offset calculation uses global position for scroll support (maybe 1Nametable with clipping)
-        let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET; // 23c0, 27c0, 2bc0, 2fc0のどれか
-        let attribute_x_offset = (tile_global_x >> 2) & 0x7;
-        let attribute_y_offset = tile_global_y >> 2;
-        let attribute_addr =
-            attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
+        // Note: sprite evaluation may be done even if sprite rendering is disabled:
+        //  "With background rendering on, sprite evaluation will resume but remain hidden"
 
-        // Used for attribute reading and BG palette selection.
-        // Change the palette information used at the 4 * 4 position
-        let raw_attribute = self.vram.read(cartridge, attribute_addr);
-        let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
-            (true, true) => (raw_attribute >> 0) & 0x03,  // top left
-            (false, true) => (raw_attribute >> 2) & 0x03, // top right
-            (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
-            (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
-        };
+        // nesdev:
+        //
+        // During all visible scanlines, the PPU scans through OAM to determine which sprites to render on the next scanline. Sprites found to be within
+        // range are copied into the secondary OAM, which is then used to initialize eight internal sprite output units.
+        //
+        // OAM[n][m] below refers to the byte at offset 4*n + m within OAM, i.e. OAM byte m (0-3) of sprite n (0-63).
+        //
+        // # Cycles 65-256: Sprite evaluation
+        // On odd cycles, data is read from (primary) OAM
+        // On even cycles, data is written to secondary OAM (unless secondary OAM is full, in which case it will read the value in secondary OAM instead)
+        //  1. Starting at n = 0, read a sprite's Y-coordinate (OAM[n][0], copying it to the next open slot in secondary OAM (unless 8 sprites
+        //     have been found, in which case the write is ignored).
+        //    1a. If Y-coordinate is in range, copy remaining bytes of sprite data (OAM[n][1] thru OAM[n][3]) into secondary OAM.
+        //  2. Increment n
+        //    2a. If n has overflowed back to zero (all 64 sprites evaluated), go to 4
+        //    2b. If less than 8 sprites have been found, go to 1
+        //    2c. If exactly 8 sprites have been found, disable writes to secondary OAM because it is full. This causes sprites in back to drop out.
+        //  3. Starting at m = 0, evaluate OAM[n][m] as a Y-coordinate.
+        //    3a. If the value is in range, set the sprite overflow flag in $2002 and read the next 3 entries of OAM
+        //        (incrementing 'm' after each byte and incrementing 'n' when 'm' overflows); if m = 3, increment n
+        //    3b. If the value is not in range, increment n and m (without carry). If n overflows to 0, go to 4; otherwise go to 3
+        //        _The m increment is a hardware bug - if only n was incremented, the overflow flag would be set whenever more than
+        //        8 sprites were present on the same scanline, as expected._
+        //  4. Attempt (and fail) to copy OAM[n][0] into the next free slot in secondary OAM, and increment n (repeat until HBLANK is reached)
+        //
+        // # Notes
+        //
+        // The value of OAMADDR when sprite evaluation starts at tick 65 of the
+        // visible scanlines will determine where in OAM sprite evaluation
+        // starts, and hence which sprite gets treated as sprite 0. The first
+        // OAM entry to be checked during sprite evaluation is the one starting
+        // at OAM[OAMADDR]. If OAMADDR is unaligned and does not point to the y
+        // position (first byte) of an OAM entry, then whatever it points to
+        // (tile index, attribute, or x coordinate) will be reinterpreted as a y
+        // position, and the following bytes will be similarly reinterpreted. No
+        // more sprites will be found once the end of OAM is reached,
+        // effectively hiding any sprites before OAM[OAMADDR].
+        //
+        // Sprite evaluation does not happen on the pre-render scanline. Because evaluation applies to the next line's sprite rendering, no sprites will
+        // be rendered on the first scanline, and this is why there is a 1 line offset on a sprite's Y coordinate.
+        //
+        // Sprite evaluation occurs if either the sprite layer or background layer is enabled via $2001. Unless both layers are disabled, it merely hides sprite rendering.
+        //
+        // Sprite evaluation does not cause sprite 0 hit. This is handled by sprite rendering instead.
 
-        // Read tile_id from Name table-> Build data from pattern table
-        let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-        let bg_tile_id = u16::from(self.vram.peek(cartridge, nametable_addr));
-
-
-        // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
-        let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
-        let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
-        let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
-        let bg_data_lower = self
-            .vram
-            .peek(cartridge, bg_pattern_table_addr_lower);
-        let bg_data_upper = self
-            .vram
-            .peek(cartridge, bg_pattern_table_addr_upper);
-
-
-        // Make the drawing color of bg
-        let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
-            | ((bg_data_lower >> (7 - offset_x)) & 0x01);
-        let bg_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET) +   // 0x3f00
-            (u16::from(bg_palette_id) << 2) + // Select BG Palette 0 ~ 3 in attribute
-            u16::from(bg_palette_offset); // Color selection in palette
-
-        // Create BG data considering the 8 pixel clip at the left end of BG
-        let is_bg_clipping = is_clip_bg_leftend && (x < 8);
-        let is_bg_tranparent = (bg_palette_addr & 0x03) == 0x00; // If the background color is selected, it will be processed here
-        let bg_palette_data: Option<u8> = if is_bg_clipping || !is_write_bg || is_bg_tranparent
-        {
-            None
+        if self.dot & 1 != 0 {
+            // "On odd cycles, data is read from (primary) OAM"
+            self.oam_evaluate_read = self.read_oam_data(self.oam_offset);
+            //println!("Read OAM[{}] = {}", self.oam_offset, self.oam_evaluate_read);
         } else {
-            Some(self.pallet_read(bg_palette_addr))
-        };
+            //println!("OAM evaluate state = {:?}, line = {}", self.oam_evaluate_state, self.line);
+            match self.oam_evaluate_state {
+                SpriteEvalState::Copying => {
+                    self.secondary_oam[self.secondary_oam_offset] = self.oam_evaluate_read;
 
-        // transparent
-        let mut draw_color = master_bg_color;
-        if let Some(color_index) = bg_palette_data {
-            let c = Color::from(color_index);
-            draw_color = c;
-        }
-
-        if is_monochrome {
-            let val = (draw_color.0 + draw_color.1 + draw_color.2) / 3;
-            draw_color.0 = val;
-            draw_color.1 = val;
-            draw_color.2 = val;
-        }
-
-        [draw_color.0, draw_color.1, draw_color.2]
-    }
-
-    /// Draw one line
-    ///
-    /// `tile_base`   - Current tile position without scroll offset addition
-    /// `tile_global` - Tile position on 4 sides including scroll offset
-    /// `tile_local`  - Converted `tile_global` to the position on the tile on 1Namespace
-    /// All of the above should match without scroll
-    fn draw_tile_span(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
-        let nametable_base_addr = self.name_table_base_addr();
-        let pattern_table_addr = self.bg_pattern_table_addr();
-        //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
-        let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
-        let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
-        let is_monochrome = self.control2.contains(Control2Flags::MONOCHROME);
-        let master_bg_color = Color::from(self.pallet_read(
-            PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET,
-        ));
-
-        //let raw_y = self.scroll_fine_y();
-        let raw_y = self.line + u16::from(self.current_scroll_y);
-        let offset_y = raw_y & 0x07; // Actual pixel deviation (0 ~ 7) from y position in tile conversion
-        let tile_base_y = raw_y >> 3; // Current position in tile conversion without offset
-                                      // scroll reg shifts in tile conversion
-        let tile_global_y = tile_base_y % (SCREEN_TILE_HEIGHT * 2); // y absolute coordinates in tile conversion
-        let tile_local_y = tile_global_y % SCREEN_TILE_HEIGHT; // Absolute coordinates within 1 tile
-                                                               // Of the 4 sides, if it is approaching the lower side, it is false
-        let is_nametable_position_top = tile_global_y < SCREEN_TILE_HEIGHT;
-
-        // pixel formatの決定
-        let pixel_indexes = match self.draw_option.pixel_format {
-            PixelFormat::RGBA8888 => (0, 1, 2, 3),
-            PixelFormat::BGRA8888 => (2, 1, 0, 3),
-            PixelFormat::ARGB8888 => (1, 2, 3, 0),
-        };
-
-        //println!("scroll_x = {}, y = {}", self.current_scroll_x, self.current_scroll_y);
-        // Loop in the drawing coordinate system
-        let pixel_y = usize::from(self.line);
-        for pixel_x in 0..VISIBLE_SCREEN_WIDTH {
-            // Sprite: Get the data to draw from the searched temporary register
-            let (sprite_palette_data_back, sprite_palette_data_front) =
-                self.get_sprite_draw_data(cartridge, pixel_x, pixel_y);
-
-            //let offset_x = self.scroll_fine_x();
-            // BG (Nametable): Get data from nametable and attribute table corresponding to coordinates
-            let offset_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) & 0x07;
-            let tile_base_x = ((pixel_x as u16) + u16::from(self.current_scroll_x)) >> 3;
-            // scroll reg shifts in tile conversion
-            let tile_global_x = tile_base_x % (SCREEN_TILE_WIDTH * 2); // X absolute coordinates in 4tile conversion
-            let tile_local_x = tile_global_x % SCREEN_TILE_WIDTH; // Absolute coordinates within 1 tile
-            let is_nametable_position_left = tile_global_x < SCREEN_TILE_WIDTH; // False if it is on the right side of the 4 sides
-
-            // Since we know which of the four faces, we will return the base address of that face
-            let target_nametable_base_addr = nametable_base_addr +
-                (if is_nametable_position_left { 0x0000 } else { 0x0400 }) + // Wide area offset on the left and right sides
-                (if is_nametable_position_top  { 0x0000 } else { 0x0800 }); // Wide area offset on top and bottom
-
-            // Since the attribute table is 32 bytes after the nametable, the address is calculated and read.
-            // It is 1 attr with 4 * 4 tiles in height and width.
-            // Offset calculation uses global position for scroll support (maybe 1Nametable with clipping)
-            let attribute_base_addr = target_nametable_base_addr + ATTRIBUTE_TABLE_OFFSET; // 23c0, 27c0, 2bc0, 2fc0のどれか
-            let attribute_x_offset = (tile_global_x >> 2) & 0x7;
-            let attribute_y_offset = tile_global_y >> 2;
-            let attribute_addr =
-                attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
-
-            // Used for attribute reading and BG palette selection.
-            // Change the palette information used at the 4 * 4 position
-            let raw_attribute = self.vram.read(cartridge, attribute_addr);
-            let bg_palette_id = match (tile_local_x & 0x03 < 0x2, tile_local_y & 0x03 < 0x2) {
-                (true, true) => (raw_attribute >> 0) & 0x03,  // top left
-                (false, true) => (raw_attribute >> 2) & 0x03, // top right
-                (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
-                (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
-            };
-
-            // Read tile_id from Name table-> Build data from pattern table
-            let nametable_addr = target_nametable_base_addr + (tile_local_y << 5) + tile_local_x;
-            let bg_tile_id = u16::from(self.vram.read(cartridge, nametable_addr));
-
-
-            // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
-            let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
-            let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + offset_y;
-            let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
-            let bg_data_lower = self
-                .vram
-                .read(cartridge, bg_pattern_table_addr_lower);
-            let bg_data_upper = self
-                .vram
-                .read(cartridge, bg_pattern_table_addr_upper);
-
-
-            // Make the drawing color of bg
-            let bg_palette_offset = (((bg_data_upper >> (7 - offset_x)) & 0x01) << 1)
-                | ((bg_data_lower >> (7 - offset_x)) & 0x01);
-            let bg_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET) +   // 0x3f00
-                (u16::from(bg_palette_id) << 2) + // Select BG Palette 0 ~ 3 in attribute
-                u16::from(bg_palette_offset); // Color selection in palette
-
-            // Create BG data considering the 8 pixel clip at the left end of BG
-            let is_bg_clipping = is_clip_bg_leftend && (pixel_x < 8);
-            let is_bg_tranparent = (bg_palette_addr & 0x03) == 0x00; // If the background color is selected, it will be processed here
-            let bg_palette_data: Option<u8> = if is_bg_clipping || !is_write_bg || is_bg_tranparent
-            {
-                None
-            } else {
-                Some(self.pallet_read(bg_palette_addr))
-            };
-
-            // transparent
-            let mut draw_color = master_bg_color;
-
-            'select_color: for palette_data in &[
-                sprite_palette_data_front,
-                bg_palette_data,
-                sprite_palette_data_back,
-            ] {
-                if let Some(color_index) = palette_data {
-                    let c = Color::from(*color_index);
-                    draw_color = c;
-                    break 'select_color;
-                }
-            }
-
-            let draw_base_y = (pixel_y as i32);
-            let draw_base_x = (pixel_x as i32);
-            // Coordinate calculation, 1 dot needs to be reflected in scale ** 2 pixel
-            let draw_y = draw_base_y;
-            if (draw_y < 0) || ((VISIBLE_SCREEN_HEIGHT as i32) <= draw_y) {
-                continue;
-            }
-
-            let draw_x = draw_base_x;
-            if (draw_x < 0) || ((VISIBLE_SCREEN_WIDTH as i32) <= draw_x) {
-                continue;
-            }
-
-            // Calculate the corresponding coordinates from the size of FrameBuffer
-            // Use the width of FrameBuffer instead of 256 for the width when
-            // calculating the index corresponding to the Y position.
-            let base_index = ((draw_y as isize) * (VISIBLE_SCREEN_WIDTH as isize)
-                + (draw_x as isize))
-                * (NUM_OF_COLOR as isize);
-
-            unsafe {
-                let base_ptr = fb.offset(base_index);
-
-                *base_ptr.offset(pixel_indexes.0) = draw_color.0; // R
-                *base_ptr.offset(pixel_indexes.1) = draw_color.1; // G
-                *base_ptr.offset(pixel_indexes.2) = draw_color.2; // B
-                *base_ptr.offset(pixel_indexes.3) = 0xff; // alpha blending
-
-                // Supports monochrome output (total average for the time being)
-                if is_monochrome {
-                    let data = ((u16::from(*base_ptr.offset(pixel_indexes.0))
-                        + u16::from(*base_ptr.offset(pixel_indexes.1))
-                        + u16::from(*base_ptr.offset(pixel_indexes.2)))
-                        / 3) as u8;
-                    *base_ptr.offset(pixel_indexes.0) = data;
-                    *base_ptr.offset(pixel_indexes.1) = data;
-                    *base_ptr.offset(pixel_indexes.2) = data;
-                }
-            }
-        }
-    }
-
-    /// Draws a sprite on the specified pixel
-    /// Returns: (Data drawn after bg, data drawn before bg)
-    fn get_sprite_draw_data(
-        &mut self,
-        cartridge: &mut Cartridge,
-        pixel_x: usize,
-        pixel_y: usize,
-    ) -> (Option<u8>, Option<u8>) {
-        if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
-            return (None, None);
-        }
-
-        // Search for Sprite (Sprite that must be drawn in y position is preloaded)
-        let mut sprite_palette_data_back: Option<u8> = None;
-        let mut sprite_palette_data_front: Option<u8> = None;
-        'draw_sprite: for &s in self.sprite_temps.iter() {
-            if let Some(sprite) = s {
-                let sprite_x = usize::from(sprite.x);
-                let sprite_y = usize::from(sprite.y);
-                // Left edge Not displayed when sprite clipping is enabled
-                let is_sprite_clipping = self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW) == false && (pixel_x < 8);
-                if !is_sprite_clipping
-                    && (sprite_x <= pixel_x)
-                    && (pixel_x < usize::from(sprite_x + SPRITE_WIDTH))
-                {
-                    // Relative coordinates of sprite
-                    let sprite_offset_x: usize = pixel_x - sprite_x; // 0-7
-                    let sprite_offset_y: usize = pixel_y - sprite_y - 1; // 0-7 or 0-15 (largeの場合, tile参照前に0-7に詰める)
-                    debug_assert!(sprite_offset_x < SPRITE_WIDTH);
-                    debug_assert!(sprite_offset_y < usize::from(self.sprite_height()));
-
-                    // pattern table addr and tile id are determined by size
-                    let (sprite_pattern_table_addr, sprite_tile_id): (u16, u8) = match sprite
-                        .tile_id
-                    {
-                        TileId::Normal { id } => (self.sprites_pattern_table_addr(), id),
-                        // Since it is 8 * 16 sprite, the id is separated at the top and bottom.
-                        TileId::Large {
-                            pattern_table_addr,
-                            upper_tile_id,
-                            lower_tile_id,
-                        } => {
-                            let is_upper = sprite_offset_y < SPRITE_NORMAL_HEIGHT;
-                            let is_vflip = sprite.attr.is_vert_flip;
-                            let id = match (is_upper, is_vflip) {
-                                (true, false) => upper_tile_id,  // Drawing coordinates are 8 pixels above, no Flip
-                                (false, false) => lower_tile_id, // Drawing coordinates are 8 pixels below, no Flip
-                                (true, true) => lower_tile_id,   // Drawing coordinates are 8 pixels above, with Flip
-                                (false, true) => upper_tile_id,  // Drawing coordinates are 8 pixels below, with Flip
-                            };
-                            (pattern_table_addr, id)
+                    if self.secondary_oam_offset % 4 == 0 {
+                        self.oam_evaluate_sprite_in_range = self.is_sprite_in_range(self.oam_evaluate_read);
+                        if self.secondary_oam_offset == 0 {
+                            self.oam_evaluate_sprite_zero_in_range = self.oam_evaluate_sprite_in_range;
                         }
-                    };
+                        if self.oam_evaluate_sprite_in_range {
+                            //println!("Found in-range sprite[{}] @ dot = {}, line = {}, Y = {}", self.secondary_oam_offset / 4, self.dot, self.line, self.oam_evaluate_read);
+                            self.oam_evaluate_n_sprites += 1;
+                        }
+                    }
+                    if self.oam_evaluate_sprite_in_range {
+                        self.secondary_oam_offset += 1;
 
-                    // Determine the data position on the tile considering x, y flip
-                    let tile_offset_x: usize = if !sprite.attr.is_hor_flip {
-                        sprite_offset_x
+                        // XXX: not sure this add with carry behaviour is quite how the HW works.
+                        //
+                        // Even though the above notes from nesdev seem to say the hardware will blindly read unaligned OAM data
+                        // that seems highly suspicious and I think that should be confirmed.
+
+                        self.oam_evaluate_m = (self.oam_evaluate_m + 1) % 4;
+                        if self.oam_evaluate_m == 0 {
+                            self.oam_evaluate_n += 1;
+                        }
                     } else {
-                        SPRITE_WIDTH - 1 - sprite_offset_x
-                    };
-                    let tile_offset_y: usize = if !sprite.attr.is_vert_flip {
-                        sprite_offset_y % SPRITE_NORMAL_HEIGHT
+                        self.oam_evaluate_n += 1;
+                    }
+                    if self.oam_evaluate_n >= 64 {
+                        self.oam_evaluate_state = SpriteEvalState::Done;
+                    } else if self.secondary_oam_offset >= 32 {
+                        self.oam_evaluate_state = SpriteEvalState::LookingForOverflow;
+                    }
+                }
+                SpriteEvalState::LookingForOverflow => {
+                    if self.is_sprite_in_range(self.oam_evaluate_read) {
+                        // 9th in-range sprite found
+                        //println!("Found 9th sprite @ dot = {}, line = {}", self.dot, self.line);
+                        debug_assert_eq!(self.oam_evaluate_n_sprites, 8);
+                        self.status.set(StatusFlags::SPRITE_OVERFLOW, true);
+                        self.oam_evaluate_state = SpriteEvalState::Done;
                     } else {
-                        SPRITE_NORMAL_HEIGHT - 1 - (sprite_offset_y % SPRITE_NORMAL_HEIGHT)
-                    };
-                    // Calculate tile addr
-                    let sprite_pattern_table_base_addr = u16::from(sprite_pattern_table_addr)
-                        + (u16::from(sprite_tile_id) * PATTERN_TABLE_ENTRY_BYTE);
-                    let sprite_pattern_table_addr_lower =
-                        sprite_pattern_table_base_addr + (tile_offset_y as u16);
-                    let sprite_pattern_table_addr_upper = sprite_pattern_table_addr_lower + 8;
-                    let sprite_data_lower = self
-                        .vram
-                        .read(cartridge, sprite_pattern_table_addr_lower);
-                    let sprite_data_upper = self
-                        .vram
-                        .read(cartridge, sprite_pattern_table_addr_upper);
-                    // Create a pixel pattern at the corresponding x position
-                    let sprite_palette_offset =
-                        (((sprite_data_upper >> (7 - tile_offset_x)) & 0x01) << 1)
-                            | ((sprite_data_lower >> (7 - tile_offset_x)) & 0x01);
-                    // Calculate the address of the palette
-                    let sprite_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_SPRITE_OFFSET) +        // 0x3f10
-                        (u16::from(sprite.attr.palette_id) * PALETTE_ENTRY_SIZE) + // Select Sprite Palette 0 ~ 3 in attribute
-                        u16::from(sprite_palette_offset); // Color selection in palette
-                                                          // If the palette is transparent, this pixel will not be drawn
-                    let is_tranparent = (sprite_palette_addr & 0x03) == 0x00; // Background color selected
-                    if !is_tranparent {
-                        let sprite_palette_data = self
-                            .pallet_read(sprite_palette_addr);
-                        if sprite.attr.is_draw_front {
-                            sprite_palette_data_front = Some(sprite_palette_data);
-                        } else {
-                            sprite_palette_data_back = Some(sprite_palette_data);
+                        // Emulate overflow bug where the hardware effectively traverses diagonally in memory
+                        // incrementing the sprite index _and_ the byte offset
+                        // XXX: I wonder how this interacts with OAMDATA being unaligned at the start of evaluation
+                        self.oam_evaluate_n += 1;
+                        self.oam_evaluate_m = (self.oam_evaluate_m + 1) % 4;
+                        if self.oam_evaluate_n >= 64 {
+                            self.oam_evaluate_state = SpriteEvalState::Done;
                         }
                     }
                 }
-            } else {
-                // sprite temps are pre-packed so no processing is needed anymore
-                break 'draw_sprite;
-            }
-        }
-        (sprite_palette_data_back, sprite_palette_data_front)
-    }
+                SpriteEvalState::Done => {
+                    //  "4. Attempt (and fail) to copy OAM[n][0] into the next free slot in secondary OAM, and increment n (repeat until HBLANK is reached)"
 
-    /// Search the OAM and fetch the sprite used for the next drawing into the register
-    /// If it exceeds 8, the Overflow flag will be set
-    fn fetch_sprite(&mut self) {
-        if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
-            return;
-        }
+                    // " a side effect of the OAM write disable signal is to turn
+                    // writes to the secondary OAM into reads from it. Once eight
+                    // in-range sprites have been found, the value being read during
+                    // write cycles from that point on is the y coordinate of the
+                    // first sprite copied into the secondary OAM."
 
-        // Pre-calculate sprite size
-        let sprite_begin_y = self.line;
-        let sprite_height = u16::from(self.sprite_height());
-        let is_large = sprite_height == 16;
+                    // The main significance for this is that it results in reading in a Y
+                    // value that's guaranteed to be in-range which is then what causes the (real)
+                    // hardware to step the 'm' read offset when it shouldn't.
 
-        // Clear all for the time being
-        self.sprite_temps = [None; SPRITE_TEMP_SIZE];
-        // Collect the ones whose current_line + 1 matches y in order (the condition is made bigger)
-        let mut tmp_index = 0;
-        'search_sprite: for sprite_index in 0..NUM_OF_SPRITE {
-            let target_oam_addr = sprite_index * 4;
-            // Equal to the value of y
-            let sprite_y = u16::from(self.oam[target_oam_addr]);
-            //println!("sprite y = {sprite_y}");
-            let sprite_end_y = sprite_y + sprite_height;
-            // Within the drawing range (y + 1) ~ (y + 1 + 8 or 16)
-            if (sprite_y < sprite_begin_y) && (sprite_begin_y <= sprite_end_y) {
-                // sprite 0 hit flag (Since it is processed for each line, it will be set first)
-                let is_zero_hit_delay = sprite_begin_y > (sprite_end_y - 3); // If it is processed one line at a time, Mario etc. will be detected too quickly, so FIXME
-                if sprite_index == 0 && is_zero_hit_delay {
-                    self.status.set(StatusFlags::SPRITE0_HIT, true);
-                }
-                // sprite overflow
-                if tmp_index >= SPRITE_TEMP_SIZE {
-                    self.status.set(StatusFlags::SPRITE_OVERFLOW, true);
-                    break 'search_sprite;
-                } else {
-                    debug_assert!(tmp_index < SPRITE_TEMP_SIZE);
-                    self.sprite_temps[tmp_index] = Some(Sprite::from(
-                        is_large,
-                        self.oam[target_oam_addr],
-                        self.oam[target_oam_addr + 1],
-                        self.oam[target_oam_addr + 2],
-                        self.oam[target_oam_addr + 3],
-                    ));
-                    tmp_index = tmp_index + 1;
+                    self.oam_evaluate_read = self.secondary_oam[0];
+                    self.oam_evaluate_n = (self.oam_evaluate_n + 1) % 64;
                 }
             }
         }
+
+        // We have decomposed the oam offset for sprite evaluation (including emulating the overflow bug) but
+        // need to recompose it since self.read_oam_data() will refer to .oam_offset.
+        self.oam_offset = ((self.oam_evaluate_n % 64) as u8) << 2 | (self.oam_evaluate_m as u8) & 0b11;
+        //println!("Updating OAM offset = {}, N = {}, M = {}", self.oam_offset, self.oam_evaluate_n, self.oam_evaluate_m);
     }
 
 
-    fn step_line(&mut self, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
+    /// Compose the sprite into an intermediate `sprite_line_back`, in priority order (i.e. lowest secondary oam index to highest)
+    /// This avoids needing more intricate shift register emulation for all the sprites while rendering the background
+    /// Each pixel contains:
+    /// bits 0-1 = pattern
+    /// bits 2-3 = palette
+    /// bit 4 = background priority
+    /// bit 5 = is zero sprite
+    fn compose_sprite(&mut self) {
 
-        //println!("tick, dot = {}, line = {}", self.dot, self.line);
+        // Don't cull sprites at this stage in case this flag gets changed by the time we render the final pixels
+        //if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
+        //    return;
+        //}
 
-        if let LineStatus::Visible | LineStatus::PreRender = self.line_status {
-            // "OAMADDR is set to 0 during each of ticks 257-320 (the sprite tile loading interval)
-            //  of the pre-render and visible scanlines."
-
-            /* TODO: supporting mid-frame updates from t -> v
-            if let 8..=256 = self.dot {
-                if self.dot % 8 == 0 {
-                    self.increment_coarse_x_scroll();
-                }
-            }
-
-            if self.dot == 256 {
-                self.increment_fine_y_scroll();
-            }
-            */
-
-
-            if let 257..=320 = self.dot {
-                self.oam_offset = 0;
-
-                /* TODO: supporting mid-frame updates from t -> v
-                if self.dot == 257 {
-                    // "If rendering is enabled, the PPU copies all bits related to horizontal position from t to v"
-                    // ref: https://www.nesdev.org/wiki/File:Ntsc_timing.png
-                    const HORIZONTAL_BITS_MASK: u16 = 0b0000_1000_0001_1111;
-                    self.shared_v_register = (self.shared_v_register & (!HORIZONTAL_BITS_MASK)) | (self.shared_t_register & HORIZONTAL_BITS_MASK);
-                    self.update_scroll_xy();
-                }
-                */
-            }
-
-            if self.dot == 340 {
-                //println!("fetch {}", self.line);
-                self.status.set(StatusFlags::SPRITE0_HIT, false);
-                self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
-                self.fetch_sprite();
-            }
+        if self.sprite_fetch_index >= self.oam_evaluate_n_sprites as usize {
+            return
         }
 
-        match self.line_status {
-            LineStatus::Visible => {
-                if self.dot == 340 {
-                    //println!("draw line = {}", self.line);
-                    self.draw_tile_span(cartridge, fb);
-                }
-                PpuStatus::None
-            }
-            LineStatus::PostRender => {
-                if self.dot == 340 {
-                    PpuStatus::FinishedFrame
-                } else {
-                    PpuStatus::None
-                }
-            }
-            LineStatus::VerticalBlanking => {
-                if self.line == 241 && self.dot == 1 {
-                    self.status.set(StatusFlags::IN_VBLANK, true);
-                }
+        //println!("line = {}, composing sprite {} of {}", self.line, self.sprite_fetch_index, self.oam_evaluate_n_sprites);
 
-                // FIXME: this shouldn't be conditional on the line/dot.
-                //
-                // The PPU asserts the NMI interrupt line if nme_enabled and
-                // nmi_output are set (status::IN_VBLANK and control::NME_ENABLE)
-                // respectively.
-                // Returning PpuStatus::RaiseNmi will end up calling
-                // cpu.interrupt(NMI) for every dot clock while in VBlank
-                // but the actual CPU interrupt should only be edge triggered!
-                //
-                // Even this is wrong, since it's going to invoke the interrupt
-                // repeatedly for every line while in VBlank
-                if self.line == 241 && self.dot == 1 && self.control1.contains(Control1Flags::NMI_ENABLE) && self.status.contains(StatusFlags::IN_VBLANK) {
-                    PpuStatus::RaiseNmi
-                } else {
-                    PpuStatus::None
-                }
-            }
-            LineStatus::PreRender => {
-                if self.dot == 1 {
-                    self.status.set(StatusFlags::IN_VBLANK, false);
-                }
+        // We store the sprite-zero state in bit 5
+        let sprite_zero_bit = if self.sprite_fetch_index == 0 && self.oam_evaluate_sprite_zero_in_range { 0b0010_0000u8 } else { 0 };
 
-                // During dots 280 to 304 of the pre-render scanline (end of vblank)
-                //
-                // If rendering is enabled, at the end of vblank, shortly after
-                // the horizontal bits are copied from t to v at dot 257, the
-                // PPU will repeatedly copy the vertical bits from t to v from
-                // dots 280 to 304, completing the full initialization of v
-                // from t:
-                //
-                // FIXME: don'y copy _all_ bits: v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
-                /* TODO: supporting mid-frame updates from t -> v
-                if let 280..=304 = self.dot {
-                    //self.shared_vram_addr = self.shared_temp;
-                    // FIXME
-                    //let (scroll_x, scroll_y) = self.decode_scroll_xy();
-                    //self.current_scroll_x = scroll_x;
-                    //self.current_scroll_y = scroll_y;
+        let sprite_attr = self.secondary_oam[self.sprite_fetch_index * 4 + 2];
+        let sprite_palette_bits = (sprite_attr & 0b11) << 2;
+        let sprite_priority_bit = if sprite_attr & 0b0010_0000 != 0 { 0b0001_0000 } else { 0 }; // we store the priority state in bit 4
+        let x_flip = sprite_attr & 0b0100_0000 != 0;
+        let y_flip = sprite_attr & 0b1000_0000 != 0;
+        let sprite_x = self.secondary_oam[self.sprite_fetch_index * 4 + 3] as usize;
+        let sprite_row_pattern_low = self.pattern_table0_latch;
+        let sprite_row_pattern_hi = self.pattern_table1_latch;
 
-                    const VERTICAL_BITS_MASK: u16 = 0b0111_0111_1110_0000;
-                    self.shared_v_register = (self.shared_v_register & (!VERTICAL_BITS_MASK)) | (self.shared_t_register & VERTICAL_BITS_MASK);
-                    self.update_scroll_xy();
+        // Don't handle clipping here in case it gets changed by the time we render the final pixels
+        //let clip_left_margin = !self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW);
+        for x in 0..8 {
+            //if x < 8 && clip_left_margin {
+            //    continue;
+            //}
+
+            let screen_x = sprite_x + x;
+            if screen_x <= 255 {
+                let existing = self.sprite_line_back[screen_x];
+                // "the first non-transparent pixel moves on to a multiplexer, where it joins the BG pixel."
+                if existing & 0b11 == 0 {
+                    let sprite_pattern = if x_flip {
+                        Ppu::right_select_bits_from_lo_hi_u8(sprite_row_pattern_low, sprite_row_pattern_hi, x)
+                    } else {
+                        Ppu::left_select_bits_from_lo_hi_u8(sprite_row_pattern_low, sprite_row_pattern_hi, x)
+                    };
+                    if sprite_pattern & 0b11 != 0 {
+                        self.sprite_line_back[screen_x as usize] = sprite_zero_bit | sprite_priority_bit | sprite_palette_bits | sprite_pattern;
+                        //if sprite_zero_bit != 0 {
+                        //    println!("Sprite Zero: Writing sprite_line[{}] = {:02x}, sz = {:08b}, sp = {:08b}, plt = {:08b}, pat = {:08b}",
+                        //            screen_x, self.sprite_line_back[screen_x as usize], sprite_zero_bit, sprite_priority_bit, sprite_palette_bits, sprite_pattern);
+                        //}
+                    }
                 }
-                */
-
-                PpuStatus::None
             }
         }
+    }
+
+    fn print_shift_register_state(&mut self) {
+        println!("Shift registers @ dot = {}, line = {}", self.dot, self.line);
+        for i in 0..16 {
+            let pattern = self.select_bg_pattern_from_shift_registers(i);
+            let palette = self.select_bg_palette_from_shift_registers(i);
+            println!("{i}) palette = {}, pattern = {}", palette, pattern);
+        }
+
+        println!("Latched state:");
+        for i in 0..8 {
+            let pattern = Ppu::left_select_bits_from_lo_hi_u8(self.pattern_table0_latch, self.pattern_table1_latch, i);
+            println!("{i}) palette = {}, pattern = {}", self.palette_latch, pattern);
+        }
+    }
+
+    /// Query the current pattern state from the shift registers, for debugging
+    pub fn peek_shift_register_patterns(&self) -> [u8; 16] {
+        let mut patterns = [0u8; 16];
+        for i in 0..16 {
+            patterns[i] = self.select_bg_pattern_from_shift_registers(i);
+        }
+        patterns
+    }
+
+    /// Query the current palette state from the shift registers, for debugging
+    pub fn peek_shift_register_palettes(&self) -> [u8; 8] {
+        let mut palettes = [0u8; 8];
+        for i in 0..8 {
+            palettes[i] = self.select_bg_palette_from_shift_registers(i);
+        }
+        palettes
+    }
+
+    /// Load data for the next tile (8 pixel span) into the low 8 bits of our shift registers
+    fn reload_shift_registers(&mut self) {
+        self.pattern_table0_shift = self.pattern_table0_shift & 0xff00 | self.pattern_table0_latch as u16;
+        self.pattern_table1_shift = self.pattern_table1_shift & 0xff00 | self.pattern_table1_latch as u16;
+
+        // The palette bits will be constant for the next tile so we extend into 8 bits for
+        // consistency with the pattern table shift registers (the actual hardware instead has
+        // 1bit latches to feed the constant into the shift register for 8 pixels)
+        let palette0_bits = if self.palette_latch & 1 != 0 { 0xffu16 } else { 0u16 };
+        let palette1_bits = if self.palette_latch & 2 != 0 { 0xffu16 } else { 0u16 };
+        self.palette0_shift = self.palette0_shift & 0xff00 | palette0_bits as u16;
+        self.palette1_shift = self.palette1_shift & 0xff00 | palette1_bits as u16;
+
+        /*
+        if self.line == 261 || self.line == 0 {
+            //println!("Reloaded shift registers: dot = {}, line = {}", self.dot, self.line);
+            self.print_shift_register_state();
+        }*/
+    }
+
+    #[inline]
+    fn shift_registers(&mut self) {
+        self.pattern_table0_shift <<= 1;
+        self.pattern_table1_shift <<= 1;
+        self.palette0_shift <<= 1;
+        self.palette1_shift <<= 1;
+        self.shift_pixel_x = (self.shift_pixel_x + 1) % 8;
+    }
+
+    fn read_nametable_byte(&mut self, cartridge: &mut Cartridge) {
+        let tile_address = self.scroll_tile_address();
+        self.nametable_latch = self.unbuffered_ppu_bus_read(cartridge, tile_address);
+
+        /*
+        if self.dot == 1 {
+            if self.rendering_enabled && self.line != 261 {
+                debug_assert_eq!(self.scroll_tile_x(), 2); // First two tiles are read at end of previous line
+                if self.line == 0 {
+                    debug_assert_eq!(self.scroll_tile_y(), 0);
+                    debug_assert_eq!(self.scroll_fine_y(), 0);
+                }
+            }
+        }
+        */
+        //if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
+        //    println!("read NT byte 0,29 @ 0x{tile_address:04x} = {:02x}, dot = {}, line = {}", self.nametable_latch, self.dot, self.line);
+        //}
+
+    }
+
+    fn read_attribute_table_byte(&mut self, cartridge: &mut Cartridge) {
+        let attr_address = self.scroll_attribute_address();
+        let attr_value = self.unbuffered_ppu_bus_read(cartridge, attr_address);
+
+        let tile_x = self.scroll_tile_x();
+        let tile_y = self.scroll_tile_y();
+        self.palette_latch = match (tile_y & 2)  | ((tile_x >> 1) & 1) {
+            0 => attr_value & 0b11, // Top-left
+            1 => (attr_value & 0b1100) >> 2, // Top-right
+            2 => (attr_value & 0b11_0000) >> 4, // Bottom-left
+            3 => (attr_value & 0b1100_0000) >> 6, // Bottom-right
+            _ => unreachable!()
+        };
+
+        /*
+        if self.line == 261 && self.dot > 320 {
+            println!("prerender read attribute @ 0x{attr_address:04x} = {:02x}, palette_latch = {:08b}/{:02x}, dot = {}, line = {}, tile_x = {}, tile_y = {}", attr_value, self.palette_latch, self.palette_latch, self.dot, self.line, tile_x, tile_y);
+        }
+        if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
+            println!("read attribute byte 0,29 @ 0x{attr_address:04x} = {:02x}, palette_latch = {:08b}/{:02x}, dot = {}, line = {}", attr_value, self.palette_latch, self.palette_latch, self.dot, self.line);
+        }
+        */
+
+    }
+
+    fn read_pattern_table_low_byte(&mut self, cartridge: &mut Cartridge) {
+        let pattern_table_index = self.nametable_latch;
+		let bg_pattern_table_addr_lower = self.bg_pattern_table_addr() |
+			((pattern_table_index as u16) << 4) | (self.scroll_fine_y() as u16);
+        self.pattern_table0_latch = self.unbuffered_ppu_bus_read(cartridge, bg_pattern_table_addr_lower);
+
+        /*
+        if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
+            println!("read pattern table low byte @ 0x{bg_pattern_table_addr_lower:04x} = {:08b}/{:02x}", self.pattern_table0_latch, self.pattern_table0_latch);
+        }
+        */
+    }
+
+    fn read_pattern_table_high_byte(&mut self, cartridge: &mut Cartridge) {
+        let pattern_table_index = self.nametable_latch;
+		let bg_pattern_table_addr_lower = self.bg_pattern_table_addr() |
+			((pattern_table_index as u16) << 4) | (self.scroll_fine_y() as u16);
+        self.pattern_table1_latch = self.unbuffered_ppu_bus_read(cartridge, bg_pattern_table_addr_lower + 8);
+
+        /*
+        if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
+            let bg_pattern_table_addr_high = bg_pattern_table_addr_lower + 8;
+            println!("read pattern table high byte @ 0x{bg_pattern_table_addr_high:04x} = {:08b}/{:02x}", self.pattern_table1_latch, self.pattern_table1_latch);
+        }*/
+    }
+
+    /// Calculate the pattern table row address (lower plane) for the 8x16 sprite currently being fetched
+    fn current_sprite8x16_pattern_table_row_address(&self) -> u16 {
+        // XXX: if the 'current' sprite state was store in the Ppu struct we could avoid
+        // a bunch of bounds checks here
+        let sprite_index_byte = self.secondary_oam[self.sprite_fetch_index * 4 + 1];
+        let sprite_tile_index = sprite_index_byte & 0xfe;
+        let sprite_y = self.secondary_oam[self.sprite_fetch_index * 4];
+        let y_flip = self.secondary_oam[self.sprite_fetch_index * 4 + 2] & 0x80 != 0;
+
+        let line = self.line as u8;
+
+        // Make sure we get an in-bounds line between 0..8 even if the current
+        // sprite is actually out-of-range since we may be effectively fetching
+        // garbage just for consistent timing (some mappers drive clocks based
+        // on ppu fetches)
+        let delta = line.wrapping_sub(sprite_y) % 16;
+        let sprite_row = if y_flip {
+            15 - delta
+        } else {
+            delta
+        };
+        let row_offset = if sprite_row > 8 { 8 + sprite_row } else { sprite_row };
+
+        let pattern_table_base = if sprite_index_byte & 1 != 0 { 0x1000 } else { 0x0000 };
+        pattern_table_base | ((sprite_tile_index as u16) << 4) | (row_offset as u16)
+    }
+
+    /// Calculate the pattern table row address (lower plane) for the 8x8 sprite currently being fetched
+    fn current_sprite8x8_pattern_table_row_address(&self) -> u16 {
+        // XXX: if the 'current' sprite state was store in the Ppu struct we could avoid
+        // a bunch of bounds checks here
+        let sprite_tile_index = self.secondary_oam[self.sprite_fetch_index * 4 + 1];
+        let sprite_y = self.secondary_oam[self.sprite_fetch_index * 4];
+        let y_flip = self.secondary_oam[self.sprite_fetch_index * 4 + 2] & 0x80 != 0;
+
+        let line = self.line as u8;
+
+        // Make sure we get an in-bounds line between 0..8 even if the current
+        // sprite is actually out-of-range since we may be effectively fetching
+        // garbage just for consistent timing (some mappers drive clocks based
+        // on ppu fetches)
+        let delta = line.wrapping_sub(sprite_y) % 8;
+        let row_offset = if y_flip {
+            7 - delta
+        } else {
+            delta
+        };
+        let pattern_table_base = self.sprites8x8_pattern_table_addr();
+        pattern_table_base | ((sprite_tile_index as u16) << 4) | (row_offset as u16)
+    }
+
+    fn calculate_sprite_pattern_table_row_address(&self) -> u16 {
+        //println!("sprite fetch index = {}, sprite count = {}", self.sprite_fetch_index, self.oam_evaluate_n_sprites);
+        if self.sprite_height() == 8 {
+            self.current_sprite8x8_pattern_table_row_address()
+        } else {
+            self.current_sprite8x16_pattern_table_row_address()
+        }
+    }
+
+    fn fetch_sprite_pattern_low_byte(&mut self, addr_lower: u16, cartridge: &mut Cartridge) {
+        self.pattern_table0_latch = self.unbuffered_ppu_bus_read(cartridge, addr_lower);
+    }
+
+    fn fetch_sprite_pattern_high_byte(&mut self, addr_high: u16, cartridge: &mut Cartridge) {
+
+        self.pattern_table1_latch = self.unbuffered_ppu_bus_read(cartridge, addr_high);
+    }
+
+    #[inline]
+    fn select_bg_pattern_from_shift_registers(&self, fine_x: usize) -> u8 {
+        let pattern0 = ((self.pattern_table0_shift << fine_x) & 0x8000) >> 15;
+        let pattern1 = ((self.pattern_table1_shift << fine_x) & 0x8000) >> 14;
+        let bits = pattern1 as u8 | pattern0 as u8;
+
+        /*
+        if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
+            println!("selected pattern bits = {:08b}/{:02x}", bits, bits);
+        }*/
+
+        bits
+    }
+
+    /// Counting from the left, with the most-significant, left bit being
+    /// selected as index `0`, this selects corresponding bits from given `lo`
+    /// and `hi` values and forms a 2-bit number with the `hi` bit as the
+    /// most-significant
+    #[inline]
+    fn left_select_bits_from_lo_hi_u16(lo: u16, hi: u16, select: usize) -> u8 {
+        let bit0 = ((lo << select) & 0x8000) >> 15;
+        let bit1 = ((hi << select) & 0x8000) >> 14;
+        (bit1 | bit0) as u8
+    }
+
+    /// Counting from the left, with the most-significant, left bit being
+    /// selected as index `0`, this selects corresponding bits from given `lo`
+    /// and `hi` values and forms a 2-bit number with the `hi` bit as the
+    /// most-significant
+    #[inline]
+    fn left_select_bits_from_lo_hi_u8(lo: u8, hi: u8, select: usize) -> u8 {
+        //println!("left selecting bit {select}");
+        let bit0 = ((lo << select) & 0x80) >> 7;
+        let bit1 = ((hi << select) & 0x80) >> 6;
+        bit1 | bit0
+    }
+
+    /// Counting from the right, with the least-significant, right bit being
+    /// selected as index `0`, this selects corresponding bits from given `lo`
+    /// and `hi` values and forms a 2-bit number with the `hi` bit as the
+    /// most-significant
+    #[inline]
+    fn right_select_bits_from_lo_hi_u8(lo: u8, hi: u8, select: usize) -> u8 {
+        let bit0 = (lo >> select) & 1;
+        let bit1 = ((hi >> select) & 1) << 1;
+        bit1 | bit0
+    }
+
+    #[inline]
+    fn select_bg_palette_from_shift_registers(&self, fine_x: usize) -> u8 {
+        let bits = Ppu::left_select_bits_from_lo_hi_u16(self.palette0_shift, self.palette1_shift, fine_x);
+
+        /*
+        if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
+            println!("selected palette bits = {:08b}/{:02x}", bits, bits);
+        }*/
+
+        bits
     }
 
     /*
@@ -1037,21 +1252,47 @@ impl Ppu {
         (scroll_x, scroll_y)
     }*/
 
-    pub fn scroll_coarse_x(&self) -> u8 {
-        (self.shared_t_register & 0b1_1111) as u8
+    /// Combines a nametable offset with the coarse and fine, horizontal scroll factors
+    ///
+    /// For debugging this combines all the horizontal scroll factors into a 9-bit
+    /// number that can extend across two logical nametables.
+    pub fn scroll_x(&self) -> u16 {
+        let nametable_x = (self.shared_v_register & 0b0000_0100_0000_0000) >> 2;
+        let coarse_x = (self.scroll_tile_x() as u16) << 3; // 5 bits
+        let fine_x = self.scroll_x_fine3 as u16; // 3 bits
+        nametable_x | coarse_x | fine_x
     }
-    pub fn scroll_fine_x(&self) -> u8 {
-        let coarse_x = ((self.shared_t_register & 0b1_1111) << 3) as u8;
-        let fine_x = self.scroll_x_fine3 & 0b111;
-        coarse_x | fine_x
+
+    /// Combines a nametable offset with the coarse and fine, vertical scroll factors
+    ///
+    /// For debugging this combines all the vertical scroll factors into a 9-bit
+    /// number that can extend across two logical nametables.
+    ///
+    /// NB: It's possible for this to be out-of-range since there are only 240 lines
+    /// to the screen, not 256. This is the range that the hardware supports and some
+    /// games even exploit this to make the hardware overrun and read attribute data
+    /// as if it were nametable data for moving the top row out of overscan.
+    pub fn scroll_y(&self) -> u16 {
+        let nametable_y = (self.shared_v_register & 0b0000_1000_0000_0000) >> 3;
+        let coarse_y = (self.scroll_tile_y() as u16) << 3; // 5 bits
+        let fine_y   = self.scroll_fine_y() as u16; // 3 bits
+        nametable_y | coarse_y | fine_y
     }
-    pub fn scroll_coarse_y(&self) -> u8 {
-        ((self.shared_t_register & 0b0000_0011_1110_0000) >> 5) as u8
+
+    /*
+    #[inline]
+    pub fn scroll_fine_y(&self) -> u16 {
+        (self.shared_v_register & 0b0111_0000_0000_0000) >> 12
     }
-    pub fn scroll_fine_y(&self) -> u8 {
-        let coarse_y = ((self.shared_t_register & 0b0000_0011_1110_0000) >> 2) as u8;
-        let fine_y   = ((self.shared_t_register & 0b0111_0000_0000_0000) >> 12) as u8;
-        coarse_y | fine_y
+
+    #[inline]
+    pub fn scroll_coarse_y(&self) -> u16 {
+        (self.shared_v_register & 0b0000_0011_1110_0000) >> 2
+    }
+
+    #[inline]
+    pub fn scroll_nametable_offset_y(&self) {
+        (self.shared_v_register & 0b0000_1000_0000_0000) >> 3
     }
 
     pub fn name_table_base_addr(&self) -> u16 {
@@ -1066,56 +1307,738 @@ impl Ppu {
         }
 
     }
-
-    pub fn update_scroll_xy(&mut self) {
+     pub fn update_scroll_xy(&mut self) {
         //let (scroll_x, scroll_y) = self.decode_scroll_xy();
-        self.current_scroll_x = self.scroll_fine_x();
-        self.current_scroll_y = self.scroll_fine_y();
+        self.current_scroll_x = self.scroll_x();
+        self.current_scroll_y = self.scroll_y();
+    }
+    */
+
+    /// Returns the horizontal nametable tile offset (within a single nametable)
+    /// NB: There are 32 horizontal tiles per nametable
+    pub fn scroll_tile_x(&self) -> u8 {
+        (self.shared_v_register & 0b1_1111) as u8
     }
 
-    // TODO: don't be so literal with re-packing this state into the internal 'v' register
-    pub fn increment_coarse_x_scroll(&mut self) {
-        let coarse_x = self.shared_t_register & 0b0000_0000_0001_1111;
-        let upper_x = (self.shared_t_register & 0b0000_0100_0000_0000) >> 5;
-        let mut coarse_x = coarse_x | upper_x;
+    /// Returns the horizontal nametable tile offset (within a single nametable)
+    ///
+    /// NB: There are 30 vertical tiles per nametable but it's technically
+    /// possible (and of course some games do this) to index up to 32 tiles
+    /// and cause the hardware to overrun and read attribute data as if it
+    /// were nametable data!
+    pub fn scroll_tile_y(&self) -> u8 {
+        ((self.shared_v_register & 0b0000_0011_1110_0000) >> 5) as u8
+    }
+
+    /// Returns the pixel-level vertical scroll within the current nametable tile
+    ///
+    /// NB: Nametable tiles are 8x8 pixels
+    pub fn scroll_fine_y(&self) -> u8 {
+        ((self.shared_v_register & 0b0111_0000_0000_0000) >> 12) as u8
+    }
+
+    /// Derives the nametable address from the current scroll offsets
+    ///
+    /// This is the address that is read every 8 clocks to read the nametable entry
+    /// for the next tile.
+    pub fn scroll_tile_address(&self) -> u16 {
+        0x2000 | (self.shared_v_register & 0x0FFF)
+    }
+
+    /// Derives the attribute table address from the current scroll offsets
+    ///
+    /// NB: The attribute table comes 960 bytes after the start of its corresponding
+    /// nametable and is 64 bytes long, with a quarter the resolution of the
+    /// nametable
+    pub fn scroll_attribute_address(&self) -> u16 {
+        0x2000 | // Nametable 0 base address
+            self.shared_v_register & 0b0000_1100_0000_0000 | // Nametable offset
+            960 | // 960 byte offset to attribute table
+            (self.shared_v_register >> 4) & 0x38 | // Coarse X / 4
+            (self.shared_v_register >> 2) & 0x07 // Coarse Y / 4
+    }
+
+    /// Increments the horizontal nametable tile offset with wrapping after two nametables
+    ///
+    /// NB: nametables are logically arranged in a 2x2 grid and the coarse scroll specifies
+    /// the tile-aligned origin for the screen within those four nametables.
+    fn increment_coarse_x_scroll(&mut self) {
+        let nametable_select_x = (self.shared_v_register & 0b0000_0100_0000_0000) >> 5;
+        let coarse_x = self.shared_v_register & 0b0000_0000_0001_1111;
+        let mut coarse_x = nametable_select_x | coarse_x;
         coarse_x += 1;
-        let upper_x = (coarse_x & 0b10_0000) << 5;
+        let nametable_select_x = (coarse_x & 0b10_0000) << 5;
         let coarse_x = coarse_x & 0b01_1111;
 
-        self.shared_t_register = (self.shared_t_register & 0b0111_1011_1110_0000) | coarse_x | upper_x;
-
-        self.current_scroll_x = coarse_x as u8;
+        self.shared_v_register = (self.shared_v_register & VT_VERTICAL_SCROLL_BITS_MASK) | nametable_select_x | coarse_x;
+        //println!("Increment coarse x scroll: (line = {}, dot = {}), scroll_tile_x = {}, scroll_tile_y = {}", self.line, self.dot, self.scroll_tile_x(), self.scroll_tile_y());
     }
 
-    // TODO: don't be so literal with re-packing this state into the internal 'v' register
-    pub fn increment_fine_y_scroll(&mut self) {
-        let upper_y  = (self.shared_t_register & 0b0000_1000_0000_0000) >> 3;
-        let coarse_y = (self.shared_t_register & 0b0000_0011_1110_0000) >> 2;
-        let fine_y   = (self.shared_t_register & 0b0111_0000_0000_0000) >> 12;
-        let mut fine_y = fine_y | coarse_y | upper_y;
-        fine_y += 1;
-        let upper_y  = (fine_y & 0b1_0000_0000) << 3;
-        let coarse_y = (fine_y & 0b0_1111_1000) << 2;
-        let fine_y   = (fine_y & 0b0_0000_0111) << 12;
+    /// Increments the vertical nametable tile offset with wrapping after two nametables
+    ///
+    /// NB: nametables are logically arranged in a 2x2 grid and the coarse scroll specifies
+    /// the tile-aligned origin for the screen within those four nametables.
+    ///
+    /// Note: considering that vertical scrolling needs to wrap at 240 pixels which isn't a neat
+    /// power of two, then the hardware actually has some slightly funky behaviour here whereby
+    /// you can actually overrun 240 pixels if you program the scroll registers directly via
+    /// $2005 which can skip over the correct wrap handling for the nametable select. This
+    /// results in the PPU reading attribute data as if it were nametable data!
+    ///
+    /// From nesdev:
+    /// > "Coarse Y can be set out of bounds (> 29), which will cause the PPU
+    /// > to read the attribute data stored there as tile data. If coarse Y is
+    /// > incremented from 31, it will wrap to 0, but the nametable will not
+    /// > switch. For this reason, a write >= 240 to $2005 may appear as a
+    /// > "negative" scroll value, where 1 or 2 rows of attribute data will
+    /// > appear before the nametable's tile data is reached. (Some games use
+    /// > this to move the top of the nametable out of the Overscan area.)"
+    fn increment_fine_y_scroll(&mut self) {
+        let mut nametable_select_y  = self.shared_v_register & 0b0000_1000_0000_0000;
+        let mut coarse_y = self.scroll_tile_y() as u16;
+        let fine_y   = self.scroll_fine_y() as u16 + 1;
+        if fine_y == 8 {
+            if coarse_y == 29 {
+                nametable_select_y = nametable_select_y ^ 0b0000_1000_0000_0000;
+                coarse_y = 0;
+            } else if coarse_y == 31 {
+                coarse_y = 0;
+            } else {
+                coarse_y += 1;
+            }
+        }
 
-        self.shared_t_register = (self.shared_t_register & 0b0000_0100_0001_1111) | upper_y | coarse_y | fine_y;
+        let coarse_y = (coarse_y & 0b1_1111) << 5;
+        let fine_y   = (fine_y & 0b111) << 12;
 
-        self.current_scroll_y = coarse_y as u8;
+        self.shared_v_register = (self.shared_v_register & VT_HORIZONTAL_SCROLL_BITS_MASK) | nametable_select_y | coarse_y | fine_y;
+        //println!("Increment fine Y scroll: scroll_tile_x = {}, scroll_tile_y = {}, scroll_fine_y = {}", self.scroll_tile_x(), self.scroll_tile_y(), self.scroll_fine_y());
     }
 
-    pub fn step(&mut self, ppu_clock: u64, cartridge: &mut Cartridge, fb: *mut u8) -> PpuStatus {
+    /// Combines background and sprite pixels according to priority rules
+    ///
+    /// Also handles sprite zero hit detection and left margin clipping
+    fn background_priority_mux(&mut self, bg_palette: u8, bg_pattern: u8, sprite_pix: u8, screen_x: usize) -> Color {
 
-        // TODO: rework this to update based on a PPU clock step that will be driven by the nes/system
-        // according to the cpu clocks elapsed (instead of batching up scanline processing)
+        //let is_sprite_zero_debug = sprite_pix & 0b10_0000 != 0;
+        //if is_sprite_zero_debug {
+        //    println!("PX: line = {}, screen_x = {screen_x}, sprite pix = {sprite_pix:02x}m bg_pattern = {bg_pattern:02x}", self.line);
+        //}
+
+        let sprite_bg_priorty = sprite_pix & 0b01_0000 != 0;
+
+        let sprite_pattern = if self.show_sprites && (self.show_sprites_in_left_margin || screen_x >= 8) {
+            sprite_pix & 0b11
+        } else {
+            0
+        };
+
+        // Determine background clipping up-front, even if we might not select the background color
+        // to simplify sprite0 hit detection
+        let bg_pattern = if self.show_background && (self.show_background_in_left_margin || screen_x >= 8) {
+            bg_pattern
+        } else {
+            0
+        };
+
+        //if is_sprite_zero_debug {
+        //    println!("PX: line = {}, screen_x = {screen_x}, sprite pattern = {sprite_pattern:02x}, bg pattern = {bg_pattern:02x}", self.line);
+        //}
+
+        // "when an opaque pixel of sprite 0 overlaps an opaque pixel of the background, this is a sprite zero hit"
+        //
+        // Sprite 0 hit does not happen:
+        // - If background or sprite rendering is disabled in PPUMASK ($2001)
+        // - At x=0 to x=7 if the left-side clipping window is enabled (if bit 2 or bit 1 of PPUMASK is 0).
+        // - At x=255, for an obscure reason related to the pixel pipeline.
+        // - At any pixel where the background or sprite pixel is transparent (2-bit color index from the CHR pattern is %00).
+        // - If sprite 0 hit has already occurred this frame. Bit 6 of PPUSTATUS ($2002) is cleared to 0 at dot 1 of the pre-render line. This means only the first sprite 0 hit in a frame can be detected.
+        //
+        // Sprite 0 hit happens regardless of the following:
+        // - Sprite priority. Sprite 0 can still hit the background from behind.
+        // - The pixel colors. Only the CHR pattern bits are relevant, not the actual rendered colors, and any CHR color index except %00 is considered opaque.
+        // - The palette. The contents of the palette are irrelevant to sprite 0 hits. For example: a black ($0F) sprite pixel can hit a black ($0F) background as long as neither is the transparent color index %00.
+        // - The PAL PPU blanking on the left and right edges at x=0, x=1, and x=254 (see Overscan).
+        let is_sprite_zero = sprite_pix & 0b10_0000 != 0;
+        let sprite_zero_hit = is_sprite_zero && sprite_pattern != 0 && bg_pattern != 0 && screen_x != 255;
+        if sprite_zero_hit {
+            //println!("PX: line = {}, screen_x = {screen_x}: SPRITE ZERO HIT", self.line);
+            self.status.set(StatusFlags::SPRITE0_HIT, true);
+        }
+
+        let sprite_priorty = sprite_pattern != 0 && (sprite_bg_priorty == false || bg_pattern == 0);
+        let (palette_addr, pattern) = if sprite_priorty {
+            let sprite_palette = (sprite_pix & 0b1100) >> 2;
+            let addr = (0x3f10 | (sprite_palette as u16) << 2, sprite_pattern);
+            //if is_sprite_zero {
+            //    println!("PX: line = {}, screen_x = {screen_x}, sprite pix = {sprite_pix:02x}", self.line);
+            //    println!("Reading from sprite palette @ {:04x}", addr.0 + addr.1 as u16);
+            //}
+            addr
+        } else if bg_pattern != 0 {
+            (0x3f00 | (bg_palette as u16) << 2, bg_pattern)
+
+            //if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29  {
+            //    println!("bg palette address 0,29 = {:04x}: palette bits = {:08b}, pattern bits = {:08b}, dot = {}, line = {}", bg_palette_addr, bg_palette, bg_pattern, self.dot, self.line);
+            //}
+        } else {
+            (0x3f00, 0) // universal background color
+        };
+
+        let palette_value = self.palette_read(palette_addr + pattern as u16);
+
+        Color::from(palette_value)
+    }
+
+    fn compose_enabled_pixel(&mut self, screen_x: usize, screen_y: usize, cartridge: &mut Cartridge) -> Color {
+        let bg_palette = self.select_bg_palette_from_shift_registers(self.scroll_x_fine3 as usize);
+        let bg_pattern = self.select_bg_pattern_from_shift_registers(self.scroll_x_fine3 as usize);
+
+        // Uncomment to just show the attribute/palette colors across each tile, ignoring the pattern
+        //let mut tile_quadrant =  if screen_y % 8 > 3 { 2 } else { 0 };
+        //tile_quadrant += if screen_x % 8 > 3 { 1 } else { 0 };
+        //let bg_pattern_bits = tile_quadrant; // HACK
+
+        //let bg_pattern_bits = 2u8; // HACK
+
+        let sprite_pixel = self.sprite_line_front[screen_x];
+        let color = self.background_priority_mux(bg_palette, bg_pattern, sprite_pixel, screen_x);
+
+        color
+    }
+
+    fn compose_disabled_pixel(&mut self, screen_x: usize, screen_y: usize, cartridge: &mut Cartridge) -> Color {
+
+        // "During forced blanking, when neither background nor sprites are
+        // enabled in PPUMASK ($2001), the picture will show the backdrop color"
+        //
+        // # The background palette hack
+        //
+        // "If the current VRAM address points in the range $3F00-$3FFF during
+        // forced blanking, the color indicated by this palette location will be
+        // shown on screen instead of the backdrop color. (Looking at the
+        // relevant circuitry in Visual 2C02, this is an intentional feature of
+        // the PPU and not merely a side effect of how rendering works.) This
+        // can be used to display colors from the normally unused
+        // $3F04/$3F08/$3F0C palette locations. A loop that fills the palette
+        // will cause each color in turn to be shown on the screen, so to avoid
+        // horizontal rainbow bar glitches while loading the palette, wait for a
+        // real vertical blank first using an NMI technique."
+        //
+        let palette_addr = if self.shared_v_register >= 0x3f00 && self.shared_v_register <= 0x3fff {
+            self.shared_v_register
+        } else {
+            0x3f00
+        };
+        let palette_value = self.palette_read(palette_addr);
+        Color::from(palette_value)
+    }
+
+    fn render_pixel(&mut self, screen_x: usize, screen_y: usize, cartridge: &mut Cartridge) {
+
+        let mut color = if self.rendering_enabled {
+            self.compose_enabled_pixel(screen_x, screen_y, cartridge)
+        } else {
+            self.compose_disabled_pixel(screen_x, screen_y, cartridge)
+        };
+
+        /*
+        if screen_x < 50 || screen_x > 200 {
+            color = Color::from(0x13);
+        }
+        if screen_y < 50 || screen_y > 200 {
+            color = Color::from(0x11);
+        }
+        if self.line == 232  {
+            //color = Color::from(0x11);
+            if screen_x == 0 {
+                println!("line = {}, screen_tile_y = {}, screen_fine_y = {}", self.line, self.scroll_tile_y(), self.scroll_fine_y());
+            }
+        }
+        */
+
+        let fb = self.framebuffer.data.as_mut_ptr();
+        let fb_off = self.framebuffer_offset;
+        debug_assert!(fb_off >= 0 && fb_off < FRAMEBUFFER_STRIDE * VISIBLE_SCREEN_HEIGHT as isize);
+        unsafe {
+            *fb.offset(fb_off + 0) = color.0;
+            *fb.offset(fb_off + 1) = color.1;
+            *fb.offset(fb_off + 2) = color.2;
+            *fb.offset(fb_off + 3) = 0xff;
+        }
+
+        self.framebuffer_offset += 4;
+
+    }
+
+    /// Treating VRAM as a 2x2 grid of nametables / screens this samples a single (background) pixel
+    pub fn peek_vram_four_screens(&self, x: usize, y: usize, cartridge: &mut Cartridge) -> [u8; 3] {
+
+        //let nametable_base_addr = self.name_table_base_addr();
+        let pattern_table_addr = self.bg_pattern_table_addr();
+        //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
+        let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
+        let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
+
+        // Which nametable are we in
+        let nametable_base_addr = if y < VISIBLE_SCREEN_HEIGHT {
+            if x < VISIBLE_SCREEN_WIDTH { 0x2000 } else { 0x2400 }
+        } else {
+            if x < VISIBLE_SCREEN_WIDTH { 0x2800 } else { 0x2c00 }
+        };
+
+        let nametable_y = y as u16 % VISIBLE_SCREEN_HEIGHT as u16; //self.line + u16::from(self.current_scroll_y);
+        let tile_y = nametable_y >> 3;
+        let tile_pixel_y = nametable_y & 0x07;
+
+        let nametable_x = x as u16 % VISIBLE_SCREEN_WIDTH as u16; // ((pixel_x as u16) + u16::from(self.current_scroll_x))
+        let tile_x = nametable_x >> 3;
+        let tile_pixel_x = nametable_x & 0x07;
+
+        let attribute_base_addr = nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
+        let attribute_x_offset = (tile_x >> 2) & 0x7;
+        let attribute_y_offset = tile_y >> 2;
+        let attribute_addr =
+            attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
+
+        let raw_attribute = cartridge.vram_read(attribute_addr);
+        let bg_palette_id = match (tile_x & 0x03 < 0x2, tile_y & 0x03 < 0x2) {
+            (true, true) => (raw_attribute >> 0) & 0x03, // top left
+            (false, true) => (raw_attribute >> 2) & 0x03, // top right
+            (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
+            (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
+        };
+
+        let nametable_addr = nametable_base_addr + tile_y * NAMETABLE_X_TILES_COUNT + tile_x;
+        let bg_tile_id = u16::from(cartridge.ppu_bus_peek(nametable_addr));
+
+        // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
+        let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
+        let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + tile_pixel_y;
+        let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
+        let bg_tile_pattern_lower = cartridge.ppu_bus_peek(bg_pattern_table_addr_lower);
+        let bg_tile_pattern_upper = cartridge.ppu_bus_peek(bg_pattern_table_addr_upper);
+
+        // Make the drawing color of bg
+        let bg_pattern = (((bg_tile_pattern_upper >> (7 - tile_pixel_x)) & 0x01) << 1)
+            | ((bg_tile_pattern_lower >> (7 - tile_pixel_x)) & 0x01);
+
+        let palette_addr = if bg_pattern != 0 {
+            0x3f00 +
+                (u16::from(bg_palette_id) << 2) +
+                u16::from(bg_pattern)
+        } else {
+            0x3f00 // universal background color for transparent pixels
+        };
+
+        let pattern_value = self.palette_read(palette_addr);
+        let color = Color::from(pattern_value);
+
+        [color.0, color.1, color.2]
+    }
+
+    /// Draw one line
+    /*
+    fn draw_tile_span(&mut self, cartridge: &mut Cartridge, fb: *mut u8) {
+        //let nametable_base_addr = self.name_table_base_addr();
+        let pattern_table_addr = self.bg_pattern_table_addr();
+        //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
+        let is_clip_bg_leftend = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW) == false;
+        let is_write_bg = self.control2.contains(Control2Flags::SHOW_BG);
+
+        let screen_y = self.line;
+        let four_screen_y = (screen_y + self.current_scroll_y as u16) % (VISIBLE_SCREEN_HEIGHT as u16 * 2u16);
+
+        let nametable_y = four_screen_y as u16 % VISIBLE_SCREEN_HEIGHT as u16;
+        let tile_y = nametable_y >> 3;
+        let tile_pixel_y = nametable_y & 0x07;
+
+        for screen_x in 0..VISIBLE_SCREEN_WIDTH {
+            let four_screen_x = ((screen_x as u16) + u16::from(self.current_scroll_x)) % (VISIBLE_SCREEN_WIDTH as u16 * 2u16);
+
+            let (sprite_palette_data_back, sprite_palette_data_front) =
+                self.get_sprite_draw_data(cartridge, screen_x, screen_y as usize);
+
+            let nametable_x = four_screen_x as u16 % VISIBLE_SCREEN_WIDTH as u16;
+            let tile_x = nametable_x >> 3;
+            let tile_pixel_x = nametable_x & 0x07;
+
+            // Which nametable are we in
+            let nametable_base_addr = if four_screen_y < VISIBLE_SCREEN_HEIGHT as u16 {
+                if four_screen_x < VISIBLE_SCREEN_WIDTH as u16 { 0x2000 } else { 0x2400 }
+            } else {
+                if four_screen_x < VISIBLE_SCREEN_WIDTH as u16 { 0x2800 } else { 0x2c00 }
+            };
+
+            let attribute_base_addr = nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
+            let attribute_x_offset = (tile_x >> 2) & 0x7;
+            let attribute_y_offset = tile_y >> 2;
+            let attribute_addr =
+                attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
+
+            let raw_attribute = cartridge.vram_read(attribute_addr);
+            let bg_palette_id = match (tile_x & 0x03 < 0x2, tile_y & 0x03 < 0x2) {
+                (true, true) => (raw_attribute >> 0) & 0x03, // top left
+                (false, true) => (raw_attribute >> 2) & 0x03, // top right
+                (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
+                (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
+            };
+
+            let nametable_addr = nametable_base_addr + tile_y * NAMETABLE_X_TILES_COUNT + tile_x;
+            let bg_tile_id = u16::from(cartridge.ppu_bus_peek(nametable_addr));
+
+            // pattern_table 1entry is 16 bytes, if it is the 0th line, use the 0th and 8th data
+            let bg_pattern_table_base_addr = pattern_table_addr + (bg_tile_id << 4);
+            let bg_pattern_table_addr_lower = bg_pattern_table_base_addr + tile_pixel_y;
+            let bg_pattern_table_addr_upper = bg_pattern_table_addr_lower + 8;
+            let bg_data_lower = cartridge.ppu_bus_peek(bg_pattern_table_addr_lower);
+            let bg_data_upper = cartridge.ppu_bus_peek(bg_pattern_table_addr_upper);
+
+            // Make the drawing color of bg
+            let bg_palette_offset = (((bg_data_upper >> (7 - tile_pixel_x)) & 0x01) << 1)
+                | ((bg_data_lower >> (7 - tile_pixel_x)) & 0x01);
+            let mut bg_palette_addr = (PALETTE_TABLE_BASE_ADDR + PALETTE_BG_OFFSET) +   // 0x3f00
+                (u16::from(bg_palette_id) << 2) + // Select BG Palette 0 ~ 3 in attribute
+                u16::from(bg_palette_offset); // Color selection in palette
+
+            // Create BG data considering the 8 pixel clip at the left end of BG
+            let is_bg_clipping = is_clip_bg_leftend && (screen_x < 8);
+            let is_bg_tranparent = (bg_palette_addr & 0x03) == 0x00; // If the background color is selected, it will be processed here
+            let bg_palette_data: Option<u8> = if is_bg_clipping || !is_write_bg || is_bg_tranparent
+            {
+                None
+            } else {
+                Some(self.pallet_read(bg_palette_addr))
+            };
+
+            // transparent
+            let mut draw_color = self.universal_background_color;
+
+            'select_color: for palette_data in &[
+                sprite_palette_data_front,
+                bg_palette_data,
+                sprite_palette_data_back,
+            ] {
+                if let Some(color_index) = palette_data {
+                    let c = Color::from(*color_index);
+                    draw_color = c;
+                    break 'select_color;
+                }
+            }
+
+            let fb_off = screen_y as isize * FRAMEBUFFER_STRIDE + screen_x as isize * FRAMEBUFFER_BPP;
+            unsafe {
+                *fb.offset(fb_off + 0) = draw_color.0;
+                *fb.offset(fb_off + 1) = draw_color.1;
+                *fb.offset(fb_off + 2) = draw_color.2;
+                *fb.offset(fb_off + 3) = 0xff;
+            }
+        }
+    }
+    */
+
+    fn step_line(&mut self, cartridge: &mut Cartridge) {
+
+        //println!("tick, dot = {}, line = {}", self.dot, self.line);
+
+        /*
+        if self.line == 0 && self.dot == 0 && self.line_status == LineStatus::Visible {
+            println!("Start of new screen, line = 0, dot = 0");
+            println!("scroll_tile_x = {}", self.scroll_tile_x());
+            println!("scroll_tile_y = {}", self.scroll_tile_y());
+            println!("scroll_fine_y = {}", self.scroll_fine_y());
+            self.print_shift_register_state();
+        } else if self.dot == 0 {
+            println!("Start of new line = {}, dot = 0", self.line);
+            self.print_shift_register_state();
+        }
+        */
+        if let LineStatus::Visible | LineStatus::PreRender = self.line_status {
+            if let 2..=257 | 322..=337 = self.dot {
+                match self.dot % 8 {
+                    1 => {
+                        // "The shifters are reloaded during ticks 9, 17, 25, ..., 257."
+                        self.reload_shift_registers();
+                    }
+                    _ => {}
+                }
+            }
+
+            // PPU Reads one byte every two clocks
+            if let 1..=256 | 321..=336 = self.dot {
+                if self.rendering_enabled {
+                    match self.dot % 8 {
+                        0 => {
+                            //self.draw_tile_span(cartridge, fb);
+                            self.increment_coarse_x_scroll();
+                            if self.dot == 256 {
+                                self.increment_fine_y_scroll();
+                            }
+                        }
+                        1 => {
+                            self.read_nametable_byte(cartridge);
+                        }
+                        2 => {}
+                        3 => {
+                            self.read_attribute_table_byte(cartridge);
+                        }
+                        4 => {}
+                        5 => {
+                            self.read_pattern_table_low_byte(cartridge);
+                        }
+                        6 => {}
+                        7 => {
+                            self.read_pattern_table_high_byte(cartridge);
+                        }
+                        _ => unreachable!()
+                    }
+                }
+            } else if let 257..=320 = self.dot {
+                if self.rendering_enabled {
+                    // "OAMADDR is set to 0 during each of ticks 257-320 (the sprite tile loading interval) of the pre-render and visible scanlines."
+                    self.oam_offset = 0;
+
+                    if self.dot == 257 {
+                        //if self.line == 200 && self.oam_evaluate_n_sprites > 0 {
+                        //    println!("line {}: evaluation found {} sprites", self.line, self.oam_evaluate_n_sprites);
+                        //}
+
+                        // "If rendering is enabled, the PPU copies all bits related to horizontal position from t to v"
+                        // rendering enabled = "(i.e., when either background or sprite rendering is enabled in $2001:3-4)"
+                        // ref: https://www.nesdev.org/wiki/File:Ntsc_timing.png
+                        self.shared_v_register = (self.shared_v_register & (!VT_HORIZONTAL_SCROLL_BITS_MASK)) | (self.shared_t_register & VT_HORIZONTAL_SCROLL_BITS_MASK);
+                        //println!("sync horizontal V bits: scroll_tile_x = {}, scroll_tile_y = {}", self.scroll_tile_x(), self.scroll_tile_y());
+                    }
+
+                    self.sprite_fetch_index = (self.dot as usize - 257) / 8;
+                    match self.dot % 8 {
+                        0 => {
+                        }
+                        1 => {
+                            // These are a continuation of the nametable reads that happen between 1..=256 | 321..=336 that
+                            // are redundant except that mappers may depend on observing them for synchronization
+                            self.read_nametable_byte(cartridge);
+                        }
+                        2 => {}
+                        3 => {
+                            // These are a continuation of the attribute reads that happen between 1..=256 | 321..=336 that
+                            // are redundant except that mappers may depend on observing them for synchronization
+                            self.read_attribute_table_byte(cartridge);
+                        }
+                        4 => {}
+                        5 => {
+                            self.sprite_pattern_addr_lo = self.calculate_sprite_pattern_table_row_address();
+                            self.fetch_sprite_pattern_low_byte(self.sprite_pattern_addr_lo, cartridge);
+                        }
+                        6 => {}
+                        7 => {
+                            self.fetch_sprite_pattern_high_byte(self.sprite_pattern_addr_lo + 8, cartridge);
+
+                            // Although the PPU fetches sprite data during the pre-render line, we currently infer
+                            // that it doesn't set up the the sprite outputs. As a minor optimization we can can also
+                            // avoid composing any sprite output during line 239.
+                            //
+                            // Note: we currently rely on this optimization to leave the sprite_line_back buffer
+                            // clear on lin 239, so that the next time the buffers are swapped at the start of the
+                            // next frame then line zero will have a clear sprite_line_front buffer.
+                            if self.line != 239 && self.line != 261 {
+                                self.compose_sprite();
+                            }
+                        }
+                        _ => unreachable!()
+                    }
+                }
+
+            } else if let 337 | 339 = self.dot {
+                // Dummy nametable reads that might be expected by mappers for synchronization (e.g. MMC5)
+                self.read_nametable_byte(cartridge);
+            }
+        }
+
+        match self.line_status {
+
+            LineStatus::Visible => {
+
+                if self.rendering_enabled {
+                    // Attempts to read OAM data via $2004 will return 0xff while secondary OAM is being cleared
+                    if self.dot == 1 {
+                        self.secondary_oam_being_cleared = true;
+                        self.clear_secondary_oam();
+
+                        // also clear the intermediate buffer we use for composing sprite pixels while fetching
+                        // sprite data later
+                        //println!("Swapping sprite line buffers");
+                        std::mem::swap(&mut self.sprite_line_front, &mut self.sprite_line_back);
+                        //println!("Clearing sprite line back buffer");
+                        self.sprite_line_back = [0; 256];
+                    } else if self.dot == 64 {
+                        self.secondary_oam_being_cleared = false;
+                        self.start_sprite_evaluation();
+                    } else if let 65..=256 = self.dot {
+                        // "Cycles 65-256: Sprite evaluation"
+
+                        // "Sprite evaluation occurs if either the sprite layer or
+                        // background layer is enabled via $2001. Unless both layers
+                        // are disabled, it merely hides sprite rendering"
+                        if self.rendering_enabled {
+                            self.step_sprite_evaluation();
+                        }
+                    }
+
+                    if let 1..=256 = self.dot {
+                        let screen_x = self.dot as usize - 1;
+                        let screen_y = self.line as usize;
+                        self.render_pixel(screen_x, screen_y, cartridge);
+                    }
+                }
+                /*
+                if self.dot == 340 {
+                    //println!("draw line = {}", self.line);
+                    self.draw_tile_span(cartridge, fb);
+                }*/
+            }
+            LineStatus::PostRender => {
+                if self.dot == 340 {
+                    //println!("PPU: Finished Frame");
+                    self.frame_ready = true;
+                }
+            }
+            LineStatus::VerticalBlanking => {
+                if self.line == 241 && self.dot == 1 {
+                    self.status.set(StatusFlags::IN_VBLANK, true);
+                }
+            }
+            LineStatus::PreRender => {
+                if self.dot == 1 {
+                    self.status.set(StatusFlags::IN_VBLANK, false);
+                    self.status.set(StatusFlags::SPRITE0_HIT, false);
+                    //println!("Clearing SPRITE_OVERFLOW in pre-render line, dot = 1");
+                    self.status.set(StatusFlags::SPRITE_OVERFLOW, false);
+                    self.framebuffer_offset = 0;
+                }
+
+                //if self.dot % 8 == 0 {
+                //    println!("Pre-render dot = {}", self.dot);
+                //}
+                // nesdev:
+                //
+                // "During dots 280 to 304 of the pre-render scanline (end of vblank)"
+                //
+                // "If rendering is enabled, at the end of vblank, shortly after
+                // the horizontal bits are copied from t to v at dot 257, the
+                // PPU will repeatedly copy the vertical bits from t to v from
+                // dots 280 to 304, completing the full initialization of v
+                // from t":
+                if let 280..=304 = self.dot {
+                    if self.rendering_enabled {
+                        self.shared_v_register = (self.shared_v_register & (!VT_VERTICAL_SCROLL_BITS_MASK)) | (self.shared_t_register & VT_VERTICAL_SCROLL_BITS_MASK);
+                        //println!("sync vertical V bits: scroll_tile_x = {}, scroll_tile_y = {}, scroll_fine_y = {}", self.scroll_tile_x(), self.scroll_tile_y(), self.scroll_fine_y());
+                        //println!("sync vertical V bits: new PPU ADDR = 0x{:04x}, control2 = {:?}", self.shared_v_register, self.control2);
+                        //self.update_scroll_xy();
+                    } else {
+                        //println!("Skipping sync of vertical V bits (rendering disabled)");
+                    }
+                }
+            }
+        }
+
+        if let 2..=257 | 322..=337 = self.dot {
+            if let LineStatus::Visible | LineStatus::PreRender = self.line_status {
+                self.shift_registers();
+            }
+        }
+
+        if self.nmi_enable && self.status.contains(StatusFlags::IN_VBLANK) {
+            self.nmi_interrupt_raised = true;
+        } else {
+            self.nmi_interrupt_raised = false;
+        }
+    }
+
+    pub fn step(&mut self, cartridge: &mut Cartridge) {
+        //println!("PPU Step dot");
 
         //println!("ppu clock = {ppu_clock}");
-        self.dot = (ppu_clock % 341) as u16;
-        let status = self.step_line(cartridge, fb);
-        if ppu_clock != 0 && self.dot == 0 {
-            //println!("next line");
+        self.dot = (self.clock % 341) as u16;
+
+        if self.dot == 0 {
+            // seems like a bit of a special case location for handling this - maybe move it
+            if self.line_status == LineStatus::PreRender {
+                // "It is also the case that if OAMADDR is not less than eight when rendering starts,
+                // the eight bytes starting at OAMADDR & 0xF8 are copied to the first eight bytes of OAM"
+                if self.rendering_enabled {
+                    if self.oam_offset >= 8 {
+                        let off = (self.oam_offset & 0xf8) as usize;
+                        for i in 0..8 {
+                            self.write_oam_data(i, self.read_oam_data((off as u8) + i));
+                        }
+                    }
+                }
+            }
+
+            // TODO: guard ppu tracing with a #[cfg feature]
+            if self.line == 261 {
+                self.trace_new_frame();
+            }
+        }
+
+        self.step_line(cartridge);
+        if self.dot == 340 {
             self.line = (self.line + 1) % RENDER_N_LINES;
             self.line_status = LineStatus::from(self.line);
+            self.is_rendering = matches!(self.line_status, LineStatus::Visible | LineStatus::PreRender) && self.rendering_enabled;
+            //println!("Next line = {}: {:?}", self.line, self.line_status);
         }
-        status
+
+        self.clock += 1;
+
     }
 }
+
+/*
+#[test]
+fn ppu_scroll_x_increment() {
+    let mut ppu = Ppu::default();
+
+    // increment_coarse_x_scroll should effectively increment to the next nametable tile
+    // There are 32 horizontal tiles per screen.
+    // There are logically two adjacent screens/nametables horizontally = 64 tiles
+    // The effective scroll should wrap around after two screens
+    // Scroll increments should update the shared V register, not the T register
+    for i in 0..128 {
+        let expected = (i * 8) % (VISIBLE_SCREEN_WIDTH as u16 * 2);
+        println!("scroll_x {i} = {}, expect = {}", ppu.scroll_x(), expected);
+        //assert_eq!(ppu.scroll_x(), expected);
+        ppu.update_scroll_xy();
+        assert_eq!(ppu.current_scroll_x, expected);
+        let saved_t = ppu.shared_t_register;
+        let saved_v = ppu.shared_v_register;
+        ppu.increment_coarse_x_scroll();
+        assert_ne!(saved_v, ppu.shared_v_register);
+        assert_eq!(saved_t, ppu.shared_t_register);
+    }
+}
+
+#[test]
+fn ppu_scroll_y_increment() {
+    let mut ppu = Ppu::default();
+
+    // increment_fine_y_scroll should effectively increment by a single pixel
+    // There are 240 vertical pixels per screen.
+    // There are logically two adjacent screens/nametables vertically = 480 pixels
+    // The effective scroll should wrap around after two screens
+    // Scroll increments should update the shared V register, not the T register
+    for i in 0..(VISIBLE_SCREEN_HEIGHT as u16 * 3) {
+        let expected = i % (VISIBLE_SCREEN_HEIGHT as u16 * 2);
+        println!("scroll_y {i} = {}, expect = {}", ppu.scroll_y(), expected);
+        assert_eq!(ppu.scroll_y(), expected);
+        //ppu.update_scroll_xy();
+        assert_eq!(ppu.current_scroll_y, expected);
+        let saved_t = ppu.shared_t_register;
+        let saved_v = ppu.shared_v_register;
+        ppu.increment_fine_y_scroll();
+        assert_ne!(saved_v, ppu.shared_v_register);
+        assert_eq!(saved_t, ppu.shared_t_register);
+    }
+}
+*/

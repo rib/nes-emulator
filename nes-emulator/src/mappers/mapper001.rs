@@ -4,8 +4,11 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
+use crate::prelude::NameTableMirror;
 
-#[derive(Debug)]
+use super::mirror_vram_address;
+
+#[derive(Debug, Clone, Copy)]
 enum Mapper1PrgMode {
 
     /// 0x8000-0xdfff switchable to two consecutive pages
@@ -18,13 +21,16 @@ enum Mapper1PrgMode {
     Switch16KFixed16KLast
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum Mapper1ChrMode {
     Switch8K,
     Switch4KSwitch4K
 }
 
+#[derive(Clone)]
 pub struct Mapper1 {
+    vram_mirror: NameTableMirror,
+    vram: [u8; 2048],
 
     // Load register
     shift_register: u8,
@@ -51,6 +57,9 @@ pub struct Mapper1 {
 impl Mapper1 {
     pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
         Self {
+            vram_mirror: config.nametable_mirror,
+            vram: [0u8; 2048],
+
             shift_register: 0,
             shift_register_pos: 0,
 
@@ -166,6 +175,10 @@ impl Mapper1 {
 impl Mapper for Mapper1 {
     fn reset(&mut self) {}
 
+    fn clone_mapper(&self) -> Box<dyn Mapper> {
+        Box::new(self.clone())
+    }
+
     fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
         let value = match addr {
             0x6000..=0x7fff => { // 8 KB PRG RAM bank, (optional)
@@ -231,7 +244,6 @@ impl Mapper for Mapper1 {
             0x8000..=0xffff => {// Load register
                 self.load_register_write(addr, data);
             }
-
             _ => {
                 trace!("MMC1: unhandled system bus write");
             }
@@ -248,6 +260,9 @@ impl Mapper for Mapper1 {
                 let offset = self.chr_bank_1_data_offset((addr - 0x1000) as usize);
                 arr_read!(self.chr_data, offset)
             }
+            0x2000..=0x3fff => { // VRAM
+                arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
+            }
             _ => {
                 trace!("MMC1: unhandled PPU bus read");
                 0
@@ -262,12 +277,19 @@ impl Mapper for Mapper1 {
     fn ppu_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x0fff => {
-                let offset = self.chr_bank_0_data_offset(addr as usize);
-                arr_write!(self.chr_data, offset, data)
+                if self.has_chr_ram {
+                    let offset = self.chr_bank_0_data_offset(addr as usize);
+                    arr_write!(self.chr_data, offset, data)
+                }
             }
             0x1000..=0x1fff => {
-                let offset = self.chr_bank_1_data_offset((addr - 0x1000) as usize);
-                arr_write!(self.chr_data, offset, data)
+                if self.has_chr_ram {
+                    let offset = self.chr_bank_1_data_offset((addr - 0x1000) as usize);
+                    arr_write!(self.chr_data, offset, data)
+                }
+            }
+            0x2000..=0x3fff => { // VRAM
+                arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }
             _ => {
                 trace!("MMC1: unhandled system bus write");
@@ -275,5 +297,6 @@ impl Mapper for Mapper1 {
         }
     }
 
+    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
     fn irq(&self) -> bool { false }
 }

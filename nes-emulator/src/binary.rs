@@ -1,4 +1,5 @@
-use log::{debug};
+#[allow(unused_imports)]
+use log::{debug, warn};
 use anyhow::anyhow;
 use anyhow::Result;
 
@@ -12,38 +13,78 @@ pub enum Type {
     Unknown
 }
 
+/// iNES file header
+/// See: https://www.nesdev.org/wiki/INES
+#[derive(Default)]
 pub struct INesConfig {
+    /// Format version
+    /// Version 1: https://www.nesdev.org/wiki/INES
+    /// Version 2: https://www.nesdev.org/wiki/NES_2.0
+    pub version: u8,
+
+    /// iNES allocated mapper number
+    /// See: https://www.nesdev.org/wiki/Mapper
     pub mapper_number: u8,
+
+    /// NTSC or PAL
     pub tv_system: TVSystem,
+
+    /// Number of 16K pages of program ROM
     pub n_prg_rom_pages: usize,
+
+    /// Number of 16K pages of program ROM
     pub n_prg_ram_pages: usize,
+
+    /// Number of 8K pages of CHR ROM
     pub n_chr_rom_pages: usize,
+
+    /// Number of 8K pages of CHR RAM
     pub n_chr_ram_pages: usize,
+
+    /// Does this mapper have writable CHR RAM?
     pub has_chr_ram: bool,
+
+    /// Does this mapper have persistent WRAM
     pub has_battery: bool,
+
+    /// Does the program ROM include additional 'trainer' code
     pub has_trainer: bool,
+
+    /// The VRAM mirroring mode for nametables
     pub nametable_mirror: NameTableMirror,
-    pub ignore_mirror_control: bool,
 
+    /// Override the `nametable_mirror` mode and provide four screens of VRAM
+    pub four_screen_vram: bool,
 
+    /// The optional file offset for trainer code
     pub trainer_baseaddr: Option<usize>,
+
+    /// The file offset for the program ROM
     pub prg_rom_baseaddr: usize,
+
+    /// The file offset for the CHR ROM
     pub chr_rom_baseaddr: usize,
 }
 
 impl INesConfig {
+
+    /// Returns [`Self::n_prg_rom_pages`] converted into bytes (n_pages * 16K)
     pub fn prg_rom_bytes(&self) -> usize {
         self.n_prg_rom_pages * PAGE_SIZE_16K
     }
+
+    /// Returns [`Self::n_chr_rom_pages`] converted into bytes (n_pages * 8K)
     pub fn chr_rom_bytes(&self) -> usize {
         self.n_chr_rom_pages * PAGE_SIZE_8K
     }
+
+    /// Returns [`Self::n_chr_ram_pages`] converted into bytes (n_pages * 8K)
     pub fn chr_ram_bytes(&self) -> usize {
         self.n_chr_ram_pages * PAGE_SIZE_8K
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NsfConfig {
     pub version: u8,
     pub n_songs: u8,
@@ -183,12 +224,18 @@ pub fn parse_nsf_header(nsf: &[u8]) -> Result<NsfConfig> {
 }
 
 pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
-
     debug!("Parsing iNes header...");
 
     if !matches!(check_type(ines), Type::INES) {
         return Err(anyhow!("Missing iNES file marker"));
     }
+
+    let version = if ines[7] & 0x0C == 0x08 { 2 } else { 1 };
+    debug!("iNes: Version {version}");
+    if version == 2 {
+        warn!("iNes 2.0 fields aren't supported yet - will be read as a 1.0 format file");
+    }
+    // TODO: actually support parsing iNES 2.0 fields
 
     let mut has_chr_ram = false;
     let n_prg_rom_pages = usize::from(ines[4]); // * 16KBしてあげる
@@ -249,6 +296,7 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
     mapper_number |= high_nibble;
 
     Ok(INesConfig {
+        version,
         mapper_number,
         tv_system,
         n_prg_rom_pages,
@@ -256,7 +304,7 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
         n_chr_rom_pages,
         n_chr_ram_pages,
         nametable_mirror,
-        ignore_mirror_control: false, // FIXME
+        four_screen_vram: false, // FIXME
         has_battery,
         has_chr_ram,
         has_trainer,

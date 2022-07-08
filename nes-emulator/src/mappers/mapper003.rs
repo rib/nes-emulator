@@ -4,6 +4,9 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
+use crate::prelude::NameTableMirror;
+
+use super::mirror_vram_address;
 
 
 /// iNES Mapper 003: AKA CNROM
@@ -36,7 +39,11 @@ use crate::binary::INesConfig;
 /// value read from address)! This bug manifests by CHR corruptions when the
 /// player changes the audio from sound effects to music playback."
 ///
+#[derive(Clone)]
 pub struct Mapper3 {
+    vram_mirror: NameTableMirror,
+    vram: [u8; 2048],
+
     // TODO: support NES 2.0 submapper information to configure this...
     // Ref: https://www.nesdev.org/wiki/NES_2.0_submappers
     has_bus_conflicts: bool,
@@ -81,6 +88,9 @@ impl Mapper3 {
         let chr_bank_select_mask = Mapper3::chr_bank_select_mask(n_chr_pages - 1);
         debug!("Mapper3: CHR Bank Select Mask = {chr_bank_select_mask:08b} ({n_chr_pages} CHR pages)");
         Self {
+            vram_mirror: config.nametable_mirror,
+            vram: [0u8; 2048],
+
             has_bus_conflicts: true,
 
             prg_rom0,
@@ -112,6 +122,10 @@ impl Mapper3 {
 impl Mapper for Mapper3 {
     fn reset(&mut self) {}
 
+    fn clone_mapper(&self) -> Box<dyn Mapper> {
+        Box::new(self.clone())
+    }
+
     fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
         (self.system_bus_read_direct(addr), 0) // no undefined bits
     }
@@ -131,13 +145,20 @@ impl Mapper for Mapper3 {
                 let page_select = data & self.chr_bank_select_mask;
                 self.chr_bank = PAGE_SIZE_8K * page_select as usize;
             }
-            _ => {
-            }
+            _ => {}
         }
     }
 
     fn ppu_bus_read(&mut self, addr: u16) -> u8 {
-        arr_read!(self.chr_data, self.chr_bank + addr as usize)
+        match addr {
+            0x0000..=0x1fff => {
+                arr_read!(self.chr_data, self.chr_bank + addr as usize)
+            }
+            0x2000..=0x3fff => { // VRAM
+                arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
+            }
+            _ => { 0 }
+        }
     }
 
     fn ppu_bus_peek(&mut self, addr: u16) -> u8 {
@@ -145,8 +166,17 @@ impl Mapper for Mapper3 {
     }
 
     fn ppu_bus_write(&mut self, addr: u16, data: u8) {
-        arr_write!(self.chr_data, self.chr_bank + addr as usize, data);
+        match addr {
+            0x0000..=0x1fff => {
+                arr_write!(self.chr_data, self.chr_bank + addr as usize, data);
+            }
+            0x2000..=0x3fff => { // VRAM
+                arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
+            }
+            _ => {}
+        }
     }
 
+    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
     fn irq(&self) -> bool { false }
 }

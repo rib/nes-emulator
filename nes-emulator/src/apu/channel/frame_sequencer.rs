@@ -77,7 +77,6 @@ impl FrameSequencer {
     }
 
     pub fn step(&mut self, apu_clock: u64) -> FrameSequencerStatus {
-        self.clock += 1;
 
         if self.queue_clock_reset {
             // Note: we must only ever reset the clock to zero on an even clock cycle
@@ -196,6 +195,8 @@ impl FrameSequencer {
         //if self.clock == 14913 {
         //    println!("half frame: status = {status:?}");
         //}
+
+        self.clock += 1;
         status
     }
 

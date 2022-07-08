@@ -4,6 +4,9 @@
 
 use std::{collections::{HashSet, HashMap, VecDeque}, fmt::Debug, time::{Instant, Duration}, path::{Path, PathBuf}, fs::File, io::Read, num::NonZeroUsize, u16::MAX};
 
+use egui::{
+    Rect, Pos2, Vec2, pos2, vec2, Shape, Image
+};
 use egui_extras::Table;
 use log::{error, warn, info, debug, trace};
 use clap::Parser;
@@ -13,7 +16,7 @@ use anyhow::Result;
 
 use winit::event::{Event, WindowEvent, VirtualKeyCode};
 
-use egui::{self, RichText, Color32, Ui, ImageData, TextureHandle};
+use egui::{self, RichText, Color32, Ui, ImageData, TextureHandle, Frame, style::Margin};
 use egui::{ColorImage, epaint::ImageDelta};
 
 use cpal::SampleRate;
@@ -24,6 +27,9 @@ use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
 
 use nes_emulator::prelude::*;
 
+
+const PPU_EVENTS_FB_WIDTH: usize = 341;
+const PPU_EVENTS_FB_HEIGHT: usize = 262;
 
 
 pub enum Status {
@@ -156,6 +162,21 @@ fn make_audio_stream<T: Sample + Send + Debug + 'static>(
         })?)
 }
 
+#[derive(PartialEq, Eq)]
+enum AddressSpace {
+    System,
+    Ppu,
+    Oam,
+}
+impl Debug for AddressSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::System => write!(f, "System Bus"),
+            Self::Ppu => write!(f, "PPU Bus"),
+            Self::Oam => write!(f, "OAM Memory"),
+        }
+    }
+}
 pub struct EmulatorUi {
     real_time: bool,
 
@@ -169,21 +190,37 @@ pub struct EmulatorUi {
 
     nes: Nes,
 
+    pub paused: bool,
+    single_step: bool,
+
     fb_width: usize,
     fb_height: usize,
-    framebuffers: [Framebuffer; 2],
-    front_framebuffer: usize,
-    back_framebuffer: usize,
+    //framebuffers: [Framebuffer; 2],
+    //front_framebuffer: usize,
+    //back_framebuffer: usize,
+    front_framebuffer: Framebuffer,
     framebuffer_texture: TextureHandle,
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
 
+
+    show_nametables: bool,
     nametables_framebuffer: Vec<u8>,
     nametables_texture: TextureHandle,
+    // Pixel coordinate within four namespace regions
+    nametables_hover_pos: [usize; 2],
+    nametables_show_scroll: bool,
     queue_nametable_fb_upload: bool,
 
-    pub paused: bool,
-    single_step: bool,
+    show_memview: bool,
+    memview_selected_space: AddressSpace,
+
+    show_ppu_events: bool,
+    ppu_events_framebuffer: Vec<u8>,
+    ppu_events_texture: TextureHandle,
+    // Pixel coordinate within four namespace regions
+    ppu_events_hover_pos: [usize; 2],
+    queue_ppu_events_fb_upload: bool,
 
     frame_no: u32, // emulated frames (not drawn frames)
 
@@ -238,12 +275,13 @@ impl EmulatorUi {
             SampleFormat::U16 => make_audio_stream::<u16>(&audio_device, &audio_config.into(), rx),
         }.unwrap();
 
-        let nes = Nes::new(PixelFormat::RGBA8888, audio_sample_rate);
+        let mut nes = Nes::new(audio_sample_rate);
 
-        let framebuffer0 = nes.allocate_framebuffer();
-        let framebuffer1 = nes.allocate_framebuffer();
-        let fb_width = framebuffer0.width();
-        let fb_height = framebuffer0.height();
+        let back_framebuffer = nes.allocate_framebuffer();
+        let front_framebuffer = nes.system_ppu().swap_framebuffer(back_framebuffer).unwrap();
+        //let framebuffer1 = nes.allocate_framebuffer();
+        let fb_width = front_framebuffer.width();
+        let fb_height = front_framebuffer.height();
 
         let framebuffer_texture = {
             //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
@@ -270,6 +308,20 @@ impl EmulatorUi {
             tex
         };
 
+        let ppu_events_fb_bpp = 3;
+
+        let ppu_events_fb_stride = PPU_EVENTS_FB_WIDTH * ppu_events_fb_bpp;
+        let ppu_events_framebuffer = vec![0u8; ppu_events_fb_stride * PPU_EVENTS_FB_HEIGHT];
+        let ppu_events_texture = {
+            //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
+            let blank = ColorImage {
+                size: [PPU_EVENTS_FB_WIDTH as _, PPU_EVENTS_FB_HEIGHT as _],
+                pixels: vec![Color32::default(); PPU_EVENTS_FB_WIDTH * PPU_EVENTS_FB_HEIGHT],
+            };
+            let blank = ImageData::Color(blank);
+            let tex = ctx.load_texture("ppu_events_framebuffer", blank, egui::TextureFilter::Nearest);
+            tex
+        };
         let now = Instant::now();
 
         let mut emulator = Self {
@@ -286,16 +338,24 @@ impl EmulatorUi {
 
             fb_width,
             fb_height,
-            framebuffers: [framebuffer0, framebuffer1],
-            back_framebuffer: 0,
-            front_framebuffer: 1,
+            //framebuffers: [framebuffer0, framebuffer1],
+            //back_framebuffer: 0,
+            //front_framebuffer: 1,
+            front_framebuffer,
             framebuffer_texture,
             queue_framebuffer_upload: false,
             last_frame_time: now,
 
+            show_nametables: false,
             nametables_framebuffer,
             nametables_texture,
             queue_nametable_fb_upload: false,
+
+            nametables_show_scroll: true,
+            nametables_hover_pos: [0, 0],
+
+            show_memview: false,
+            memview_selected_space: AddressSpace::Oam,
 
             paused: false,
             single_step: false,
@@ -314,6 +374,12 @@ impl EmulatorUi {
             profiled_aggregate_fps: 0.0,
 
             tmp_row_values: vec![],
+
+            show_ppu_events: false,
+            ppu_events_framebuffer,
+            ppu_events_texture,
+            ppu_events_hover_pos: [0, 0],
+            queue_ppu_events_fb_upload: false,
         };
 
         if let Some(ref rom) = args.rom {
@@ -326,7 +392,7 @@ impl EmulatorUi {
     pub fn open_binary(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let rom = get_file_as_byte_vec(path);
 
-        self.nes = Nes::new(PixelFormat::RGBA8888, self.audio_sample_rate);
+        self.nes = Nes::new(self.audio_sample_rate);
         self.nes.open_binary(&rom)?;
 
         let start_timestamp = std::time::Instant::now();
@@ -473,14 +539,18 @@ impl EmulatorUi {
             };
 
             'progress: loop {
-                match self.nes.progress(target, self.framebuffers[self.back_framebuffer].clone()) {
+                match self.nes.progress(target) {
                     ProgressStatus::FrameReady => {
                         let now = Instant::now();
                         let frame_duration = now - self.last_frame_time;
                         self.profiled_last_fps = (1.0 as f64 / frame_duration.as_secs_f64()) as f32;
                         self.last_frame_time = now;
-                        self.front_framebuffer = self.back_framebuffer;
-                        self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
+                        //self.front_framebuffer = self.back_framebuffer;
+                        //self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
+
+                        //println!("Frame Ready: swapping in new PPU back buffer");
+                        self.front_framebuffer = self.nes.system_ppu().swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
+
                         self.queue_framebuffer_upload = true;
                         self.update_nametable_framebuffer();
                         self.frame_no += 1;
@@ -537,7 +607,8 @@ impl EmulatorUi {
     }
 
     pub fn front_buffer(&mut self) -> Framebuffer {
-        self.framebuffers[self.front_framebuffer].clone()
+        self.front_framebuffer.clone()
+        //self.framebuffers[self.front_framebuffer].clone()
     }
 
 
@@ -545,6 +616,17 @@ impl EmulatorUi {
         egui::Window::new("Memory View")
             .resizable(true)
             .show(ctx, |ui| {
+
+                 egui::SidePanel::left("memview_options_panel").show_inside(ui, |ui| {
+                    egui::ComboBox::from_label("address_space")
+                        .selected_text(format!("{:?}", self.memview_selected_space))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.memview_selected_space, AddressSpace::System, "System Bus");
+                            ui.selectable_value(&mut self.memview_selected_space, AddressSpace::Ppu, "PPU Bus");
+                            ui.selectable_value(&mut self.memview_selected_space, AddressSpace::Ppu, "OAM Memory");
+                        }
+                    );
+                });
 
                 let bytes_per_row = 16;
                 let num_rows: usize = (1<<16) / bytes_per_row;
@@ -602,7 +684,11 @@ impl EmulatorUi {
                             self.tmp_row_values.clear();
                             for i in 0..n_val_cols {
                                 let addr = row_index * bytes_per_row + i;
-                                let val = self.nes.peek_system_bus(addr as u16);
+                                let val = match self.memview_selected_space{
+                                    AddressSpace::System => self.nes.peek_system_bus(addr as u16),
+                                    AddressSpace::Ppu => self.nes.peek_ppu_bus(addr as u16),
+                                    AddressSpace::Oam => self.nes.system_ppu().peek_oam_data(addr as u8),
+                                };
                                 self.tmp_row_values.push(val);
                                 row.col(|ui| {
                                     ui.label(format!("{:02x}", val));
@@ -626,6 +712,16 @@ impl EmulatorUi {
          });
     }
 
+
+    // Really klunky :/
+    pub fn draw_nametable_rect(ui: &mut Ui, rect: egui::Rect, scale: f32, offset: egui::Vec2) {
+        use std::ops::Mul;
+        let scaled = egui::Rect {
+            min: rect.min.to_vec2().mul(scale).to_pos2(),
+            max: rect.max.to_vec2().mul(scale).to_pos2(),
+        };
+    }
+
     pub fn draw_nametables_view(&mut self, ctx: &egui::Context) {
         let width = self.fb_width * 2;
         let height = self.fb_height * 2;
@@ -638,14 +734,85 @@ impl EmulatorUi {
             }), egui::TextureFilter::Nearest);
 
             ctx.tex_manager().write().set(self.nametables_texture.id(), copy);
-            self.queue_framebuffer_upload = false;
+            self.queue_nametable_fb_upload = false;
         }
 
         egui::Window::new("Nametables")
+            .default_width(900.0)
             .resizable(true)
+            //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
 
-                ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
+                let panels_width = ui.fonts().pixels_per_point() * 100.0;
+
+                egui::SidePanel::left("nametables_options_panel")
+                    .resizable(false)
+                    .min_width(panels_width)
+                    .show_inside(ui, |ui| {
+                        ui.checkbox(&mut self.nametables_show_scroll, "Show Scroll Position");
+                    });
+                egui::SidePanel::right("nametables_properties_panel")
+                    .resizable(false)
+                    .min_width(panels_width)
+                    .show_inside(ui, |ui| {
+                        //ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_x()));
+                        //ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_y()));
+                });
+
+                egui::TopBottomPanel::bottom("nametables_footer").show_inside(ui, |ui| {
+                    ui.label(format!("[{}, {}]", self.nametables_hover_pos[0], self.nametables_hover_pos[1]));
+                });
+
+                //let frame = Frame::none().outer_margin(Margin::same(200.0));
+                egui::CentralPanel::default()
+                    //.frame(frame)
+                    .show_inside(ui, |ui| {
+
+                        let (response, painter) =
+                            ui.allocate_painter(egui::Vec2::new(width as f32, height as f32), egui::Sense::hover());
+
+                        let img = egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32));
+                        //let response = ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
+                                        // TODO(emilk): builder pattern for Mesh
+
+                        let mut mesh = egui::Mesh::with_texture(self.nametables_texture.id());
+                        mesh.add_rect_with_uv(response.rect, egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE,);
+                        painter.add(Shape::mesh(mesh));
+
+                        let img_pos = response.rect.left_top();
+                        let img_width = response.rect.width();
+                        let img_height = response.rect.height();
+                        let img_to_nes_px = self.fb_width as f32 * 2.0 / img_width;
+                        let nes_px_to_img = 1.0 / img_to_nes_px;
+
+                        if let Some(hover_pos) = response.hover_pos() {
+                            let x = ((hover_pos.x - img_pos.x) * img_to_nes_px) as usize;
+                            let y = ((hover_pos.y - img_pos.y) * img_to_nes_px) as usize;
+                            self.nametables_hover_pos = [x, y];
+
+                            /*
+                            let tile_x =
+                            painter.rect_stroke(
+                                egui::Rect::from_min_size(response.rect.min + vec2(x_off as f32 * nes_px_to_img, y_off as f32 * nes_px_to_img),
+                                                            vec2(self.fb_width as f32 * nes_px_to_img, self.fb_height as f32 * nes_px_to_img)),
+                                egui::Rounding::none(),
+                                egui::Stroke::new(1.0, Color32::RED));
+                                */
+                            //painter.rect_filled(egui::Rect::from_min_size(response.rect.min, vec2(200.0, 200.0)),
+                            //    egui::Rounding::none(), Color32::RED);
+                        }
+
+                        /*
+                        let x_off = self.nes.system_ppu().scroll_x();
+                        let y_off = self.nes.system_ppu().scroll_y();
+                        painter.rect_stroke(
+                            egui::Rect::from_min_size(response.rect.min + vec2(x_off as f32 * nes_px_to_img, y_off as f32 * nes_px_to_img),
+                                                        vec2(self.fb_width as f32 * nes_px_to_img, self.fb_height as f32 * nes_px_to_img)),
+                            egui::Rounding::none(),
+                            egui::Stroke::new(2.0, Color32::YELLOW));
+                            */
+                });
+
         });
     }
 
@@ -655,7 +822,9 @@ impl EmulatorUi {
         let front = self.front_buffer();
 
         if self.queue_framebuffer_upload {
-            let rental = self.framebuffers[self.front_framebuffer].rent_data().unwrap();
+            //println!("Uploading frame for render");
+            //let rental = self.framebuffers[self.front_framebuffer].rent_data().unwrap();
+            let rental = self.front_framebuffer.rent_data().unwrap();
 
             // hmmm, redundant copy, grumble grumble...
             let copy = ImageDelta::full(ImageData::Color(ColorImage {
@@ -666,6 +835,16 @@ impl EmulatorUi {
             }), egui::TextureFilter::Nearest);
 
             ctx.tex_manager().write().set(self.framebuffer_texture.id(), copy);
+
+            /*
+            // DEBUG clear to red, to be able to see if any framebuffer pixels aren't rendered in the next frame
+            for pixel in rental.data.chunks_exact_mut(4) {
+                pixel[0] = 0xff;
+                pixel[1] = 0x00;
+                pixel[2] = 0x00;
+                pixel[3] = 0xff;
+            }*/
+
             self.queue_framebuffer_upload = false;
         }
 
@@ -703,9 +882,12 @@ impl EmulatorUi {
                 }
 
                 let ppu = self.nes.system_ppu();
-                let debug_val = self.nes.debug_read_ppu(0x2000);
+                let debug_val = self.nes.peek_ppu_bus(0x2000);
                 //println!("PPU debug = {debug_val:x}");
             }
+
+            ui.checkbox(&mut &mut self.show_memview, "Show Memory");
+            ui.checkbox(&mut &mut &mut self.show_nametables, "Show Nametables");
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -713,8 +895,13 @@ impl EmulatorUi {
             ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
         });
 
-        self.draw_nametables_view(ctx);
-        self.draw_memory_view(ctx);
+        if self.show_nametables {
+            self.draw_nametables_view(ctx);
+        }
+
+        if self.show_memview {
+            self.draw_memory_view(ctx);
+        }
 
         status
     }
