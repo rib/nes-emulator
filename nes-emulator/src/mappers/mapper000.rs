@@ -108,7 +108,7 @@ impl Mapper for Mapper0 {
                 arr_write!(self.vram, off, data);
             }
             _ => {
-                trace!("Unexpected PPU write via mapper, address = {}", addr);
+                panic!("Unexpected PPU write via mapper, address = 0x{addr:x}");
             }
         }
     }

@@ -264,7 +264,7 @@ impl EmulatorUi {
             SampleFormat::U16 => make_audio_stream::<u16>(&audio_device, &audio_config.into(), rx),
         }.unwrap();
 
-        let nes = Nes::new(PixelFormat::RGBA8888, audio_sample_rate);
+        let nes = Nes::new(audio_sample_rate);
 
         let framebuffer0 = nes.allocate_framebuffer();
         let framebuffer1 = nes.allocate_framebuffer();
@@ -359,7 +359,7 @@ impl EmulatorUi {
     pub fn open_binary(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let rom = get_file_as_byte_vec(path);
 
-        self.nes = Nes::new(PixelFormat::RGBA8888, self.audio_sample_rate);
+        self.nes = Nes::new(self.audio_sample_rate);
         self.nes.open_binary(&rom)?;
 
         let start_timestamp = std::time::Instant::now();
@@ -715,8 +715,8 @@ impl EmulatorUi {
                     .resizable(false)
                     .min_width(panels_width)
                     .show_inside(ui, |ui| {
-                        ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_fine_x()));
-                        ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_fine_y()));
+                        //ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_x()));
+                        //ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_y()));
                 });
 
                 egui::TopBottomPanel::bottom("nametables_footer").show_inside(ui, |ui| {
@@ -762,13 +762,15 @@ impl EmulatorUi {
                             //    egui::Rounding::none(), Color32::RED);
                         }
 
-                        let x_off = self.nes.system_ppu().scroll_fine_x();
-                        let y_off = self.nes.system_ppu().scroll_fine_y();
+                        /*
+                        let x_off = self.nes.system_ppu().scroll_x();
+                        let y_off = self.nes.system_ppu().scroll_y();
                         painter.rect_stroke(
                             egui::Rect::from_min_size(response.rect.min + vec2(x_off as f32 * nes_px_to_img, y_off as f32 * nes_px_to_img),
                                                         vec2(self.fb_width as f32 * nes_px_to_img, self.fb_height as f32 * nes_px_to_img)),
                             egui::Rounding::none(),
                             egui::Stroke::new(2.0, Color32::YELLOW));
+                            */
                 });
 
         });

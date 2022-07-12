@@ -25,11 +25,13 @@ bitflags! {
 bitflags! {
     #[derive(Default)]
     pub struct Control2Flags: u8 {
-        const COLOR_INTENSITY_MASK  = 0b1110_0000;
-        const SPRITES_LEFT_COL_SHOW = 0b0001_0000;
-        const BG_LEFT_COL_SHOW      = 0b0000_1000;
-        const SHOW_SPRITES          = 0b0000_0100;
-        const SHOW_BG               = 0b0000_0010;
+        const EMPHASIZE_BLUE        = 0b1000_0000;
+        const EMPHASIZE_GREEN       = 0b0100_0000;
+        const EMPHASIZE_RED         = 0b0010_0000;
+        const SHOW_SPRITES          = 0b0001_0000;
+        const SHOW_BG               = 0b0000_1000;
+        const SPRITES_LEFT_COL_SHOW = 0b0000_0100;
+        const BG_LEFT_COL_SHOW      = 0b0000_0010;
         const MONOCHROME            = 0b0000_0001;
     }
 }

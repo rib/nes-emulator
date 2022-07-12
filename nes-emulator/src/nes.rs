@@ -35,7 +35,6 @@ pub struct Nes {
     reference_timestamp: Instant,
     reference_cpu_clock: u64,
 
-    pixel_format: PixelFormat,
     cpu: Cpu,
     cpu_clock: u64,
     ppu_clock: u64,
@@ -51,11 +50,10 @@ pub struct Nes {
 }
 
 impl Nes {
-    pub fn new(pixel_format: PixelFormat, audio_sample_rate: u32) -> Nes {
+    pub fn new(audio_sample_rate: u32) -> Nes {
 
         let cpu = Cpu::default();
         let mut ppu = Ppu::default();
-        ppu.draw_option.pixel_format = pixel_format;
 
         let apu = Apu::new(NTSC_CPU_CLOCK_HZ, audio_sample_rate);
 
@@ -64,7 +62,8 @@ impl Nes {
             reference_timestamp: Instant::now(),
             reference_cpu_clock: 0,
 
-            pixel_format, cpu, cpu_clock: 0, ppu_clock: 0,
+            cpu, cpu_clock: 0,
+            ppu_clock: 0,
             apu_clock: 0, system,
 
             nsf_config: None,
@@ -180,7 +179,7 @@ impl Nes {
     }
 
     pub fn allocate_framebuffer(&self) -> Framebuffer {
-        Framebuffer::new(FRAMEBUFFER_WIDTH, FRAMEBUFFER_HEIGHT, self.pixel_format)
+        Framebuffer::new(FRAMEBUFFER_WIDTH, FRAMEBUFFER_HEIGHT, PixelFormat::RGBA8888)
     }
 
     // Aiming for Meson compatible trace format which can be used for cross referencing
