@@ -1807,9 +1807,9 @@ impl Ppu {
                     // We skip from 339 to 340 so we don't need special case logic
                     // to progress the line counter (this is still after the
                     // nametable read)
-                    if self.frame & 1 != 0 && self.line == 261 && self.dot == 339 {
-                        self.dot = 340;
-                    }
+                    //if self.frame & 1 != 0 && self.line == 261 && self.dot == 339 {
+                    //    self.dot = 340;
+                    //}
                 }
             }
         }
