@@ -55,7 +55,7 @@ impl Default for TraceState {
             saved_p: Flags::NONE,
             instruction_pc: 0,
             instruction_op_code: 0,
-            instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0},
+            instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0, early_intr_poll: false },
             instruction_operand: 0,
             effective_address: 0,
             loaded_mem_value: 0,

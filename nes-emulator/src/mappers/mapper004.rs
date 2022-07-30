@@ -9,6 +9,30 @@ use crate::prelude::NameTableMirror;
 use super::mirror_vram_address;
 
 /// iNES Mapper 004: AKA MMC3
+///
+/// PRG ROM capacity	512K
+/// PRG ROM window	8K + 8K + 16K fixed
+/// PRG RAM capacity	8K
+/// PRG RAM window	8K
+/// CHR capacity	256K
+/// CHR window	2Kx2 + 1Kx4
+/// Nametable mirroring	H or V, switchable, or 4 fixed
+/// Bus conflicts	No
+///
+/// # Banks
+///
+/// CPU $6000-$7FFF: 8 KB PRG RAM bank (optional)
+/// CPU $8000-$9FFF (or $C000-$DFFF): 8 KB switchable PRG ROM bank
+/// CPU $A000-$BFFF: 8 KB switchable PRG ROM bank
+/// CPU $C000-$DFFF (or $8000-$9FFF): 8 KB PRG ROM bank, fixed to the second-last bank
+/// CPU $E000-$FFFF: 8 KB PRG ROM bank, fixed to the last bank
+/// PPU $0000-$07FF (or $1000-$17FF): 2 KB switchable CHR bank
+/// PPU $0800-$0FFF (or $1800-$1FFF): 2 KB switchable CHR bank
+/// PPU $1000-$13FF (or $0000-$03FF): 1 KB switchable CHR bank
+/// PPU $1400-$17FF (or $0400-$07FF): 1 KB switchable CHR bank
+/// PPU $1800-$1BFF (or $0800-$0BFF): 1 KB switchable CHR bank
+/// PPU $1C00-$1FFF (or $0C00-$0FFF): 1 KB switchable CHR bank
+///
 #[derive(Clone)]
 pub struct Mapper4 {
     vram_mirror: NameTableMirror,

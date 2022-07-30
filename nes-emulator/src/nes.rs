@@ -304,6 +304,7 @@ impl Nes {
                 }
 
                 self.cpu.step_instruction(&mut self.system);
+                //println!("cpu clock = {}, apu clock = {}", self.cpu.clock, self.system.apu_clock());
                 debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
                 if self.cpu.breakpoint_hit {
                     self.cpu.remove_break(self.cpu.pc, true);

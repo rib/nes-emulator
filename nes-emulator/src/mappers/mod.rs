@@ -115,6 +115,9 @@ pub use mapper003::Mapper3;
 pub mod mapper004;
 pub use mapper004::Mapper4;
 
+pub mod mapper007;
+pub use mapper007::Mapper7;
+
 pub mod mapper031;
 pub use mapper031::Mapper31;
 

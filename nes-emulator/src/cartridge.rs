@@ -121,6 +121,7 @@ impl Cartridge {
             2 => Box::new(Mapper2::new(config, prg_rom, chr_data)),
             3 => Box::new(Mapper3::new(config, prg_rom, chr_data)),
             4 => Box::new(Mapper4::new(config, prg_rom, chr_data)),
+            7 => Box::new(Mapper7::new(config, prg_rom, chr_data)),
             66 => Box::new(Mapper66::new(config, prg_rom, chr_data)),
             _ => {
                 return Err(anyhow!("Unsupported mapper number {}", config.mapper_number));

@@ -27,6 +27,25 @@ enum Mapper1ChrMode {
     Switch4KSwitch4K
 }
 
+/// iNes mapper 001, aka MMC1
+///
+/// PRG ROM capacity	256K (512K)
+/// PRG ROM window	16K + 16K fixed or 32K
+/// PRG RAM capacity	32K
+/// PRG RAM window	8K
+/// CHR capacity	128K
+/// CHR window	4K + 4K or 8K
+/// Nametable mirroring	H, V, or 1, switchable
+/// Bus conflicts	No
+///
+/// # Banks
+///
+/// CPU $6000-$7FFF: 8 KB PRG RAM bank, (optional)
+/// CPU $8000-$BFFF: 16 KB PRG ROM bank, either switchable or fixed to the first bank
+/// CPU $C000-$FFFF: 16 KB PRG ROM bank, either fixed to the last bank or switchable
+/// PPU $0000-$0FFF: 4 KB switchable CHR bank
+/// PPU $1000-$1FFF: 4 KB switchable CHR bank
+///
 #[derive(Clone)]
 pub struct Mapper1 {
     vram_mirror: NameTableMirror,
