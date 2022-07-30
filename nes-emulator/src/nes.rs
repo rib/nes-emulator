@@ -79,8 +79,7 @@ impl Nes {
         }
     }
 
-    pub fn open_binary(&mut self, binary: &[u8]) -> Result<()> {
-
+    fn try_open_binary(&mut self, binary: &[u8]) -> Result<()> {
         match binary::parse_any_header(binary)? {
             NesBinaryConfig::INes(ines_config) => {
                 let cartridge = Cartridge::from_ines_binary(&ines_config, binary)?;
@@ -93,6 +92,16 @@ impl Nes {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn open_binary(&mut self, binary: &[u8]) -> Result<()> {
+
+        if let Err(err) = self.try_open_binary(binary) {
+            log::warn!("Failed to open binary: {:?}", err);
+            self.insert_cartridge(None);
+            Err(err)?
+        }
         Ok(())
     }
 

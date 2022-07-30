@@ -7,6 +7,7 @@ use crate::binary::INesConfig;
 use crate::prelude::NameTableMirror;
 
 use super::mirror_vram_address;
+use super::bank_select_mask;
 
 
 /// iNES Mapper 003: AKA CNROM
@@ -65,15 +66,6 @@ pub struct Mapper3 {
 
 impl Mapper3 {
 
-    /// Determine the minimal mask of bits needed to be able to index
-    /// all the CHR ROM pages
-    fn chr_bank_select_mask(num_chr_rom_pages: u8) -> u8 {
-        let l = num_chr_rom_pages.leading_zeros();
-        let shift = 8 - l;
-        let mask = ((1u16<<shift)-1) as u8;
-        mask
-    }
-
     pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
 
         let prg_rom0 = prg_rom[0..PAGE_SIZE_16K].to_vec();
@@ -85,7 +77,7 @@ impl Mapper3 {
         };
 
         let n_chr_pages = config.n_chr_rom_pages as u8;
-        let chr_bank_select_mask = Mapper3::chr_bank_select_mask(n_chr_pages - 1);
+        let chr_bank_select_mask = bank_select_mask(n_chr_pages);
         debug!("Mapper3: CHR Bank Select Mask = {chr_bank_select_mask:08b} ({n_chr_pages} CHR pages)");
         Self {
             vram_mirror: config.nametable_mirror,
@@ -178,5 +170,4 @@ impl Mapper for Mapper3 {
     }
 
     fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
-    fn irq(&self) -> bool { false }
 }

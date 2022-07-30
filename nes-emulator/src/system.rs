@@ -113,7 +113,7 @@ impl System {
     }
 
     pub fn irq_line(&self) -> bool {
-        self.apu.irq()
+        self.apu.irq() || self.cartridge.mapper.irq()
     }
 
     /// Apply the open bus bits and update the open bus value for future reads

@@ -14,18 +14,25 @@ pub struct Mapper0 {
     pub vram: [u8; 2048],
     pub prg_rom: Vec<u8>,
     pub prg_ram: Vec<u8>,
+    pub last_prg_page_off: usize,
     pub has_chr_ram: bool,
     pub chr_data: Vec<u8>, // may be ROM or RAM
 }
 
 impl Mapper0 {
     pub(crate) fn new_full(prg_rom: Vec<u8>, chr_data: Vec<u8>, has_writeable_chr_ram: bool, n_prg_ram_pages: usize, mirror: NameTableMirror) -> Self {
+        // We expect the PRG / CHR data to be padded to have a page aligned size
+        // when they are loaded
+        debug_assert_eq!(prg_rom.len() % PAGE_SIZE_16K, 0);
+
+        let last_prg_page_off = if prg_rom.len() > PAGE_SIZE_16K { PAGE_SIZE_16K } else { 0 };
         Self {
             vram_mirror: mirror,
             vram: [0u8; 2048],
             prg_rom,
             prg_ram: vec![0u8; n_prg_ram_pages * PAGE_SIZE_16K],
             has_chr_ram: has_writeable_chr_ram,
+            last_prg_page_off,
             chr_data,
          }
     }
@@ -43,30 +50,29 @@ impl Mapper for Mapper0 {
     }
 
     fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
-        let value = match addr {
-            0x6000..=0x7fff => { // PRG RAM
-                let ram_offset = (addr - 0x6000) as usize;
-                self.prg_ram[ram_offset]
+        match addr {
+            0x6000..=0x7fff => { // PRG RAM, 8k window (2k or 4k physical ram for FamilyBasic)
+                if self.prg_ram.len() > 0 {
+                    let offset = (addr - 0x6000) as usize % self.prg_ram.len();
+                    (arr_read!(self.prg_ram, offset), 0)
+                } else {
+                    log::warn!("Invalid mapper read @ {}", addr);
+                    (0, 0xff)
+                }
             }
             0x8000..=0xbfff => { // First 16 KB of ROM
                 let addr = (addr - 0x8000) as usize;
-                self.prg_rom[addr]
+                (arr_read!(self.prg_rom, addr), 0)
             }
             0xc000..=0xffff => { // Last 16 KB of ROM (NROM-256) or mirror of $8000-$BFFF (NROM-128)
-                let addr = (addr - 0x8000) as usize;
-                if addr >= self.prg_rom.len() {
-                    self.prg_rom[addr - self.prg_rom.len()]
-                } else {
-                    self.prg_rom[addr]
-                }
+                let addr = (addr - 0xc000) as usize + self.last_prg_page_off;
+                (arr_read!(self.prg_rom, addr), 0)
             }
             _ => {
-                error!("Invalid mapper read @ {}", addr);
-                return (0, 0xff)
+                log::warn!("Invalid mapper read @ {}", addr);
+                (0, 0xff)
             }
-        };
-
-        (value, 0) // No undefined (open bus) bits
+        }
     }
 
     fn system_bus_peek(&mut self, addr: u16) -> (u8, u8) {
@@ -86,8 +92,7 @@ impl Mapper for Mapper0 {
     fn ppu_bus_read(&mut self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x1fff => {
-                let index = addr as usize;
-                arr_read!(self.chr_data, index)
+                arr_read!(self.chr_data, addr as usize)
             }
             0x2000..=0x3fff => { // VRAM
                 let off = mirror_vram_address(addr, self.vram_mirror);
@@ -108,8 +113,8 @@ impl Mapper for Mapper0 {
         match addr {
             0x0000..=0x1fff => {
                 if self.has_chr_ram {
-                    let index = addr as usize;
-                    arr_write!(self.chr_data, index, data);
+                    let off = addr as usize;
+                    arr_write!(self.chr_data, off, data);
                 }
             },
             0x2000..=0x3fff => { // VRAM
@@ -123,7 +128,6 @@ impl Mapper for Mapper0 {
     }
 
     fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
-    fn irq(&self) -> bool { false }
 }
 
 

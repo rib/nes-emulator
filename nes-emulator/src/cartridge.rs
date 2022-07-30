@@ -35,12 +35,10 @@ impl Mapper for NoCartridge {
     fn ppu_bus_read(&mut self, _addr: u16) -> u8 { 0 }
     fn ppu_bus_peek(&mut self, _addr: u16) -> u8 { 0 }
     fn ppu_bus_write(&mut self, _addr: u16, _data: u8) { }
-    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::Vertical }
-    fn irq(&self) -> bool { false }
 }
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum NameTableMirror {
     Unknown,
     Horizontal,
@@ -120,8 +118,10 @@ impl Cartridge {
         let mut mapper: Box<dyn Mapper> = match config.mapper_number {
             0 => Box::new(Mapper0::new(config, prg_rom, chr_data)),
             1 => Box::new(Mapper1::new(config, prg_rom, chr_data)),
+            2 => Box::new(Mapper2::new(config, prg_rom, chr_data)),
             3 => Box::new(Mapper3::new(config, prg_rom, chr_data)),
             4 => Box::new(Mapper4::new(config, prg_rom, chr_data)),
+            66 => Box::new(Mapper66::new(config, prg_rom, chr_data)),
             _ => {
                 return Err(anyhow!("Unsupported mapper number {}", config.mapper_number));
             }
@@ -172,6 +172,12 @@ impl Cartridge {
 
         self.mapper.ppu_bus_write(addr, data);
     }
+
+    /// An alias for [`Self::ppu_bus_read`]
+    ///
+    /// Although this just calls through to ppu_bus_read we might integrate
+    /// debugging / tracing that will want to easily differentiate VRAM
+    /// I/O
     pub fn vram_read(&mut self, addr: u16) -> u8 {
         //println!("VRAM: read {addr:04x}");
         let val = self.mapper.ppu_bus_read(addr);
@@ -182,6 +188,11 @@ impl Cartridge {
         val
     }
 
+    /// An alias for [`Self::ppu_bus_peek`]
+    ///
+    /// Although this just calls through to ppu_bus_peek we might integrate
+    /// debugging / tracing that will want to easily differentiate VRAM
+    /// I/O
     pub fn vram_peek(&mut self, addr: u16) -> u8 {
         let val = self.mapper.ppu_bus_peek(addr);
 
@@ -190,11 +201,36 @@ impl Cartridge {
         //}
         val
     }
+
+    /// An alias for [`Self::ppu_bus_write`]
+    ///
+    /// Although this just calls through to ppu_bus_write we might integrate
+    /// debugging / tracing that will want to easily differentiate VRAM
+    /// I/O
     pub fn vram_write(&mut self, addr: u16, data: u8) {
         //println!("VRAM: writing {data} to {addr:04x}");
         //if addr < 0x2400 {
         //    println!("writing {data} to {addr}");
         //}
         self.mapper.ppu_bus_write(addr, data);
+    }
+
+    /// Lets the PPU notify the cartridge of a new address without any I/O required
+    ///
+    /// As an optimization for being able to update the PPU bus address (such as
+    /// when entering vblank or disabling rendering) this simply notifies mappers
+    /// of the new address.
+    ///
+    /// Mappers like MMC3 should use this to track the A12 address bit
+    pub fn ppu_bus_nop_io(&mut self, addr: u16) {
+        self.mapper.ppu_bus_nop_io(addr);
+    }
+
+    /// Steps the m2 (aka phi2 / φ2) wire (i.e. clocked once for each CPU cycle)
+    ///
+    /// Mappers like MMC3 can use this to filter the A12 bit of the PPU address bus
+    /// (which can be tracked via ppu_bus_reads/writes)
+    pub fn step_m2_phi2(&mut self, cpu_clock: u64) {
+        self.mapper.step_m2_phi2(cpu_clock);
     }
 }

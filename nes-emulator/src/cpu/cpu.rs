@@ -274,7 +274,7 @@ impl Cpu {
 
         // Iterate one clock cycle at a time until pending DMA[s] completed
         while oam_dma_state != OamDmaState::None || dmc_dma_state != DmcDmaState::None {
-            self.step_interrupt_detector_phase1(system);
+            self.start_clock_cycle_phi1(system);
             // DMC DMA requests can arrive in the middle of an OAM DMA and DMC reads have higher priority
             if let Some(request) = std::mem::take(&mut system.dmc_dma_request) {
                 dmc_dma_state = DmcDmaState::Stall;
@@ -367,7 +367,7 @@ impl Cpu {
                 }
             }
 
-            self.step_interrupt_detector_phase2(system);
+            self.end_clock_cycle_phi2(system);
 
             self.clock += 1;
 
@@ -423,9 +423,9 @@ impl Cpu {
     ///
     /// "read" the system bus at the given address, but don't _actually_ do the read
     pub(in super) fn nop_read_system_bus(&mut self, system: &mut System, addr: u16) {
-        self.step_interrupt_detector_phase1(system);
+        self.start_clock_cycle_phi1(system);
         system.step_for_cpu_cycle();
-        self.step_interrupt_detector_phase2(system);
+        self.end_clock_cycle_phi2(system);
 
         self.clock += 1;
 
@@ -439,9 +439,9 @@ impl Cpu {
         // so this is a convenient place to run the interrupt detection that
         // happens during phase 1/2 of each clock cycle
 
-        self.step_interrupt_detector_phase1(system);
+        self.start_clock_cycle_phi1(system);
         let mut data = system.cpu_read(addr, self.clock);
-        self.step_interrupt_detector_phase2(system);
+        self.end_clock_cycle_phi2(system);
 
         self.clock += 1;
 
@@ -456,9 +456,9 @@ impl Cpu {
     ///
     /// This skips doing the actual write but still steps the system for one CPU clock cycle.
     pub(in super) fn nop_write_system_bus(&mut self, system: &mut System, addr: u16, data: u8) {
-        self.step_interrupt_detector_phase1(system);
+        self.start_clock_cycle_phi1(system);
         system.step_for_cpu_cycle();
-        self.step_interrupt_detector_phase2(system);
+        self.end_clock_cycle_phi2(system);
 
         self.clock += 1;
     }
@@ -474,7 +474,7 @@ impl Cpu {
             self.trace.stored_mem_value = data;
         }
 
-        self.step_interrupt_detector_phase1(system);
+        self.start_clock_cycle_phi1(system);
         system.cpu_write(addr, data, self.clock);
 
         // We treat the OAMDMA register as a special, internal register
@@ -493,7 +493,7 @@ impl Cpu {
             self.input_ready = false;
         }
 
-        self.step_interrupt_detector_phase2(system);
+        self.end_clock_cycle_phi2(system);
         self.clock += 1;
     }
 
@@ -578,12 +578,14 @@ impl Cpu {
             }
         };
 
+        //println!("Interrupt vector = {vector:?}");
         let (lower_addr, upper_addr) = match vector {
             Interrupt::NMI => (NMI_READ_LOWER, NMI_READ_UPPER),
             Interrupt::RESET => (RESET_READ_LOWER, RESET_READ_UPPER),
             Interrupt::IRQ => (IRQ_READ_LOWER, IRQ_READ_UPPER),
             Interrupt::BRK => (BRK_READ_LOWER, BRK_READ_UPPER),
         };
+        //println!("vector address lo ={lower_addr:04x}, hi = {upper_addr:04x}");
         //println!("BRK5: pending NMI = {}, raised NMI = {}, handler pending = {:?}", self.pending_nmi_detected, self.nmi_raised, self.interrupt_handler_pending);
         let lower = self.read_system_bus(system, lower_addr);
         //println!("BRK6: pending NMI = {}, raised NMI = {}, handler pending = {:?}", self.pending_nmi_detected, self.nmi_raised, self.interrupt_handler_pending);
@@ -654,10 +656,10 @@ impl Cpu {
         }
     }
 
-    /// Checks the status of the edge/level detector during φ1 of a cycle to determine if an
+    /// Checks the status of the edge/level detector during φ1/phi1 (first half) of a cycle to determine if an
     /// interrupt has been detected.
     /// Note: this phase 1 state still needs to be polled before an interrupt will actually be handled
-    pub(in super) fn step_interrupt_detector_phase1(&mut self, system: &System) {
+    fn step_interrupt_detector_phi1(&mut self) {
         if self.pending_nmi_detected {
             // Note this will then stay set until "the NMI has been handled"
             self.nmi_raised = true;
@@ -668,8 +670,13 @@ impl Cpu {
         //println!("phase 1 irq_raised = {}", self.irq_raised);
     }
 
-    /// Checks interrupt lines during phase 2 of a cycle to detect NMI edges or level IRQ inputs
-    pub(in super) fn step_interrupt_detector_phase2(&mut self, system: &System) {
+    /// Handle anything specific to the first half of the clock cycle, aka φ1/phi1
+    pub(in super) fn start_clock_cycle_phi1(&mut self, _system: &System) {
+        self.step_interrupt_detector_phi1();
+    }
+
+    /// Checks interrupt lines during φ2/phi2 (second half) of a cycle to detect NMI edges or level IRQ inputs
+    fn step_interrupt_detector_phi2(&mut self, system: &System) {
         let nmi_level = system.nmi_line();
         if nmi_level == true && self.last_nmi_level == false {
             // Note this will then stay set until "the NMI has been handled"
@@ -680,6 +687,12 @@ impl Cpu {
         self.last_nmi_level = nmi_level;
         self.pending_irq_detected = system.irq_line();
         //println!("phase 2 pending_irq_detected = {}", self.pending_irq_detected);
+    }
+
+    /// Handle anything specific to the second half of the clock cycle, aka φ2/phi2
+    pub(in super) fn end_clock_cycle_phi2(&mut self, system: &mut System) {
+        self.step_interrupt_detector_phi2(system);
+        system.cartridge.step_m2_phi2(self.clock);
     }
 
     pub fn add_break(&mut self, addr: u16, temp: bool) {

@@ -159,7 +159,4 @@ impl Mapper for Mapper31 {
             }
         }
     }
-
-    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::Vertical }
-    fn irq(&self) -> bool { false }
 }

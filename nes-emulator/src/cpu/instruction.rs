@@ -483,7 +483,7 @@ impl Instruction {
 
             0x9b => Instruction { op: Opcode::XAS, mode: AddressingMode::AbsoluteY, cyc: 5 },
 
-            _ => panic!("Invalid inst_code:{:08x}", inst_code),
+            _ => panic!("Invalid inst_code:{:02x}", inst_code),
         }
     }
 
@@ -2142,9 +2142,9 @@ impl Cpu {
             if fixup_delta > 0 {
                 log::warn!("fixup cycles ({}) needed for instruction {:?} @ {inst_pc:04x}", fixup_delta, Instruction { op: opcode, mode, cyc: expected_cyc });
                 for _ in 0..fixup_delta {
-                    self.step_interrupt_detector_phase1(system);
+                    self.start_clock_cycle_phi1(system);
                     system.step_for_cpu_cycle();
-                    self.step_interrupt_detector_phase2(system);
+                    self.end_clock_cycle_phi2(system);
                 }
             }
 

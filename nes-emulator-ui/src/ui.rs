@@ -383,7 +383,9 @@ impl EmulatorUi {
         };
 
         if let Some(ref rom) = args.rom {
-            emulator.open_binary(rom)?;
+            if let Err(err) = emulator.open_binary(rom) {
+                eprintln!("Failed to open ROM {rom}: {err:?}");
+            }
         }
 
         Ok(emulator)

@@ -262,6 +262,8 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
         NameTableMirror::Horizontal
     };
     debug!("iNes: Mirroring {:?}", nametable_mirror);
+    let four_screen_vram = flags6 & 0b1000 != 0;
+    debug!("iNes: Four screen VRAM (Mirroring override): {}", four_screen_vram);
 
     let flags7 = ines[7];
     let _flags8 = ines[8];
@@ -304,7 +306,7 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
         n_chr_rom_pages,
         n_chr_ram_pages,
         nametable_mirror,
-        four_screen_vram: false, // FIXME
+        four_screen_vram,
         has_battery,
         has_chr_ram,
         has_trainer,

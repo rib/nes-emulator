@@ -10,9 +10,12 @@ pub trait Mapper {
     fn ppu_bus_read(&mut self, addr: u16) -> u8;
     fn ppu_bus_peek(&mut self, addr: u16) -> u8;
     fn ppu_bus_write(&mut self, addr: u16, data: u8);
+    fn ppu_bus_nop_io(&mut self, _addr: u16) { }
 
-    fn mirror_mode(&self) -> NameTableMirror;
-    fn irq(&self) -> bool;
+    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::Vertical }
+
+    fn step_m2_phi2(&mut self, _cpu_clock: u64) { }
+    fn irq(&self) -> bool { false }
 }
 
 #[inline]
@@ -83,11 +86,28 @@ pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
     off as usize
 }
 
+/// Determine the minimal mask of bits needed to be able to index
+/// this many ROM pages
+pub fn bank_select_mask(num_rom_pages: u8) -> u8 {
+    if num_rom_pages > 0 {
+        let max_index = num_rom_pages - 1;
+        let l = max_index.leading_zeros();
+        let shift = 8 - l;
+        let mask = ((1u16<<shift)-1) as u8;
+        mask
+    } else {
+        0
+    }
+}
+
 pub mod mapper000;
 pub use mapper000::Mapper0;
 
 pub mod mapper001;
 pub use mapper001::Mapper1;
+
+pub mod mapper002;
+pub use mapper002::Mapper2;
 
 pub mod mapper003;
 pub use mapper003::Mapper3;
@@ -97,5 +117,8 @@ pub use mapper004::Mapper4;
 
 pub mod mapper031;
 pub use mapper031::Mapper31;
+
+pub mod mapper066;
+pub use mapper066::Mapper66;
 
 use crate::prelude::NameTableMirror;

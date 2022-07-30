@@ -222,7 +222,7 @@ impl Mapper for Mapper1 {
                 arr_read!(self.prg_rom, prg_bank_offset + bank_offset)
             }
             _ => {
-                error!("MMC1: unhandled system bus read");
+                error!("MMC1: invalid system bus read");
                 return (0, 0xff)
             }
         };
@@ -245,7 +245,7 @@ impl Mapper for Mapper1 {
                 self.load_register_write(addr, data);
             }
             _ => {
-                trace!("MMC1: unhandled system bus write");
+                trace!("MMC1: invalid system bus write");
             }
         }
     }
@@ -264,7 +264,7 @@ impl Mapper for Mapper1 {
                 arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
             }
             _ => {
-                trace!("MMC1: unhandled PPU bus read");
+                trace!("MMC1: invalid PPU bus read");
                 0
             }
         }
@@ -292,11 +292,10 @@ impl Mapper for Mapper1 {
                 arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }
             _ => {
-                trace!("MMC1: unhandled system bus write");
+                trace!("MMC1: invalid system bus write");
             }
         }
     }
 
     fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
-    fn irq(&self) -> bool { false }
 }
