@@ -5,10 +5,14 @@ authors = ["Robert Bragg <robert@sixbynine.org>", "K <kamiyaowl@gmail.com>"]
 edition = "2021"
 
 [features]
-default = [ "unsafe-opt" ]
+default = [ "unsafe-opt", "nsf-player", "debugger", "ppu-hooks" ]
 unsafe-opt = []
 trace = []
+trace-events = []
+ppu-hooks = []
 sim = []
+nsf-player = []
+debugger = []
 
 [lib]
 path = "src/lib.rs"
@@ -21,6 +25,8 @@ bindgen = "0.60"
 log = "0.4"
 bytemuck = "1.9"
 bitflags = "1"
+bitvec = "1.0.1"
+select-rustc = "0.1.2"
 anyhow = "1"
 
 [dev-dependencies]

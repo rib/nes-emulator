@@ -10,6 +10,7 @@ const DUTY_MAP: [[u8; 8]; 4] = [
     [1, 0, 0, 1, 1, 1, 1, 1], // 25% negated
 ];
 
+#[derive(Clone, Default)]
 pub struct SquareChannel {
 
     // We don't currently encapsulate the sweep state since it interacts
@@ -38,7 +39,12 @@ pub struct SquareChannel {
 impl SquareChannel {
     pub fn new(twos_compliment_sweep_negate: bool) -> Self {
 
-        SquareChannel {
+        Self {
+            twos_compliment_sweep_negate,
+            volume_envelope: VolumeEnvelope::new(),
+            length_counter: LengthCounter::new(),
+            ..Default::default()
+            /*
             sweep_enabled: false,
             sweep_negate: false,
             sweep_shift: 0,
@@ -53,11 +59,14 @@ impl SquareChannel {
 
             duty: 0,
             duty_offset: 0,
-            volume_envelope: VolumeEnvelope::new(),
-            length_counter: LengthCounter::new(),
 
             output: 0,
+            */
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        *self = Self::new(self.twos_compliment_sweep_negate);
     }
 
     /// "Two conditions cause the sweep unit to mute the channel:

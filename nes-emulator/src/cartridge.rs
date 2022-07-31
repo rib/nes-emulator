@@ -5,6 +5,7 @@ use log::{error, debug, trace};
 use anyhow::anyhow;
 use anyhow::Result;
 
+use crate::binary::NesBinaryConfig;
 use crate::binary::{self, NsfConfig, INesConfig};
 use crate::mappers::*;
 
@@ -13,15 +14,15 @@ pub const fn page_offset(page_no: usize, page_size: usize) -> usize {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum TVSystem {
+pub enum TVSystemCompatibility {
     Ntsc,
     Pal,
     Dual,
     Unknown
 }
-impl Default for TVSystem {
+impl Default for TVSystemCompatibility {
     fn default() -> Self {
-        TVSystem::Ntsc
+        TVSystemCompatibility::Ntsc
     }
 }
 
@@ -54,11 +55,20 @@ impl Default for NameTableMirror {
 }
 
 pub struct Cartridge {
+    pub config: NesBinaryConfig,
     pub mapper: Box<dyn Mapper>,
 }
 impl Clone for Cartridge {
     fn clone(&self) -> Self {
-        Self { mapper: self.mapper.clone_mapper() }
+        Self {
+            config: self.config.clone(),
+            mapper: self.mapper.clone_mapper()
+        }
+    }
+}
+impl Default for Cartridge {
+    fn default() -> Self {
+        Cartridge::none()
     }
 }
 
@@ -77,6 +87,7 @@ impl Cartridge {
 
         let mapper = Box::new(Mapper31::new(&config, &nsf[128..(prg_len as usize)]));
         Ok(Cartridge{
+            config: NesBinaryConfig::Nsf(config.clone()),
             mapper,
         })
     }
@@ -140,13 +151,46 @@ impl Cartridge {
         }
 
         Ok(Cartridge {
+            config: NesBinaryConfig::INes(config.clone()),
             mapper,
         })
     }
 
+    pub fn from_binary(binary: &[u8]) -> Result<Cartridge> {
+        match binary::parse_any_header(binary)? {
+            NesBinaryConfig::INes(ines_config) => {
+                Ok(Cartridge::from_ines_binary(&ines_config, binary)?)
+            }
+            NesBinaryConfig::Nsf(nsf_config) => {
+                Ok(Cartridge::from_nsf_binary(&nsf_config, binary)?)
+            }
+            NesBinaryConfig::None => {
+                Err(anyhow!("Unknown binary format"))?
+            },
+        }
+    }
+
     pub fn none() -> Cartridge {
         Cartridge {
+            config: NesBinaryConfig::None,
             mapper: Box::new(NoCartridge),
+        }
+    }
+
+    pub(crate) fn power_cycle(&mut self) {
+        self.mapper.power_cycle();
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.mapper.reset();
+    }
+
+    /// What TV system is the cartridge built for
+    pub fn tv_system(&self) -> TVSystemCompatibility {
+        match &self.config {
+            NesBinaryConfig::INes(ines_config) => ines_config.tv_system,
+            NesBinaryConfig::Nsf(nsf_config) => nsf_config.tv_system,
+            NesBinaryConfig::None => TVSystemCompatibility::Ntsc
         }
     }
 

@@ -30,8 +30,8 @@ fn build_ppu_sim() {
     ];
 
 
-    let cwd = std::env::current_dir().unwrap();
-    println!("current dir = {}", std::env::current_dir().unwrap().display());
+    //let cwd = std::env::current_dir().unwrap();
+    //println!("current dir = {}", std::env::current_dir().unwrap().display());
     let mut build = cc::Build::new();
     build.include("breaknes/Common/BaseLogicLib");
     build.include("breaknes/BreaksPPU/PPUSim");

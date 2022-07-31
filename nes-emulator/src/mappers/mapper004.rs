@@ -4,7 +4,7 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
-use crate::prelude::NameTableMirror;
+use crate::cartridge::NameTableMirror;
 
 use super::mirror_vram_address;
 
@@ -64,8 +64,6 @@ pub struct Mapper4 {
     a12_low_clock: Option<u64>,
 
     irq_raised: bool,
-
-    debug: u64,
 }
 
 impl Mapper4 {
@@ -81,8 +79,8 @@ impl Mapper4 {
         // An appropriate iNes config should mean code will never try to access
         // non-existent pages, but just in case we count the number of pages we
         // have and will wrap out-of-bounds page selections.
-        let n_prg_pages = usize::min(64, (prg_rom.len() / PAGE_SIZE_8K));
-        let n_chr_pages = usize::min(256, (chr_data.len() / PAGE_SIZE_1K));
+        let n_prg_pages = usize::min(64, prg_rom.len() / PAGE_SIZE_8K);
+        let n_chr_pages = usize::min(256, chr_data.len() / PAGE_SIZE_1K);
 
         let mut mapper = Self {
             vram_mirror: if config.four_screen_vram { NameTableMirror::FourScreen } else { config.nametable_mirror },
@@ -111,8 +109,6 @@ impl Mapper4 {
             ppu_bus_address: 0,
             a12_low_clock: None,
             irq_raised: false,
-
-            debug: 0,
         };
 
         mapper.update_prg_banks();
@@ -225,8 +221,6 @@ impl Mapper4 {
 }
 
 impl Mapper for Mapper4 {
-    fn reset(&mut self) {}
-
     fn clone_mapper(&self) -> Box<dyn Mapper> {
         Box::new(self.clone())
     }

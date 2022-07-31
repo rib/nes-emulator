@@ -1,5 +1,8 @@
+use crate::cartridge::NameTableMirror;
+
 pub trait Mapper {
-    fn reset(&mut self);
+    fn reset(&mut self) {}
+    fn power_cycle(&mut self) { self.reset() }
     fn clone_mapper(&self) -> Box<dyn Mapper>;
 
     // Returns (value, undefined_bits)
@@ -22,7 +25,7 @@ pub trait Mapper {
 pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
     debug_assert!(addr >= 0x2000 && addr < 0x4000);
 
-    let save = addr;
+    //let save = addr;
 
     // NB: each Nametable (+attribute table) = 1024 bytes: 960 + 64
     //
@@ -123,5 +126,3 @@ pub use mapper031::Mapper31;
 
 pub mod mapper066;
 pub use mapper066::Mapper66;
-
-use crate::prelude::NameTableMirror;

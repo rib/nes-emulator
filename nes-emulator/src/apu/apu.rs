@@ -1,14 +1,16 @@
 use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
 use crate::apu::channel::square_channel::SquareChannel;
-use crate::system::DmcDmaRequest;
+use crate::system::{DmcDmaRequest, Model};
 use super::channel::triangle_channel::TriangleChannel;
 use super::channel::noise_channel::NoiseChannel;
 use super::channel::dmc_channel::DmcChannel;
 use crate::apu::mixer::Mixer;
 
 
+#[derive(Clone, Default)]
 pub struct Apu {
     pub clock: u64,
+    pub sample_rate: u32,
     pub sample_buffer: Vec<f32>,
     frame_sequencer: FrameSequencer,
     square_channel1: SquareChannel,
@@ -16,27 +18,46 @@ pub struct Apu {
     triangle_channel: TriangleChannel,
     noise_channel: NoiseChannel,
     pub dmc_channel: DmcChannel,
-    mixer: Mixer,
+    pub mixer: Mixer,
     output_timer: u16,
     output_step: u16,
 }
 
 impl Apu {
-    pub fn new(cpu_clock_hz: u32, sample_rate: u32) -> Self {
+    pub fn new(nes_model: Model, sample_rate: u32) -> Self {
+        let cpu_clock_hz = nes_model.cpu_clock_hz();
         let output_step = (cpu_clock_hz / sample_rate) as u16;
         Apu {
-            clock: 0,
-            sample_buffer: vec![],
+            sample_rate,
+            output_step,
             frame_sequencer: FrameSequencer::new(),
             square_channel1: SquareChannel::new(false),
             square_channel2: SquareChannel::new(true /* two's compliment sweep negate */),
             triangle_channel: TriangleChannel::new(),
             noise_channel: NoiseChannel::new(),
-            dmc_channel: DmcChannel::new(),
+            dmc_channel: DmcChannel::new(nes_model),
             mixer: Mixer::new(),
+            ..Default::default()
+            /*
+            clock: 0,
+            sample_buffer: vec![],
             output_timer: 0,
-            output_step,
+            */
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        self.clock = 0;
+        self.sample_buffer.clear();
+        self.frame_sequencer.power_cycle();
+        self.square_channel1.power_cycle();
+        self.square_channel2.power_cycle();
+        self.triangle_channel.power_cycle();
+        self.noise_channel.power_cycle();
+        self.dmc_channel.power_cycle();
+        self.mixer.power_cycle();
+        self.output_timer = 0;
+        // Keep output_step
     }
 
     pub fn reset(&mut self)

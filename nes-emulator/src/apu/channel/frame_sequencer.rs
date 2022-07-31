@@ -7,11 +7,14 @@ pub enum FrameSequencerStatus {
     HalfFrame,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum FrameSequencerMode {
+    #[default]
     FourStep,
     FiveStep
 }
 
+#[derive(Clone, Default)]
 pub struct FrameSequencer {
     clock: u16,
     queue_clock_reset: bool, // Can only reset clock on an even cycle
@@ -26,7 +29,12 @@ pub struct FrameSequencer {
 
 impl FrameSequencer {
     pub fn new() -> Self {
-        FrameSequencer {
+        Self {
+            interrupt_enable: true,
+            ..Default::default()
+
+
+            /*
             clock: 0,
             queue_clock_reset: false,
             mode: FrameSequencerMode::FourStep,
@@ -34,9 +42,14 @@ impl FrameSequencer {
             interrupt_flagged: false,
             pending_register_write: None,
             pending_register_write_delay: None,
+            */
 
             //pending_4017_write_clock: false,
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        *self = Self::new();
     }
 
     pub fn write_register(&mut self, value: u8) {

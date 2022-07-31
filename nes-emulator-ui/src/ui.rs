@@ -1,64 +1,116 @@
-// There's some kind of compiler bug going on, causing a crazy amount of false
-// positives atm :(
-#![allow(dead_code)]
+use std::{collections::{VecDeque}, fmt::Debug, time::{Instant, Duration}, path::{Path, PathBuf}, fs::File, io::{BufWriter}, num::NonZeroUsize, rc::Rc, cell::RefCell, sync::mpsc};
+use std::io::Write;
 
-use std::{collections::{HashSet, HashMap, VecDeque}, fmt::Debug, time::{Instant, Duration}, path::{Path, PathBuf}, fs::File, io::Read, num::NonZeroUsize, u16::MAX};
+use log::{error, debug};
 
-use egui::{
-    Rect, Pos2, Vec2, pos2, vec2, Shape, Image
-};
-use egui_extras::Table;
-use log::{error, warn, info, debug, trace};
-use clap::Parser;
-
-use anyhow::anyhow;
 use anyhow::Result;
 
-use winit::event::{Event, WindowEvent, VirtualKeyCode};
+use winit::{event::{WindowEvent, VirtualKeyCode, ModifiersState}, event_loop::EventLoopProxy};
 
-use egui::{self, RichText, Color32, Ui, ImageData, TextureHandle, Frame, style::Margin};
+use egui::{self, RichText, Color32, Ui, ImageData, TextureHandle};
 use egui::{ColorImage, epaint::ImageDelta};
 
-use cpal::SampleRate;
 use cpal::traits::StreamTrait;
 use cpal::{traits::{HostTrait, DeviceTrait}, OutputCallbackInfo, SampleFormat, Sample};
 
 use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
 
-use nes_emulator::prelude::*;
+use nes_emulator::{nes::*, system::Model, port::ControllerButton, hook::HookHandle, cpu::cpu::BreakpointHandle};
+use nes_emulator::framebuffer::*;
 
+use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView}};
 
-const PPU_EVENTS_FB_WIDTH: usize = 341;
-const PPU_EVENTS_FB_HEIGHT: usize = 262;
-
+const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
 pub enum Status {
     Ok,
     Quit
 }
 
+const NOTICE_TIMEOUT_SECS: u8 = 7;
 struct Notice {
     level: log::Level,
     text: String,
     timestamp: Instant
 }
 
-const NOTICE_TIMEOUT_SECS: u64 = 7;
 
-fn get_file_as_byte_vec(filename: impl AsRef<Path>) -> Vec<u8> {
-    //println!("Loading {}", filename);
-    let mut f = File::open(&filename).expect("no file found");
-    let metadata = std::fs::metadata(&filename).expect("unable to read metadata");
-    let mut buffer = vec![0; metadata.len() as usize];
-    f.read(&mut buffer).expect("buffer overflow");
-
-    buffer
+/// Each debug view / tool is fairly self-contained and although they can directly inspect
+/// and modify the Nes they don't have arbitrary control over the rest of the EmulatorUi
+/// and instead need to send the top-level UI requests
+#[derive(Debug)]
+pub enum ViewRequest {
+    ShowUserNotice(log::Level, String),
+    RunMacro(Macro),
+    LoadRom(String),
 }
 
-fn epoch_timestamp() -> u64 {
-    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(n) => n.as_secs(),
-        Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+#[derive(Clone)]
+pub struct ViewRequestSender {
+    tx: mpsc::Sender<ViewRequest>,
+    proxy: EventLoopProxy<crate::ui_winit::Event>
+}
+
+impl ViewRequestSender {
+    pub fn send(&self, req: ViewRequest) {
+        let _ = self.tx.send(req);
+        let _ = self.proxy.send_event(crate::ui_winit::Event::RequestRedraw);
+    }
+}
+
+fn load_nes(path: Option<impl AsRef<Path>>, rom_dirs: &Vec<PathBuf>, audio_sample_rate: u32, start_timestamp: Instant, notices: &mut VecDeque<Notice>) -> (Nes, Option<PathBuf>) {
+    if let Some(path) = path {
+        if let Some(ref path) = utils::find_rom(path, rom_dirs) {
+            match utils::create_nes_from_binary(path, audio_sample_rate, start_timestamp) {
+                Ok(nes) => return (nes, Some(path.clone())),
+                Err(err) => {
+                    notices.push_back(Notice { level: log::Level::Error, text: format!("{}", err), timestamp: Instant::now() });
+                }
+            }
+        }
+    }
+    (Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp), None)
+}
+
+pub fn blank_texture_for_framebuffer(ctx: &egui::Context, info: &impl FramebufferInfo, name: impl Into<String>) -> TextureHandle {
+    let blank = ColorImage {
+        size: [info.width(), info.height()],
+        pixels: vec![Color32::default(); info.width() * info.height()],
+    };
+    let blank = ImageData::Color(blank);
+    ctx.load_texture(name, blank, egui::TextureFilter::Nearest)
+}
+
+pub fn full_framebuffer_image_delta(fb: &FramebufferDataRental) -> ImageDelta {
+    let owner = &fb.owner();
+    let width = owner.width();
+    let height = owner.height();
+
+    match owner.format() {
+        PixelFormat::RGBA8888 => {
+            ImageDelta::full(ImageData::Color(ColorImage {
+                size: [width, height],
+                pixels: fb.data.chunks_exact(4)
+                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
+                    .collect(),
+            }), egui::TextureFilter::Nearest)
+        }
+        PixelFormat::RGB888 => {
+            ImageDelta::full(ImageData::Color(ColorImage {
+                size: [width, height],
+                pixels: fb.data.chunks_exact(3)
+                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 0xff))
+                    .collect(),
+            }), egui::TextureFilter::Nearest)
+        }
+        PixelFormat::GREY8 => {
+            ImageDelta::full(ImageData::Color(ColorImage {
+                size: [width, height],
+                pixels: fb.data.iter()
+                    .map(|p| Color32::from_rgba_premultiplied(*p, *p, *p, 0xff))
+                    .collect(),
+            }), egui::TextureFilter::Nearest)
+        }
     }
 }
 
@@ -108,7 +160,7 @@ where
 
 const DEBUG_CLOCK_DIV: usize = 1;
 
-fn read_audio_samples<T: Sample + Send + Debug>(rx: &mut RingReceiver<f32>, sampler_state: &mut EmulatorAudioState<T>, nchannels: usize, output: &mut [T], info: &OutputCallbackInfo) {
+fn read_audio_samples<T: Sample + Send + Debug>(rx: &mut RingReceiver<f32>, sampler_state: &mut EmulatorAudioState<T>, nchannels: usize, output: &mut [T], _info: &OutputCallbackInfo) {
     for frame in output.chunks_mut(nchannels * DEBUG_CLOCK_DIV as usize) {
         let value: T = match rx.try_recv() {
             Err(TryRecvError::Empty) => {
@@ -142,7 +194,7 @@ fn make_audio_stream<T: Sample + Send + Debug + 'static>(
                         config: &cpal::StreamConfig,
                         mut rx: RingReceiver<f32>) -> Result<cpal::Stream, anyhow::Error>
 {
-    let mut debug_options = SampleRequestOptions {
+    let mut _debug_options = SampleRequestOptions {
         sample_rate: config.sample_rate.0 as f32,
         sample_clock: 0f32,
         nchannels: config.channels as usize
@@ -162,23 +214,10 @@ fn make_audio_stream<T: Sample + Send + Debug + 'static>(
         })?)
 }
 
-#[derive(PartialEq, Eq)]
-enum AddressSpace {
-    System,
-    Ppu,
-    Oam,
-}
-impl Debug for AddressSpace {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::System => write!(f, "System Bus"),
-            Self::Ppu => write!(f, "PPU Bus"),
-            Self::Oam => write!(f, "OAM Memory"),
-        }
-    }
-}
 pub struct EmulatorUi {
     real_time: bool,
+
+    modifiers: ModifiersState,
 
     notices: VecDeque<Notice>,
 
@@ -188,75 +227,56 @@ pub struct EmulatorUi {
     audio_tx: RingSender<f32>,
     audio_stream: cpal::Stream,
 
+    player: Option<MacroPlayer>,
+    shared_crc32: Rc<RefCell<u32>>,
+    crc_hook_handle: Option<HookHandle>,
+
+    rom_dirs: Vec<PathBuf>,
+
     nes: Nes,
+    loaded_rom: Option<PathBuf>,
+
+    trace_writer: Option<Rc<RefCell<BufWriter<File>>>>,
 
     pub paused: bool,
-    single_step: bool,
+
+    /// The address of any temporary debugger breakpoint (for handling things
+    /// like 'step over' or 'step out') which should be removed whenever
+    /// the debugger next stops
+    temp_debug_breakpoint: Option<BreakpointHandle>,
 
     fb_width: usize,
     fb_height: usize,
-    //framebuffers: [Framebuffer; 2],
-    //front_framebuffer: usize,
-    //back_framebuffer: usize,
     front_framebuffer: Framebuffer,
     framebuffer_texture: TextureHandle,
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
 
+    #[cfg(feature="macro-builder")]
+    macro_builder_view: MacroBuilderView,
 
-    show_nametables: bool,
-    nametables_framebuffer: Vec<u8>,
-    nametables_texture: TextureHandle,
-    // Pixel coordinate within four namespace regions
-    nametables_hover_pos: [usize; 2],
-    nametables_show_scroll: bool,
-    queue_nametable_fb_upload: bool,
+    nametables_view: NametablesView,
+    sprites_view: SpritesView,
+    mem_view: MemView,
+    trace_events_view: TraceEventsView,
 
-    show_memview: bool,
-    memview_selected_space: AddressSpace,
+    view_requests_rx: mpsc::Receiver<ViewRequest>,
+    view_request_sender: ViewRequestSender,
 
-    show_ppu_events: bool,
-    ppu_events_framebuffer: Vec<u8>,
-    ppu_events_texture: TextureHandle,
-    // Pixel coordinate within four namespace regions
-    ppu_events_hover_pos: [usize; 2],
-    queue_ppu_events_fb_upload: bool,
+    stats: BenchmarkState,
 
-    frame_no: u32, // emulated frames (not drawn frames)
-
-    stats_update_period: Duration,
-    last_stats_update_timestamp: Instant,
-    last_stats_update_frame_no: u32,
-    last_stats_update_cpu_clock: u64,
-
-    profiled_last_clocks_per_second: u32, // Measured from last update()
-    profiled_aggregate_clocks_per_second: u32, // Measure over stats update period
-
-    profiled_last_fps: f32, // Extrapolated from last frame duration
-    profiled_aggregate_fps: f32, // Measured over stats update period
-
-    tmp_row_values: Vec<u8>,
-}
-
-#[derive(Parser, Debug)]
-#[clap(version, about, long_about = None)]
-pub struct Args {
-    rom: Option<String>,
-
-    #[clap(short='t', long="trace", help="Record a trace of CPU instructions executed")]
-    trace: Option<String>,
-
-    #[clap(short='r', long="relative-time", help="Step emulator by relative time intervals, not necessarily keeping up with real time")]
-    relative_time: Option<bool>,
 }
 
 impl EmulatorUi {
 
-    pub fn new(args: &Args, ctx: &egui::Context) -> Result<Self> {
+    pub fn new(args: &Args, ctx: &egui::Context, event_loop_proxy: EventLoopProxy<crate::ui_winit::Event>) -> Result<Self> {
+
+        let mut notices = VecDeque::new();
+
         let audio_host = cpal::default_host();
         let audio_device = audio_host
             .default_output_device()
-            .expect("failed to find output device");
+            .expect("failed to find audio output device");
         let audio_config = audio_device.default_output_config().unwrap();
         let audio_sample_rate = audio_config.sample_rate().0;
         debug!("Audio sample rate = {}", audio_sample_rate);
@@ -275,10 +295,15 @@ impl EmulatorUi {
             SampleFormat::U16 => make_audio_stream::<u16>(&audio_device, &audio_config.into(), rx),
         }.unwrap();
 
-        let mut nes = Nes::new(audio_sample_rate);
+        let rom_dirs = utils::canonicalize_rom_dirs(&args.rom_dir);
+        let rom_path = match &args.rom {
+            Some(rom) => utils::find_rom(rom, &rom_dirs),
+            None => None
+        };
+        let (mut nes, loaded_rom) = load_nes(rom_path.as_ref(), &rom_dirs, audio_sample_rate, Instant::now(), &mut notices);
 
         let back_framebuffer = nes.allocate_framebuffer();
-        let front_framebuffer = nes.system_ppu().swap_framebuffer(back_framebuffer).unwrap();
+        let front_framebuffer = nes.ppu_mut().swap_framebuffer(back_framebuffer).unwrap();
         //let framebuffer1 = nes.allocate_framebuffer();
         let fb_width = front_framebuffer.width();
         let fb_height = front_framebuffer.height();
@@ -294,40 +319,20 @@ impl EmulatorUi {
             tex
         };
 
-        let nametables_fb_bpp = 3;
-        let nametables_fb_stride = fb_width * 2 * nametables_fb_bpp;
-        let nametables_framebuffer = vec![0u8; nametables_fb_stride * fb_height * 2];
-        let nametables_texture = {
-            //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
-            let blank = ColorImage {
-                size: [(fb_width * 2) as _, (fb_height * 2) as _],
-                pixels: vec![Color32::default(); fb_width * 2 * fb_height * 2],
-            };
-            let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture("nametables_framebuffer", blank, egui::TextureFilter::Nearest);
-            tex
-        };
+        let stats = BenchmarkState::new(&nes, Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64));
 
-        let ppu_events_fb_bpp = 3;
-
-        let ppu_events_fb_stride = PPU_EVENTS_FB_WIDTH * ppu_events_fb_bpp;
-        let ppu_events_framebuffer = vec![0u8; ppu_events_fb_stride * PPU_EVENTS_FB_HEIGHT];
-        let ppu_events_texture = {
-            //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
-            let blank = ColorImage {
-                size: [PPU_EVENTS_FB_WIDTH as _, PPU_EVENTS_FB_HEIGHT as _],
-                pixels: vec![Color32::default(); PPU_EVENTS_FB_WIDTH * PPU_EVENTS_FB_HEIGHT],
-            };
-            let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture("ppu_events_framebuffer", blank, egui::TextureFilter::Nearest);
-            tex
-        };
         let now = Instant::now();
 
-        let mut emulator = Self {
-            real_time: !args.relative_time.unwrap_or(false),
+        let (tx, rx) = mpsc::channel();
+        let view_request_sender = ViewRequestSender {
+            tx,
+            proxy: event_loop_proxy
+        };
 
-            notices: Default::default(),
+        let mut emulator = Self {
+            real_time: !args.relative_time,
+            modifiers: Default::default(),
+            notices,
             audio_device,
             audio_sample_rate,
             //audio_config,
@@ -335,6 +340,15 @@ impl EmulatorUi {
             audio_stream,
 
             nes,
+
+            player: None,
+            crc_hook_handle: None,
+            shared_crc32: Rc::new(RefCell::new(0)),
+
+            trace_writer: None,
+
+            paused: false,
+            temp_debug_breakpoint: None,
 
             fb_width,
             fb_height,
@@ -346,78 +360,98 @@ impl EmulatorUi {
             queue_framebuffer_upload: false,
             last_frame_time: now,
 
-            show_nametables: false,
-            nametables_framebuffer,
-            nametables_texture,
-            queue_nametable_fb_upload: false,
+            #[cfg(feature="macro-builder")]
+            macro_builder_view: MacroBuilderView::new(ctx, args, rom_dirs.clone(), loaded_rom.clone(), view_request_sender.clone(), false),
+            nametables_view: NametablesView::new(ctx),
+            sprites_view: SpritesView::new(ctx),
+            mem_view: MemView::new(),
 
-            nametables_show_scroll: true,
-            nametables_hover_pos: [0, 0],
+            view_request_sender,
+            view_requests_rx: rx,
 
-            show_memview: false,
-            memview_selected_space: AddressSpace::Oam,
+            trace_events_view: TraceEventsView::new(ctx),
 
-            paused: false,
-            single_step: false,
+            rom_dirs,
+            loaded_rom,
 
-            frame_no: 0,
-
-            stats_update_period: Duration::from_secs(5),
-            last_stats_update_timestamp: now,
-            last_stats_update_frame_no: 0,
-            last_stats_update_cpu_clock: 0,
-
-            profiled_last_clocks_per_second: 0,
-            profiled_aggregate_clocks_per_second: 0,
-
-            profiled_last_fps: 0.0,
-            profiled_aggregate_fps: 0.0,
-
-            tmp_row_values: vec![],
-
-            show_ppu_events: false,
-            ppu_events_framebuffer,
-            ppu_events_texture,
-            ppu_events_hover_pos: [0, 0],
-            queue_ppu_events_fb_upload: false,
+            stats,
         };
 
-        if let Some(ref rom) = args.rom {
-            if let Err(err) = emulator.open_binary(rom) {
-                eprintln!("Failed to open ROM {rom}: {err:?}");
-            }
+        if let Some(trace) = &args.trace {
+            let f = File::create(trace)?;
+            let writer = Rc::new(RefCell::new(BufWriter::new(f)));
+            emulator.trace_writer = Some(writer.clone());
+            emulator.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
+                    log::error!("Failed to write to CPU trace: {err}");
+                }
+            }));
         }
+
+        //emulator.recreate_test_builder_on_load(ctx);
+        emulator.power_on_new_nes();
 
         Ok(emulator)
     }
 
-    pub fn open_binary(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let rom = get_file_as_byte_vec(path);
-
-        self.nes = Nes::new(self.audio_sample_rate);
-        self.nes.open_binary(&rom)?;
+    fn power_on_new_nes(&mut self) {
+        self.stats = BenchmarkState::new(&self.nes, Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64));
 
         let start_timestamp = std::time::Instant::now();
-        self.nes.poweron(start_timestamp);
-        self.audio_stream.play()?;
+        self.nes.power_cycle(start_timestamp);
+        if let Err(err) = self.audio_stream.play() {
+            self.notices.push_back(Notice { level: log::Level::Error, text: format!("Couldn't start audio stream: {:#?}", err), timestamp: Instant::now() });
+        }
 
-        Ok(())
+        #[cfg(feature="macro-builder")]
+        self.macro_builder_view.power_on_new_nes_hook(&mut self.nes, self.loaded_rom.as_ref());
     }
 
-    fn open_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
+    /*
+    fn recreate_test_builder_on_load(&mut self, ctx: &egui::Context) {
+        #[cfg(feature="macro-builder")]
+        {
+            if let Some(loaded_rom) = &self.loaded_rom {
+                self.macro_builder_view = Some(MacroBuilderView::new(ctx, loaded_rom.to_string(), self.view_request_sender.clone(), self.paused))
+            }
+        }
+    }
+    */
+
+    pub fn open_binary(&mut self, path: impl AsRef<Path>) {
+        self.disconnect_nes();
+        let (nes, loaded_rom) = load_nes(Some(path.as_ref().clone()), &self.rom_dirs, self.audio_sample_rate, Instant::now(), &mut self.notices);
+        self.nes = nes;
+        self.loaded_rom = loaded_rom;
+
+        self.power_on_new_nes();
+    }
+
+    pub fn disconnect_nes(&mut self) {
+        if let Some(handle) = self.crc_hook_handle {
+            self.nes.ppu_mut().remove_mux_hook(handle);
+            self.crc_hook_handle = None;
+        }
+
+        #[cfg(feature="macro-builder")]
+        self.macro_builder_view.disconnect_nes(&mut self.nes);
+    }
+
+    pub(crate) fn pick_rom_dialog() -> Option<PathBuf> {
+        rfd::FileDialog::new()
             .add_filter("nes", &["nes"])
             .add_filter("nsf", &["nsf"])
             .pick_file()
-        {
-            if let Err(er) = self.open_binary(path) {
+    }
 
-            }
+    fn open_dialog(&mut self, _ctx: &egui::Context) {
+        if let Some(path) = EmulatorUi::pick_rom_dialog() {
+            self.open_binary(path);
         }
     }
 
     fn save_image(&mut self) {
-        let mut front = self.front_buffer();
+        let front = self.front_buffer();
         if let Some(rental) = front.rent_data() {
             let fb_width = front.width();
             let fb_height = front.height();
@@ -435,7 +469,7 @@ impl EmulatorUi {
                 *pixel = image::Rgb([r, g, b]);
             }
             println!("Saving debug image");
-            imgbuf.save(format!("nes-emulator-frame-{}.png", epoch_timestamp())).unwrap();
+            imgbuf.save(format!("nes-emulator-frame-{}.png", utils::epoch_timestamp())).unwrap();
         }
     }
 
@@ -443,7 +477,7 @@ impl EmulatorUi {
 
         while self.notices.len() > 0 {
             let ts = self.notices.front().unwrap().timestamp;
-            if Instant::now() - ts > Duration::from_secs(NOTICE_TIMEOUT_SECS) {
+            if Instant::now() - ts > Duration::from_secs(NOTICE_TIMEOUT_SECS as u64) {
                 self.notices.pop_front();
             } else {
                 break;
@@ -465,146 +499,162 @@ impl EmulatorUi {
         }
     }
 
-
-    fn real_time_emulation_speed(&self) -> f32 {
-        self.profiled_last_clocks_per_second as f32 / self.nes.cpu_clock_hz() as f32
-    }
-    fn aggregated_emulation_speed(&self) -> f32 {
-        self.profiled_aggregate_clocks_per_second as f32 / self.nes.cpu_clock_hz() as f32
-    }
-
-    pub fn estimated_cpu_clocks_for_duration(&self, duration: Duration) -> u64 {
-        if self.profiled_last_clocks_per_second > 0 {
-            (self.profiled_last_clocks_per_second as f64 * duration.as_secs_f64()) as u64
-        } else {
-            (self.nes.cpu_clock_hz() as f64 * duration.as_secs_f64()) as u64
-        }
-    }
-    pub fn estimate_duration_for_cpu_clocks(&self, cpu_clocks: u64) -> Duration {
-        if self.profiled_last_clocks_per_second > 0 {
-            Duration::from_secs_f64(cpu_clocks as f64 / self.profiled_last_clocks_per_second as f64)
-        } else {
-            Duration::from_secs_f64(cpu_clocks as f64 / self.nes.cpu_clock_hz() as f64)
-        }
-    }
-
-    pub fn update_nametable_framebuffer(&mut self) {
-        let fb_width = self.front_buffer().width();
-        let fb_height = self.front_buffer().height();
-        let bpp = 3;
-        let stride = fb_width * 2 * bpp;
-        for y in 0..(fb_height * 2) {
-            for x in 0..(fb_width * 2) {
-                let pix = self.nes.debug_sample_nametable(x, y);
-                let pos = y * stride + x * bpp;
-                self.nametables_framebuffer[pos + 0] = pix[0];
-                self.nametables_framebuffer[pos + 1] = pix[1];
-                self.nametables_framebuffer[pos + 2] = pix[2];
-            }
-        }
-
-        self.queue_nametable_fb_upload = true;
-    }
-
     pub fn update(&mut self) {
 
-        if self.paused == false || self.single_step == true {
+        match self.view_requests_rx.try_recv() {
+            Ok(req) => {
+                println!("Got view request: {req:?}");
+                match req {
+                    ViewRequest::ShowUserNotice(level, text) => {
+                        self.notices.push_back(Notice { level, text, timestamp: Instant::now() });
+                    }
+                    ViewRequest::RunMacro(recording) => {
+                        if let Some(rom) = utils::find_rom(&recording.rom, &self.rom_dirs) {
+                            self.open_binary(rom);
+
+                            if self.crc_hook_handle.is_none() {
+                                self.crc_hook_handle = Some(macros::register_frame_crc_hasher(&mut self.nes, self.shared_crc32.clone()));
+                            }
+                            self.player = Some(MacroPlayer::new(recording, &mut self.nes, self.shared_crc32.clone()));
+
+                            self.set_paused(false);
+                            if let Some(player) = &mut self.player {
+
+                                // TODO: have a generic way of notifying all views
+                                #[cfg(feature="macro-builder")]
+                                self.macro_builder_view.started_playback(&mut self.nes, player);
+
+                                player.update(&mut self.nes);
+
+                                // TODO: have a generic way of notifying all views
+                                #[cfg(feature="macro-builder")]
+                                self.macro_builder_view.playback_update(&mut self.nes, &player);
+                            }
+                        } else {
+                            self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
+                        }
+                    }
+                    ViewRequest::LoadRom(path) => {
+                        if let Some(rom) = utils::find_rom(path, &self.rom_dirs) {
+                            self.open_binary(rom);
+                            self.set_paused(false);
+
+                            // TODO: have a generic way of notifying all views
+                            #[cfg(feature="macro-builder")]
+                            self.macro_builder_view.load_rom_request_finished(true);
+                        } else {
+                            self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
+
+                            // TODO: have a generic way of notifying all views
+                            #[cfg(feature="macro-builder")]
+                            self.macro_builder_view.load_rom_request_finished(false);
+                        }
+                    }
+                }
+            },
+            Err(_) => {}
+        }
+
+        if self.paused == false {
             let update_limit = Duration::from_micros(1_000_000 / 30); // We want to render at at-least 30fps even if emulation is running slow
 
             let update_start = Instant::now();
-            let update_start_clock = self.nes.cpu_clock();
+            self.stats.start_update(&self.nes, update_start);
 
             let target = if self.real_time {
-                let ideal_target = self.nes.cpu_clocks_for_time_since_poweron(update_start);
-                if self.estimate_duration_for_cpu_clocks(ideal_target - self.nes.cpu_clock()) < update_limit {
+                let ideal_target = self.nes.cpu_clocks_for_time_since_power_cycle(update_start);
+                if self.stats.estimate_duration_for_cpu_clocks(ideal_target - self.nes.cpu_clock()) < update_limit {
                     // The happy path: we are emulating in real-time and we are keeping up
 
                     // TODO: if we are consistently vblank synchronized and not missing frames then we
                     // should aim to accurately snap+align update intervals with the vblank interval (even
                     // if that might technically have a small time skew compared to the original hardware
                     // with 60hz vs 59.94hz)
-                    ProgressTarget::Clock(self.nes.cpu_clocks_for_time_since_poweron(update_start))
+                    ProgressTarget::Clock(self.nes.cpu_clocks_for_time_since_power_cycle(update_start))
                 } else {
                     // We are _trying_ to emulate in real-time but not keeping up, so we limit
                     // how much we try and progress based on the emulation performance we have
                     // observed.
-                    let ideal_target = self.nes.cpu_clocks_for_time_since_poweron(update_start);
-                    let limit_step_target = self.nes.cpu_clock() + self.estimated_cpu_clocks_for_duration(update_limit);
+                    let ideal_target = self.nes.cpu_clocks_for_time_since_power_cycle(update_start);
+                    let limit_step_target = self.nes.cpu_clock() + self.stats.estimated_cpu_clocks_for_duration(update_limit);
                     let target = limit_step_target.min(ideal_target);
                     ProgressTarget::Clock(target)
                 }
             } else {
                 // Non-real-time emulation: we progress the emulator forwards based on
                 // the limit duration and based on the emulation performance we have observed
-                let limit_step_target = self.nes.cpu_clock() + self.estimated_cpu_clocks_for_duration(update_limit);
+                let limit_step_target = self.nes.cpu_clock() + self.stats.estimated_cpu_clocks_for_duration(update_limit);
                 ProgressTarget::Clock(limit_step_target)
             };
 
             'progress: loop {
                 match self.nes.progress(target) {
                     ProgressStatus::FrameReady => {
-                        let now = Instant::now();
-                        let frame_duration = now - self.last_frame_time;
-                        self.profiled_last_fps = (1.0 as f64 / frame_duration.as_secs_f64()) as f32;
-                        self.last_frame_time = now;
+                        self.stats.end_frame();
                         //self.front_framebuffer = self.back_framebuffer;
                         //self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
 
                         //println!("Frame Ready: swapping in new PPU back buffer");
-                        self.front_framebuffer = self.nes.system_ppu().swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
+                        self.front_framebuffer = self.nes.ppu_mut().swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
 
                         self.queue_framebuffer_upload = true;
-                        self.update_nametable_framebuffer();
-                        self.frame_no += 1;
+                        if self.nametables_view.show {
+                            self.nametables_view.update(&mut self.nes);
+                        }
+                        if self.sprites_view.show {
+                            self.sprites_view.update(&mut self.nes);
+                        }
                     },
                     ProgressStatus::ReachedTarget => {
                         break 'progress;
                     }
-                    ProgressStatus::Error => {
-                        error!("Internal emulator error");
+                    ProgressStatus::Breakpoint => {
+                        println!("Hit breakpoint");
+
+                        // See if the macro player was expecting this breakpoint before deciding whether
+                        // to pause the emulator
+                        if let Some(player) = &mut self.player {
+                            if !player.check_breakpoint(&mut self.nes) {
+                                self.set_paused(true);
+                            } else {
+                                println!("Breakpoint was handled my macro player");
+                            }
+                        } else {
+                            self.set_paused(true);
+                        }
+
+                        // If we had set a temporary breakpoint before continuing running the emulator
+                        // we need to remove that now, regardless of where we stopped (it's possible
+                        // we hit a different breakpoint and so our temporary one may not have been
+                        // automatically removed)
+                        if let Some(handle) = self.temp_debug_breakpoint {
+                            self.nes.cpu_mut().remove_breakpoint(handle);
+                            self.temp_debug_breakpoint = None;
+                        }
                         break 'progress;
                     }
+                    //ProgressStatus::Error => {
+                    //    error!("Internal emulator error");
+                    //    break 'progress;
+                    //}
                 }
                 //let delta = std::time::Instant::now() - start;
                 //if delta > Duration::from_millis(buffer_time_millis) {
-                    for s in self.nes.system_apu().sample_buffer.iter() {
+                    for s in self.nes.apu_mut().sample_buffer.iter() {
                         let _ = self.audio_tx.send(*s);
                     }
-                    self.nes.system_apu().sample_buffer.clear();
+                    self.nes.apu_mut().sample_buffer.clear();
                 //}
             }
 
-            let cpu_clock = self.nes.cpu_clock();
-            let elapsed = Instant::now() - update_start;
-            let clocks_elapsed = cpu_clock - update_start_clock;
-            // Try to avoid updating last_clocks_per_second for early exit conditions where we didn't actually do any work
-            if elapsed > Duration::from_millis(1) || clocks_elapsed > 2000 {
-                self.profiled_last_clocks_per_second = (clocks_elapsed as f64 / elapsed.as_secs_f64()) as u32;
+            if let Some(player) = &mut self.player {
+                player.update(&mut self.nes);
+
+                #[cfg(feature="macro-builder")]
+                self.macro_builder_view.playback_update(&mut self.nes, &player);
             }
-            let now = Instant::now();
-            let stats_update_duration = now - self.last_stats_update_timestamp;
-            if stats_update_duration > self.stats_update_period {
-                let n_frames = self.frame_no - self.last_stats_update_frame_no;
-                let aggregate_fps = (n_frames as f64 / stats_update_duration.as_secs_f64()) as f32;
 
-                let n_clocks = cpu_clock - self.last_stats_update_cpu_clock;
-                let aggregate_cps = (n_clocks as f64 / stats_update_duration.as_secs_f64()) as u32;
-
-                let aggregate_speed = (self.aggregated_emulation_speed() * 100.0) as u32;
-                debug!("Aggregate Emulator Stats: Clocks/s: {aggregate_cps:8}, Update FPS: {aggregate_fps:4.2}, Real-time Speed: {aggregate_speed:3}%");
-
-                let last_fps = self.profiled_last_fps;
-                let last_cps = self.profiled_last_clocks_per_second;
-                let latest_speed = (self.real_time_emulation_speed() * 100.0) as u32;
-                debug!("Raw Emulator Stats:       Clocks/s: {last_cps:8}, Update FPS: {last_fps:4.2}, Real-time Speed: {latest_speed:3}%");
-
-                self.last_stats_update_timestamp = now;
-                self.last_stats_update_frame_no = self.frame_no;
-                self.last_stats_update_cpu_clock = cpu_clock;
-                self.profiled_aggregate_fps = aggregate_fps as f32;
-                self.profiled_aggregate_clocks_per_second = aggregate_cps;
-            }
-            self.single_step = false;
+            self.stats.end_update(&self.nes);
         }
     }
 
@@ -613,210 +663,6 @@ impl EmulatorUi {
         //self.framebuffers[self.front_framebuffer].clone()
     }
 
-
-    pub fn draw_memory_view(&mut self, ctx: &egui::Context) {
-        egui::Window::new("Memory View")
-            .resizable(true)
-            .show(ctx, |ui| {
-
-                 egui::SidePanel::left("memview_options_panel").show_inside(ui, |ui| {
-                    egui::ComboBox::from_label("address_space")
-                        .selected_text(format!("{:?}", self.memview_selected_space))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.memview_selected_space, AddressSpace::System, "System Bus");
-                            ui.selectable_value(&mut self.memview_selected_space, AddressSpace::Ppu, "PPU Bus");
-                            ui.selectable_value(&mut self.memview_selected_space, AddressSpace::Ppu, "OAM Memory");
-                        }
-                    );
-                });
-
-                let bytes_per_row = 16;
-                let num_rows: usize = (1<<16) / bytes_per_row;
-                let n_val_cols = bytes_per_row;
-
-
-                let addr_col_width = Size::exact(60.0);
-                let val_col_width = Size::exact(30.0);
-                let char_col_width = Size::exact(10.0);
-                let text_view_padding = Size::exact(100.0);
-                let row_height_sans_spacing = 30.0;
-                //let num_rows = 20;
-                use egui_extras::{TableBuilder, Size};
-                let mut tb = TableBuilder::new(ui)
-                    .column(addr_col_width);
-
-                for _ in 0..n_val_cols {
-                    tb = tb.column(val_col_width);
-                }
-
-                tb = tb.column(text_view_padding);
-
-                for _ in 0..n_val_cols {
-                    tb = tb.column(char_col_width);
-                }
-
-                tb
-                    .header(30.0, |mut header| {
-                        header.col(|ui| {
-                            ui.heading("    ");
-                        });
-
-                        for i in 0..n_val_cols {
-                            header.col(|ui| {
-                                ui.heading(format!("{i:02x}"));
-                            });
-                        }
-
-                        header.col(|ui| {
-                            ui.heading("     ");
-                        });
-
-                        for _ in 0..n_val_cols {
-                            header.col(|ui| {
-                                ui.heading(" ");
-                            });
-                        }
-                    })
-                    .body(|mut body| {
-                        body.rows(row_height_sans_spacing, num_rows, |row_index, mut row| {
-                            row.col(|ui| {
-                                ui.heading(format!("{:04x}", row_index * bytes_per_row));
-                            });
-
-                            self.tmp_row_values.clear();
-                            for i in 0..n_val_cols {
-                                let addr = row_index * bytes_per_row + i;
-                                let val = match self.memview_selected_space{
-                                    AddressSpace::System => self.nes.peek_system_bus(addr as u16),
-                                    AddressSpace::Ppu => self.nes.peek_ppu_bus(addr as u16),
-                                    AddressSpace::Oam => self.nes.system_ppu().peek_oam_data(addr as u8),
-                                };
-                                self.tmp_row_values.push(val);
-                                row.col(|ui| {
-                                    ui.label(format!("{:02x}", val));
-                                });
-                            }
-                            row.col(|ui| {
-                                ui.label(" ");
-                            });
-                            for i in 0..n_val_cols {
-                                let val = self.tmp_row_values[i];
-                                row.col(|ui| {
-                                    if val.is_ascii_alphanumeric() {
-                                        ui.label(format!("{}", val as char));
-                                    } else {
-                                        ui.label(".");
-                                    }
-                                });
-                            }
-                        });
-                    });
-         });
-    }
-
-
-    // Really klunky :/
-    pub fn draw_nametable_rect(ui: &mut Ui, rect: egui::Rect, scale: f32, offset: egui::Vec2) {
-        use std::ops::Mul;
-        let scaled = egui::Rect {
-            min: rect.min.to_vec2().mul(scale).to_pos2(),
-            max: rect.max.to_vec2().mul(scale).to_pos2(),
-        };
-    }
-
-    pub fn draw_nametables_view(&mut self, ctx: &egui::Context) {
-        let width = self.fb_width * 2;
-        let height = self.fb_height * 2;
-        if self.queue_nametable_fb_upload {
-            let copy = ImageDelta::full(ImageData::Color(ColorImage {
-                size: [width as _, height as _],
-                pixels: self.nametables_framebuffer.chunks_exact(3)
-                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
-                    .collect(),
-            }), egui::TextureFilter::Nearest);
-
-            ctx.tex_manager().write().set(self.nametables_texture.id(), copy);
-            self.queue_nametable_fb_upload = false;
-        }
-
-        egui::Window::new("Nametables")
-            .default_width(900.0)
-            .resizable(true)
-            //.resize(|r| r.auto_sized())
-            .show(ctx, |ui| {
-
-                let panels_width = ui.fonts().pixels_per_point() * 100.0;
-
-                egui::SidePanel::left("nametables_options_panel")
-                    .resizable(false)
-                    .min_width(panels_width)
-                    .show_inside(ui, |ui| {
-                        ui.checkbox(&mut self.nametables_show_scroll, "Show Scroll Position");
-                    });
-                egui::SidePanel::right("nametables_properties_panel")
-                    .resizable(false)
-                    .min_width(panels_width)
-                    .show_inside(ui, |ui| {
-                        //ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_x()));
-                        //ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_y()));
-                });
-
-                egui::TopBottomPanel::bottom("nametables_footer").show_inside(ui, |ui| {
-                    ui.label(format!("[{}, {}]", self.nametables_hover_pos[0], self.nametables_hover_pos[1]));
-                });
-
-                //let frame = Frame::none().outer_margin(Margin::same(200.0));
-                egui::CentralPanel::default()
-                    //.frame(frame)
-                    .show_inside(ui, |ui| {
-
-                        let (response, painter) =
-                            ui.allocate_painter(egui::Vec2::new(width as f32, height as f32), egui::Sense::hover());
-
-                        let img = egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32));
-                        //let response = ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
-                                        // TODO(emilk): builder pattern for Mesh
-
-                        let mut mesh = egui::Mesh::with_texture(self.nametables_texture.id());
-                        mesh.add_rect_with_uv(response.rect, egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE,);
-                        painter.add(Shape::mesh(mesh));
-
-                        let img_pos = response.rect.left_top();
-                        let img_width = response.rect.width();
-                        let img_height = response.rect.height();
-                        let img_to_nes_px = self.fb_width as f32 * 2.0 / img_width;
-                        let nes_px_to_img = 1.0 / img_to_nes_px;
-
-                        if let Some(hover_pos) = response.hover_pos() {
-                            let x = ((hover_pos.x - img_pos.x) * img_to_nes_px) as usize;
-                            let y = ((hover_pos.y - img_pos.y) * img_to_nes_px) as usize;
-                            self.nametables_hover_pos = [x, y];
-
-                            /*
-                            let tile_x =
-                            painter.rect_stroke(
-                                egui::Rect::from_min_size(response.rect.min + vec2(x_off as f32 * nes_px_to_img, y_off as f32 * nes_px_to_img),
-                                                            vec2(self.fb_width as f32 * nes_px_to_img, self.fb_height as f32 * nes_px_to_img)),
-                                egui::Rounding::none(),
-                                egui::Stroke::new(1.0, Color32::RED));
-                                */
-                            //painter.rect_filled(egui::Rect::from_min_size(response.rect.min, vec2(200.0, 200.0)),
-                            //    egui::Rounding::none(), Color32::RED);
-                        }
-
-                        /*
-                        let x_off = self.nes.system_ppu().scroll_x();
-                        let y_off = self.nes.system_ppu().scroll_y();
-                        painter.rect_stroke(
-                            egui::Rect::from_min_size(response.rect.min + vec2(x_off as f32 * nes_px_to_img, y_off as f32 * nes_px_to_img),
-                                                        vec2(self.fb_width as f32 * nes_px_to_img, self.fb_height as f32 * nes_px_to_img)),
-                            egui::Rounding::none(),
-                            egui::Stroke::new(2.0, Color32::YELLOW));
-                            */
-                });
-
-        });
-    }
 
     pub fn draw(&mut self, ctx: &egui::Context) -> Status {
         let mut status = Status::Ok;
@@ -852,85 +698,219 @@ impl EmulatorUi {
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             self.draw_notices_header(ui);
-            use egui::{menu, Button};
 
-            menu::bar(ui, |ui| {
+            egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open").clicked() {
-                        self.open_dialog();
+                        ui.close_menu();
+                        self.open_dialog(ui.ctx());
+                    }
+                    ui.separator();
+                    if ui.button("Exit").clicked() {
+                        status = Status::Quit;
+                        ui.close_menu();
                     }
                 });
-            });
 
+                ui.menu_button("Nes", |ui| {
+                    egui::Grid::new("some_unique_id").show(ui, |ui| {
+
+                        if ui.button(if self.paused == false { "Pause" } else { "Resume" }).clicked() {
+                            ui.close_menu();
+                            self.set_paused(!self.paused);
+                        }
+                        ui.label("Esc");
+                        ui.end_row();
+
+                        if ui.button("Reset").clicked() {
+                            ui.close_menu();
+                            self.nes.reset();
+                        }
+                        ui.label("Ctrl-R");
+                        ui.end_row();
+
+                        if ui.button("Power Cycle").clicked() {
+                            ui.close_menu();
+                            self.nes.power_cycle(Instant::now());
+                        }
+                        ui.label("Ctrl-T");
+                        ui.end_row();
+                    });
+                });
+            });
         });
 
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            if ui.button("Quit").clicked() {
-                status = Status::Quit;
-            }
-            if ui.button("Reset").clicked() {
-                self.nes.reset();
-            }
-            if !self.paused {
-                if ui.button("Break").clicked() {
-                    self.paused = true;
-                }
-            } else {
-                if ui.button("Step").clicked() {
-                    self.single_step = true;
-                }
-                if ui.button("Continue").clicked() {
-                    self.paused = false;
-                }
 
-                let ppu = self.nes.system_ppu();
-                let debug_val = self.nes.peek_ppu_bus(0x2000);
-                //println!("PPU debug = {debug_val:x}");
+            if self.paused() {
+                #[cfg(feature="cpu-debugger")]
+                {
+                    if ui.button("Step In").clicked() {
+                        self.step_instruction_in();
+                    }
+                    if ui.button("Step Over").clicked() {
+                        self.step_instruction_over();
+                    }
+                    if ui.button("Step Out").clicked() {
+                        self.step_instruction_out();
+                    }
+                }
             }
 
-            ui.checkbox(&mut &mut self.show_memview, "Show Memory");
-            ui.checkbox(&mut &mut &mut self.show_nametables, "Show Nametables");
+            ui.spacing();
+            ui.label("Tools");
+            ui.group(|ui| {
+                ui.checkbox(&mut self.mem_view.show, "Show Memory");
+                ui.checkbox(&mut self.nametables_view.show, "Show Nametables");
+
+                ui.add_enabled_ui(cfg!(feature="sprite-view"), |ui| {
+                    let resp = ui.checkbox(&mut self.sprites_view.show, "Show Sprites")
+                        .on_disabled_hover_text("\"sprite-view\" feature not enabled");
+                    #[cfg(feature="sprite-view")]
+                    {
+                        if resp.changed {
+                            self.sprites_view.set_visible(&mut self.nes, self.sprites_view.show);
+                        }
+                    }
+                });
+
+                ui.add_enabled_ui(cfg!(feature="macro-builder"), |ui| {
+                    let mut visible = {
+                        #[cfg(feature="macro-builder")]
+                        {self.macro_builder_view.visible}
+                        #[cfg(not(feature="macro-builder"))]
+                        {false}
+                    };
+                    let resp = ui.checkbox(&mut visible, "Record Macros")
+                        .on_disabled_hover_text("\"macro-builder\" feature not enabled");
+                    #[cfg(feature="macro-builder")]
+                    {
+                        if resp.changed() {
+                            self.macro_builder_view.set_visible(&mut self.nes, visible);
+                        }
+                    }
+                });
+                ui.checkbox(&mut self.trace_events_view.show, "Show Events");
+            });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-
             ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
         });
 
-        if self.show_nametables {
-            self.draw_nametables_view(ctx);
+        if self.nametables_view.show {
+            self.nametables_view.draw(ctx);
         }
 
-        if self.show_memview {
-            self.draw_memory_view(ctx);
+        #[cfg(feature="sprite-view")]
+        if self.sprites_view.show {
+            self.sprites_view.draw(&mut self.nes, ctx);
+        }
+
+        #[cfg(feature="macro-builder")]
+        {
+            if self.macro_builder_view.visible {
+                self.macro_builder_view.draw(&mut self.nes, ctx);
+            }
+        }
+        if self.trace_events_view.show {
+            self.trace_events_view.draw(ctx);
+        }
+        if self.mem_view.show {
+            self.mem_view.draw(&mut self.nes, ctx);
         }
 
         status
     }
 
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
 
+        if paused {
+            if let Some(writer) = &self.trace_writer {
+                let _ = writer.borrow_mut().flush();
+            }
+        }
+
+        #[cfg(feature="macro-builder")]
+        {
+            self.macro_builder_view.set_paused(paused, &mut self.nes);
+        }
+
+        if paused == false {
+            // Stop the emulator from trying to catch up for lost time
+            self.nes.set_progress_time(Instant::now());
+        }
+    }
+
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    #[cfg(feature="cpu-debugger")]
+    pub fn step_instruction_in(&mut self) {
+        self.nes.step_instruction_in();
+    }
+
+    #[cfg(feature="cpu-debugger")]
+    pub fn step_instruction_over(&mut self) {
+        self.temp_debug_breakpoint = Some(self.nes.add_tmp_step_over_breakpoint());
+        self.set_paused(false);
+    }
+
+    #[cfg(feature="cpu-debugger")]
+    pub fn step_instruction_out(&mut self) {
+        self.temp_debug_breakpoint = self.nes.add_tmp_step_out_breakpoint();
+        self.set_paused(false);
+    }
 
     pub fn handle_window_event(&mut self, event: winit::event::WindowEvent) {
         match event {
+            WindowEvent::ModifiersChanged(modifiers) => { self.modifiers = modifiers; },
             WindowEvent::KeyboardInput { input, .. } => {
                 if let Some(keycode) = input.virtual_keycode {
+                    if input.state == winit::event::ElementState::Released {
+                        match keycode {
+                            VirtualKeyCode::Escape => {
+                                self.set_paused(!self.paused());
+                            }
+                            VirtualKeyCode::R if self.modifiers.contains(ModifiersState::CTRL) => {
+                                self.nes.reset();
+                            }
+                            VirtualKeyCode::T if self.modifiers.contains(ModifiersState::CTRL) => {
+                                self.nes.power_cycle(Instant::now());
+                            }
+                            VirtualKeyCode::S if self.modifiers.contains(ModifiersState::CTRL) => {
+
+                                #[cfg(feature="macro-builder")]
+                                self.macro_builder_view.save();
+                            }
+                            _ => {}
+                        }
+                    }
+
                     let button = match keycode {
-                        VirtualKeyCode::Return => { Some(PadButton::Start) }
-                        VirtualKeyCode::Space => { Some(PadButton::Select) }
-                        VirtualKeyCode::A => { Some(PadButton::Left) }
-                        VirtualKeyCode::D => { Some(PadButton::Right) }
-                        VirtualKeyCode::W => { Some(PadButton::Up) }
-                        VirtualKeyCode::S => { Some(PadButton::Down) }
-                        VirtualKeyCode::Right => { Some(PadButton::A) }
-                        VirtualKeyCode::Left => { Some(PadButton::B) }
+                        VirtualKeyCode::Return => { Some(ControllerButton::Start) }
+                        VirtualKeyCode::Space => { Some(ControllerButton::Select) }
+                        VirtualKeyCode::A => { Some(ControllerButton::Left) }
+                        VirtualKeyCode::D => { Some(ControllerButton::Right) }
+                        VirtualKeyCode::W => { Some(ControllerButton::Up) }
+                        VirtualKeyCode::S => { Some(ControllerButton::Down) }
+                        VirtualKeyCode::Right => { Some(ControllerButton::A) }
+                        VirtualKeyCode::Left => { Some(ControllerButton::B) }
                         _ => None
                     };
                     if let Some(button) = button {
-                        let system = self.nes.system_mut();
                         if input.state == winit::event::ElementState::Pressed {
-                            system.pad1.press_button(button);
+                            // run the macro builder hook first so it can see if the input is redundant
+                            #[cfg(feature="macro-builder")]
+                            self.macro_builder_view.controller_input_hook(&mut self.nes, button, true);
+                            self.nes.system_mut().port1.press_button(button);
                         } else {
-                            system.pad1.release_button(button);
+                            // run the macro builder hook first so it can see if the input is redundant
+                            #[cfg(feature="macro-builder")]
+                            self.macro_builder_view.controller_input_hook(&mut self.nes, button, false);
+                            self.nes.system_mut().port1.release_button(button);
                         }
                     }
                 }

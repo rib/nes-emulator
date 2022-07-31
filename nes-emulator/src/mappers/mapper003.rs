@@ -4,7 +4,7 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
-use crate::prelude::NameTableMirror;
+use crate::cartridge::NameTableMirror;
 
 use super::mirror_vram_address;
 use super::bank_select_mask;
@@ -112,8 +112,6 @@ impl Mapper3 {
 }
 
 impl Mapper for Mapper3 {
-    fn reset(&mut self) {}
-
     fn clone_mapper(&self) -> Box<dyn Mapper> {
         Box::new(self.clone())
     }
@@ -159,9 +157,9 @@ impl Mapper for Mapper3 {
 
     fn ppu_bus_write(&mut self, addr: u16, data: u8) {
         match addr {
-            0x0000..=0x1fff => {
-                arr_write!(self.chr_data, self.chr_bank + addr as usize, data);
-            }
+            //0x0000..=0x1fff => {
+            //    arr_write!(self.chr_data, self.chr_bank + addr as usize, data);
+            //}
             0x2000..=0x3fff => { // VRAM
                 arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }

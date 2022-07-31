@@ -1,5 +1,7 @@
+use std::ops::Index;
+
 use super::frame_sequencer::FrameSequencerStatus;
-use crate::system::DmcDmaRequest;
+use crate::system::{DmcDmaRequest, Model};
 
 // Ref: https://www.nesdev.org/wiki/APU_DMC
 // Measured in CPU clock cycles
@@ -8,7 +10,24 @@ const DMC_PERIODS_TABLE_NTSC: [u16; 16] = [ 428, 380, 340, 320, 286, 254, 226, 2
 #[allow(dead_code)]
 const DMC_PERIODS_TABLE_PAL: [u16; 16] = [ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98,  78,  66,  50 ];
 
+/// Newtype so we can impl Default
+#[derive(Clone)]
+pub struct PeriodsTable(&'static [u16; 16]);
+impl Default for PeriodsTable {
+    fn default() -> Self { Self(&DMC_PERIODS_TABLE_NTSC) }
+}
+impl Index<usize> for PeriodsTable {
+    type Output = u16;
+    fn index(&self, index: usize) -> &Self::Output { self.0.index(index) }
+}
+
+
+#[derive(Clone, Default)]
 pub struct DmcChannel {
+    nes_model: Model,
+
+    periods_table: PeriodsTable,
+
     interrupt_enable: bool,
     pub interrupt_flagged: bool,
 
@@ -34,9 +53,27 @@ pub struct DmcChannel {
 }
 
 impl DmcChannel {
-    pub fn new() -> Self {
+    pub fn new(nes_model: Model) -> Self {
 
+        let periods_table = match nes_model {
+            Model::Ntsc => PeriodsTable(&DMC_PERIODS_TABLE_NTSC),
+            Model::Pal => PeriodsTable(&DMC_PERIODS_TABLE_PAL),
+        };
+
+        let timer_period = periods_table[0];
+        let timer = periods_table[0];
         DmcChannel {
+            nes_model,
+            periods_table,
+            pending_sample_address: 0xc000,
+            pending_sample_bytes_remaining: 1,
+            output_silence_flag: true,
+            output_bits_remaining: 8,
+            timer_period,
+            timer,
+            ..Default::default()
+
+            /*
             interrupt_enable: false,
             interrupt_flagged: false,
 
@@ -45,22 +82,21 @@ impl DmcChannel {
             loop_flag: false,
 
             // DMA reader...
-            pending_sample_address: 0xc000,
             sample_address: 0,
-            pending_sample_bytes_remaining: 1,
             sample_bytes_remaining: 0,
 
             sample_buffer: None,
 
             output_bits_remaining: 8,
             output_shift: 0,
-            output_silence_flag: true,
-
-            timer_period: DMC_PERIODS_TABLE_NTSC[0],
-            timer: DMC_PERIODS_TABLE_NTSC[0],
 
             output: 0,
+            */
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        *self = Self::new(self.nes_model);
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -223,7 +259,7 @@ impl DmcChannel {
 
                 self.loop_flag = (value & 0b0100_0000) != 0;
 
-                self.timer_period = DMC_PERIODS_TABLE_NTSC[(value & 0xf) as usize];
+                self.timer_period = self.periods_table[(value & 0xf) as usize];
                 //println!("$4010 write: rate[{}] = {} (timer = {})", (value & 0xf), self.timer_period, self.timer);
             }
             1 => { // Direct Load

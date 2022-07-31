@@ -8,7 +8,11 @@ use std::ops::Index;
 use anyhow::anyhow;
 use anyhow::Result;
 
-use crate::{prelude::{Cartridge, PAGE_SIZE_16K, PAGE_SIZE_8K, Framebuffer, FramebufferDataRental}, cartridge, ppu::PixelFormat};
+use crate::binary::NesBinaryConfig;
+use crate::cartridge::{self, Cartridge};
+use crate::constants::{PAGE_SIZE_16K, PAGE_SIZE_8K};
+use crate::framebuffer::{Framebuffer, FramebufferDataRental, PixelFormat};
+use crate::system::Model;
 
 mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -189,11 +193,16 @@ impl PpuSim {
         }
     }
 
-    pub fn new(revision: Revision) -> Self {
+    pub fn new(nes_model: Model) -> Self {
 
         debug_assert_eq!(ffi::PPUSim_Revision_Max, 18);
         debug_assert_eq!(ffi::PPUSim_InputPad_Max, 7);
         debug_assert_eq!(ffi::PPUSim_OutputPad_Max, 4);
+
+        let revision = match nes_model {
+            Model::Ntsc => Revision::RP2C02G,
+            Model::Pal => Revision::RP2C07_0,
+        };
 
         let framebuffer = Framebuffer::new(256, 240, PixelFormat::RGBA8888);
         let framebuffer = framebuffer.rent_data().unwrap();
@@ -511,17 +520,18 @@ fn ppu_sim_test_cpu_read(ppu: &mut PpuSim, cartridge: &mut Cartridge, address: u
 #[test]
 fn ppu_sim_step() {
 
-    let mut fb = Framebuffer::new(256, 240, crate::ppu::PixelFormat::RGBA8888);
+    let mut fb = Framebuffer::new(256, 240, PixelFormat::RGBA8888);
     let mut fb_data = fb.rent_data().unwrap();
     let fb_ptr = fb_data.data.as_mut_ptr();
 
-    let mut ppu = PpuSim::new(Revision::RP2C02G);
+    let mut ppu = PpuSim::new(Model::Ntsc);
     ppu.reset();
     ppu.debug_set_force_render_enabled(true);
 
     let prg_rom = vec![0u8; PAGE_SIZE_16K];
     let chr_ram = vec![0u8; PAGE_SIZE_8K];
     let mut cartridge = Cartridge {
+        config: NesBinaryConfig::None,
         mapper: Box::new(crate::mappers::Mapper0::new_full(prg_rom, chr_ram, true, 1, cartridge::NameTableMirror::Vertical))
     };
 

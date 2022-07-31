@@ -7,6 +7,7 @@ const NTSC_TIMER_PERIODS_TABLE: [u16; 16] = [ 4, 8, 16, 32, 64, 96, 128, 160, 20
 #[allow(dead_code)]
 const PAL_TIMER_PERIODS_TABLE: [u16; 16] = [ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 ];
 
+#[derive(Clone, Default)]
 pub struct NoiseChannel {
     volume_envelope: VolumeEnvelope,
     pub length_counter: LengthCounter,
@@ -23,19 +24,25 @@ pub struct NoiseChannel {
 impl NoiseChannel {
     pub fn new() -> Self {
         Self {
+            // "On power-up, the shift register is loaded with the value 1"
+            shift_register: 1,
             volume_envelope: VolumeEnvelope::new(),
             length_counter: LengthCounter::new(),
+            ..Default::default()
+            /*
 
             timer_period: 0,
             timer: 0,
 
             mode_flag: false,
 
-            // "On power-up, the shift register is loaded with the value 1"
-            shift_register: 1,
-
             output: 0,
+            */
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        *self = Self::new();
     }
 
     pub fn update_output(&mut self) {

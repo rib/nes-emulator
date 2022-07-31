@@ -1,6 +1,6 @@
-use bitflags::bitflags;
+use std::fmt;
 
-use crate::system::DmcDmaRequest;
+use bitflags::bitflags;
 
 use crate::system::System;
 
@@ -28,7 +28,7 @@ pub enum Interrupt {
 
 #[derive(Clone, Debug)]
 pub struct TraceState {
-    pub last_display_cycle_count: u64,
+    pub last_hook_cycle_count: u64,
     pub cycle_count: u64,
     pub saved_a: u8,
     pub saved_x: u8,
@@ -46,7 +46,7 @@ pub struct TraceState {
 impl Default for TraceState {
     fn default() -> Self {
         Self {
-            last_display_cycle_count: 0,
+            last_hook_cycle_count: 0,
             cycle_count: 0,
             saved_a: 0,
             saved_x: 0,
@@ -61,6 +61,32 @@ impl Default for TraceState {
             loaded_mem_value: 0,
             stored_mem_value: 0,
         }
+    }
+}
+impl fmt::Display for TraceState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+
+        // Aiming for Meson compatible trace format which can be used for cross referencing
+        let pc = self.instruction_pc;
+        let op = self.instruction_op_code;
+        let operand_len = self.instruction.len() - 1;
+        let bytecode_str = if operand_len == 2 {
+            let lsb = self.instruction_operand & 0xff;
+            let msb = (self.instruction_operand & 0xff00) >> 8;
+            format!("${op:02X} ${lsb:02X} ${msb:02X}")
+        } else if operand_len == 1{
+            format!("${op:02X} ${:02X}", self.instruction_operand)
+        } else {
+            format!("${op:02X}")
+        };
+        let disassembly = self.instruction.disassemble(self.instruction_operand, self.effective_address, self.loaded_mem_value, self.stored_mem_value);
+        let a = self.saved_a;
+        let x = self.saved_x;
+        let y = self.saved_y;
+        let sp = self.saved_sp & 0xff;
+        let p = self.saved_p.to_flags_string();
+        let cpu_cycles = self.cycle_count;
+        write!(f, "{pc:0X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}")
     }
 }
 
@@ -103,12 +129,51 @@ enum OamDmaProgress {
 }
 */
 
-#[derive(Clone, Debug)]
-pub struct Breakpoint {
-    pub addr: u16,
+/// Closure type for the callback when a breakpoint is hit
+pub type FnBreakpointCallback = dyn FnMut(&mut Cpu, u16) -> BreakpointCallbackAction;
 
-    /// automatically remove breakpoint when hit
-    pub temp: bool
+/// Determines whether a breakpoint should be kept or removed after being hit
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BreakpointCallbackAction {
+    Keep,
+    Remove
+}
+
+/// A unique handle for a registered breakpoint that can be used to remove the breakpoint
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct BreakpointHandle(u32);
+
+pub(super) struct Breakpoint {
+    pub(super) handle: BreakpointHandle,
+    pub(super) addr: u16,
+    pub(super) callback: Box<FnBreakpointCallback>
+}
+
+/// Debugger state attached to a CPU instance that won't be
+/// cloned if the CPU is cloned but will be preserved though
+/// a power cycle
+#[derive(Default)]
+pub struct NoCloneDebuggerState {
+    pub(super) next_breakpoint_handle: u32,
+    pub(super) breakpoints: Vec<Breakpoint>,
+    pub breakpoint_hit: bool,
+}
+impl Clone for NoCloneDebuggerState {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+bitflags! {
+    #[derive(Default)]
+    pub struct StackByteTags: u8 {
+        const ADDR_LO    = 0b0000_0001;
+        const ADDR_HI    = 0b0000_0010;
+        const STATUS     = 0b0000_0100;
+        const INTERRUPT  = 0b0000_1000;
+
+        const A          = 0b0001_0000;
+    }
 }
 
 #[derive(Clone)]
@@ -176,21 +241,21 @@ pub struct Cpu {
     /// Processor Status Register
     pub p: Flags,
 
+    /// Cleared on reset, each byte of the stack that gets modified is
+    /// tagged to aid debugging
+    #[cfg(feature="debugger")]
+    stack_tags: [StackByteTags; 256],
+    #[cfg(feature="debugger")]
+    pub debugger: NoCloneDebuggerState,
+
     #[cfg(feature="trace")]
     pub trace: TraceState,
-
-    /// Set to true to continue without re-breaking on the
-    /// current instruction (automatically cleared when
-    /// the pc updates)
-    pub breakpoints_paused: bool,
-    pub breakpoints: Vec<Breakpoint>,
-    pub breakpoint_hit: bool,
 }
 
 impl Default for Cpu {
     fn default() -> Self {
         Self {
-            clock: 0,
+            clock: 6, // hacky constant just to make CPU traces comparable with Mesen trace logs
 
             last_nmi_level: false,
             pending_nmi_detected: false,
@@ -215,12 +280,13 @@ impl Default for Cpu {
             sp: 0xfd,
             p: unsafe { Flags::from_bits_unchecked(0x34) },
 
+            #[cfg(feature="debugger")]
+            stack_tags: [StackByteTags::default(); 256],
+            #[cfg(feature="debugger")]
+            debugger: NoCloneDebuggerState::default(),
+
             #[cfg(feature="trace")]
             trace: TraceState::default(),
-
-            breakpoints_paused: false,
-            breakpoints: vec![],
-            breakpoint_hit: false,
         }
     }
 }
@@ -239,7 +305,63 @@ enum OamDmaState {
     Write
 }
 
+#[cfg(feature="debugger")]
+pub struct Backtrace<'a> {
+    cpu: &'a Cpu,
+    system: &'a mut System,
+    start_sp: u8,
+    sp: u8,
+}
+
+/// Walks back through the stack looking for tagged ADDR_LO/HI pairs
+/// until it loops around to the start position. For each address
+/// returned the included tags are for the lower byte of the address.
+#[cfg(feature="debugger")]
+impl<'a> Iterator for Backtrace<'a> {
+    type Item = (u16, StackByteTags);
+
+    fn next(&mut self) -> Option<Self::Item> {
+
+        // On the first call `sp` will == cpu.sp which is conceptually empty
+        // On subsequent calls `sp` will be left pointing to the last address high byte
+        loop {
+            if self.sp == self.start_sp {
+                return None;
+            }
+            self.sp = self.sp.wrapping_add(1);
+            // Address bytes are always pushed hi, then lo
+            let tags = self.cpu.stack_tags[self.sp as usize];
+            if tags.contains(StackByteTags::ADDR_LO) {
+                let lo = self.cpu.stack_peek(self.sp, self.system) as u16;
+                self.sp = self.sp.wrapping_add(1);
+
+                if self.cpu.stack_tags[self.sp as usize].contains(StackByteTags::ADDR_HI) {
+                    let hi = self.cpu.stack_peek(self.sp, self.system) as u16;
+                    return Some((hi << 8 | lo, tags));
+                } else {
+                    log::warn!("Terminating stack walk at inconsistency (missing high byte for address)");
+                    return None;
+                }
+            }
+        }
+    }
+}
+
 impl Cpu {
+
+    /// Reset the state of the CPU to a power-on state, but preserving debug state such as breakpoints
+    pub(crate) fn power_cycle(&mut self) {
+        let debugger = std::mem::take(&mut self.debugger);
+        *self = Self {
+            debugger,
+            ..Default::default()
+        };
+    }
+
+    pub(crate) fn reset(&mut self, system: &mut System) {
+        self.sp = self.sp.wrapping_sub(3);
+        self.handle_interrupt(system, Interrupt::RESET);
+    }
 
     /// Handles OAM and DMC DMA requests with pedantic handling of cycle stealing
     fn run_dma_unit(&mut self, system: &mut System, dummy_addr: u16) {
@@ -299,7 +421,7 @@ impl Cpu {
                 (OamDmaState::None, DmcDmaState::Stall) => {
                     if dummy_read_coalesce == false || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
-                        let _discard = system.cpu_read(dummy_addr, self.clock); // will call .step_for_cpu_cycle()
+                        let _discard = system.cpu_read(dummy_addr); // will call .step_for_cpu_cycle()
                         last_read_addr = dummy_addr;
                     } else {
                         //println!("Stepping system for coalesced dummy read during DMA, clock = {}", self.clock);
@@ -312,14 +434,14 @@ impl Cpu {
                     if self.clock % 2 == 1 { // DMC and OAM DMA only read on even cycles
                         if dummy_read_coalesce == false || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
-                            let _discard = system.cpu_read(dummy_addr, self.clock); // will call .step_for_cpu_cycle()
+                            let _discard = system.cpu_read(dummy_addr); // will call .step_for_cpu_cycle()
                             last_read_addr = dummy_addr;
                         } else {
                             //println!("Stepping system for coalesced dummy read during DMA, clock = {}", self.clock);
                             system.step_for_cpu_cycle(); // Coalesced dummy read
                         }
                     } else {
-                        let sample = system.cpu_read(dmc_dma_addr, self.clock); // will call .step_for_cpu_cycle()
+                        let sample = system.cpu_read(dmc_dma_addr); // will call .step_for_cpu_cycle()
                         last_read_addr = dmc_dma_addr;
                         system.apu.dmc_channel.completed_dma(dmc_dma_addr, sample);
                         dmc_dma_state = DmcDmaState::None;
@@ -330,7 +452,7 @@ impl Cpu {
                     if self.clock % 2 == 1 { // OAM DMA only reads on even cycles
                         if dummy_read_coalesce == false || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
-                            let _discard = system.cpu_read(dummy_addr, self.clock); // will call .step_for_cpu_cycle()
+                            let _discard = system.cpu_read(dummy_addr); // will call .step_for_cpu_cycle()
                             last_read_addr = dummy_addr;
                         } else {
                             //println!("Stepping system for coalesced dummy read during DMA, clock = {}", self.clock);
@@ -338,7 +460,7 @@ impl Cpu {
                         }
                     } else {
                         let dma_addr = oam_dma_addr.wrapping_add(oam_dma_offset);
-                        oam_dma_value = system.cpu_read(dma_addr, self.clock);
+                        oam_dma_value = system.cpu_read(dma_addr);
                         //println!("OAM DMA: reading {dma_addr:04x} = {oam_dma_value:02x},  offset = {}, clock = {}", oam_dma_offset, self.clock);
                         last_read_addr = dma_addr;
                         oam_dma_state = OamDmaState::Write;
@@ -351,7 +473,7 @@ impl Cpu {
                     debug_assert_eq!(self.clock % 2, 1);
 
                     //println!("OAM DMA: writing {oam_dma_value:02x} to $2004, offset = {}, clock = {}", oam_dma_offset, self.clock);
-                    system.cpu_write(0x2004 /* OAMDATA */, oam_dma_value, self.clock);
+                    system.cpu_write(0x2004 /* OAMDATA */, oam_dma_value);
                     last_read_addr = 0;
 
                     oam_dma_offset += 1;
@@ -386,6 +508,7 @@ impl Cpu {
     ///
     /// This will run the DMA unit which uses RDY to suspend the CPU and the last read
     /// will effectively be repeated for any dummy cycle needed while servicing the DMA.
+    #[allow(non_snake_case)]
     #[inline]
     fn handle_RDY_halt(&mut self, system: &mut System, addr: u16) -> u8 {
         //println!("CPU Halt");
@@ -412,19 +535,18 @@ impl Cpu {
         data
     }
 
-    /// A NOP read optimization for various superfluous reads that the CPU does (such as
-    /// reading the non-existent op code for implied/accumulator addressing mode instructions)
-    /// or when an address crosses a page boundary.
+    /// Handles various superfluous reads that the CPU does (such as reading the
+    /// non-existent op code for implied/accumulator addressing mode
+    /// instructions) or when an address crosses a page boundary.
     ///
-    /// This skips doing the actual read but still steps the system for one CPU clock cycle.
+    /// This may potentially skip doing the actual read but still steps the
+    /// system for one CPU clock cycle.
     ///
-    /// If the CPU is halted by the RDY line the address is given for performing any required
-    /// dummy reads while the DMA unit is running
-    ///
-    /// "read" the system bus at the given address, but don't _actually_ do the read
-    pub(in super) fn nop_read_system_bus(&mut self, system: &mut System, addr: u16) {
+    /// If the CPU is halted by the RDY line the address is given for performing
+    /// any required dummy reads while the DMA unit is running
+    pub(in super) fn dummy_read_system_bus(&mut self, system: &mut System, addr: u16) {
         self.start_clock_cycle_phi1(system);
-        system.step_for_cpu_cycle();
+        system.dummy_cpu_read(addr);
         self.end_clock_cycle_phi2(system);
 
         self.clock += 1;
@@ -440,7 +562,7 @@ impl Cpu {
         // happens during phase 1/2 of each clock cycle
 
         self.start_clock_cycle_phi1(system);
-        let mut data = system.cpu_read(addr, self.clock);
+        let mut data = system.cpu_read(addr);
         self.end_clock_cycle_phi2(system);
 
         self.clock += 1;
@@ -452,12 +574,13 @@ impl Cpu {
         data
     }
 
-    /// A NOP write optimization for various superfluous writes that the CPU does
+    /// Handles various superfluous writes that the CPU does
     ///
-    /// This skips doing the actual write but still steps the system for one CPU clock cycle.
-    pub(in super) fn nop_write_system_bus(&mut self, system: &mut System, addr: u16, data: u8) {
+    /// As an optimization in some cases this may skip doing the actual write
+    /// but still steps the system for one CPU clock cycle.
+    pub(in super) fn dummy_write_system_bus(&mut self, system: &mut System, addr: u16, data: u8) {
         self.start_clock_cycle_phi1(system);
-        system.step_for_cpu_cycle();
+        system.dummy_cpu_write(addr, data);
         self.end_clock_cycle_phi2(system);
 
         self.clock += 1;
@@ -475,7 +598,7 @@ impl Cpu {
         }
 
         self.start_clock_cycle_phi1(system);
-        system.cpu_write(addr, data, self.clock);
+        system.cpu_write(addr, data);
 
         // We treat the OAMDMA register as a special, internal register
         // so we can neatly control how we suspend/halt the CPU mid-instruction
@@ -497,14 +620,26 @@ impl Cpu {
         self.clock += 1;
     }
 
-    pub(in super) fn stack_push(&mut self, system: &mut System, data: u8) {
+    pub(in super) fn stack_push(&mut self, system: &mut System, data: u8, tags: StackByteTags) {
+        #[cfg(feature="debugger")]
+        {
+            self.stack_tags[self.sp as usize] = tags;
+        }
         self.write_system_bus(system, self.sp as u16 + 0x100, data);
         self.sp = self.sp.wrapping_sub(1);
     }
 
     pub(in super) fn stack_pop(&mut self, system: &mut System) -> u8 {
         self.sp = self.sp.wrapping_add(1);
+        #[cfg(feature="debugger")]
+        {
+            self.stack_tags[self.sp as usize] = Default::default();
+        }
         self.read_system_bus(system, self.sp as u16 + 0x100)
+    }
+
+    pub fn stack_peek(&self, sp: u8, system: &mut System) -> u8 {
+        system.peek(sp as u16 + 0x100)
     }
 
     pub fn handle_interrupt(&mut self, system: &mut System, interrupt: Interrupt) {
@@ -524,9 +659,9 @@ impl Cpu {
                 self.nmi_raised = false;
                 self.pending_nmi_detected = false;
 
-                self.stack_push(system, (self.pc >> 8) as u8);
-                self.stack_push(system, (self.pc & 0xff) as u8);
-                self.stack_push(system, (self.p | Flags::BREAK_HIGH).bits());
+                self.stack_push(system, (self.pc >> 8) as u8, StackByteTags::ADDR_HI|StackByteTags::INTERRUPT);
+                self.stack_push(system, (self.pc & 0xff) as u8, StackByteTags::ADDR_LO|StackByteTags::INTERRUPT);
+                self.stack_push(system, (self.p | Flags::BREAK_HIGH).bits(), StackByteTags::STATUS|StackByteTags::INTERRUPT);
                 self.set_interrupt_flag(true);
 
                 Interrupt::NMI
@@ -540,8 +675,8 @@ impl Cpu {
             }
             Interrupt::IRQ => {
                 //println!("Handling IRQ");
-                self.stack_push(system, (self.pc >> 8) as u8);
-                self.stack_push(system, (self.pc & 0xff) as u8);
+                self.stack_push(system, (self.pc >> 8) as u8, StackByteTags::ADDR_HI|StackByteTags::INTERRUPT);
+                self.stack_push(system, (self.pc & 0xff) as u8, StackByteTags::ADDR_LO|StackByteTags::INTERRUPT);
 
                 // "*** At this point, the signal status determines which interrupt vector is used ***"
                 // (I.e. the interrupt may be hijacked)
@@ -550,17 +685,17 @@ impl Cpu {
                     None => Interrupt::IRQ
                 };
 
-                self.stack_push(system, (self.p | Flags::BREAK_HIGH).bits());
+                self.stack_push(system, (self.p | Flags::BREAK_HIGH).bits(), StackByteTags::STATUS|StackByteTags::INTERRUPT);
                 self.set_interrupt_flag(true);
 
                 vector
             }
             Interrupt::BRK => {
                 //println!("BRK2: pending NMI = {}, raised NMI = {}, handler pending = {:?}", self.pending_nmi_detected, self.nmi_raised, self.interrupt_handler_pending);
-                self.stack_push(system, (self.pc >> 8) as u8);
+                self.stack_push(system, (self.pc >> 8) as u8, StackByteTags::ADDR_HI|StackByteTags::INTERRUPT);
 
                 //println!("BRK3: pending NMI = {}, raised NMI = {}, handler pending = {:?}", self.pending_nmi_detected, self.nmi_raised, self.interrupt_handler_pending);
-                self.stack_push(system, (self.pc & 0xff) as u8);
+                self.stack_push(system, (self.pc & 0xff) as u8, StackByteTags::ADDR_LO|StackByteTags::INTERRUPT);
 
                 // "*** At this point, the signal status determines which interrupt vector is used ***"
                 // (I.e. the interrupt may be hijacked)
@@ -571,7 +706,7 @@ impl Cpu {
                 //println!("BRK vector = {:?}", vector);
 
                 //println!("BRK4: pending NMI = {}, raised NMI = {}, handler pending = {:?}", self.pending_nmi_detected, self.nmi_raised, self.interrupt_handler_pending);
-                self.stack_push(system, (self.p | Flags::BREAK_HIGH | Flags::BREAK_LOW).bits());
+                self.stack_push(system, (self.p | Flags::BREAK_HIGH | Flags::BREAK_LOW).bits(), StackByteTags::STATUS|StackByteTags::INTERRUPT);
                 self.set_interrupt_flag(true);
 
                 vector
@@ -695,29 +830,30 @@ impl Cpu {
         system.cartridge.step_m2_phi2(self.clock);
     }
 
-    pub fn add_break(&mut self, addr: u16, temp: bool) {
-        if !temp { // Allow multiple temporaries, but only one permanent
-            self.remove_break(addr, false);
-        }
-        self.breakpoints.push(Breakpoint {
+    #[cfg(feature="debugger")]
+    pub fn add_break(&mut self, addr: u16, callback: Box<FnBreakpointCallback>) -> BreakpointHandle {
+        let handle = BreakpointHandle(self.debugger.next_breakpoint_handle);
+        self.debugger.next_breakpoint_handle += 1;
+
+        self.debugger.breakpoints.push(Breakpoint {
+            handle,
             addr,
-            temp
-        })
+            callback
+        });
+
+        handle
     }
 
-    pub fn remove_break(&mut self, addr: u16, temp: bool) {
-        if temp {
-            loop { // There may be multiple temporary breakpoints
-                if let Some(i) = self.breakpoints.iter().position(|b| b.temp == true && b.addr == addr) {
-                    self.breakpoints.swap_remove(i);
-                } else {
-                    break;
-                }
-            }
-        } else {
-            if let Some(i) = self.breakpoints.iter().position(|b| b.addr == addr) {
-                self.breakpoints.swap_remove(i);
-            }
+    #[cfg(feature="debugger")]
+    pub fn remove_breakpoint(&mut self, handle: BreakpointHandle) {
+        if let Some(i) = self.debugger.breakpoints.iter().position(|b| b.handle == handle) {
+            self.debugger.breakpoints.swap_remove(i);
         }
+    }
+
+    /// Returns a stack iterator that can walk stack frame pointers
+    #[cfg(feature="debugger")]
+    pub fn backtrace<'a>(&'a self, system: &'a mut System) -> Backtrace<'a> {
+        Backtrace { cpu: &self, system, start_sp: self.sp, sp: self.sp }
     }
 }

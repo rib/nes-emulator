@@ -3,6 +3,8 @@ use super::frame_sequencer::FrameSequencerStatus;
 
 const OUTPUT_SEQUENCE: [u8; 32] = [ 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ];
 
+
+#[derive(Clone, Default)]
 pub struct TriangleChannel {
     pub length_counter: LengthCounter,
 
@@ -18,6 +20,8 @@ impl TriangleChannel {
     pub fn new() -> Self {
         Self {
             length_counter: LengthCounter::new(),
+            ..Default::default()
+            /*
 
             timer_period: 0,
             timer: 0,
@@ -25,7 +29,12 @@ impl TriangleChannel {
             sequence_pos: 0,
 
             output: 0,
+            */
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        *self = Self::new();
     }
 
     pub fn update_output(&mut self) {

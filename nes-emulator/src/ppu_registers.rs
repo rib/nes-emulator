@@ -33,6 +33,8 @@ bitflags! {
         const SPRITES_LEFT_COL_SHOW = 0b0000_0100;
         const BG_LEFT_COL_SHOW      = 0b0000_0010;
         const MONOCHROME            = 0b0000_0001;
+
+        const EMPHASIS              = 0b1110_0000;
     }
 }
 

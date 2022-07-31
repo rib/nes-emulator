@@ -1,4 +1,5 @@
 
+#[derive(Clone, Default)]
 pub struct Mixer {
     square1_enabled: bool,
     square2_enabled: bool,
@@ -9,14 +10,20 @@ pub struct Mixer {
 
 impl Mixer {
     pub fn new() -> Self {
-
-        Mixer {
+        Self {
+            ..Default::default()
+            /*
             square1_enabled: false,
             square2_enabled: false,
             triangle_enabled: false,
             noise_enabled: false,
             dmc_enabled: false,
+            */
         }
+    }
+
+    pub fn power_cycle(&mut self) {
+        *self = Self::new();
     }
 
     pub fn mix(
@@ -37,6 +44,12 @@ impl Mixer {
         //    println!("Mixer: square 1 input = {square1_channel}");
         //    println!("Mixer: square 2 input = {square2_channel}");
         //}
+
+        let square1_channel = if self.square1_enabled { square1_channel } else { 0 };
+        let square2_channel = if self.square2_enabled { square2_channel } else { 0 };
+        let triangle_channel = if self.triangle_enabled { triangle_channel } else { 0 };
+        let noise_channel = if self.noise_enabled { noise_channel } else { 0 };
+        let dmc_channel = if self.dmc_enabled { dmc_channel } else { 0 };
 
         // DAC Output formula from https://www.nesdev.com/apu_ref.txt
 
@@ -70,19 +83,19 @@ impl Mixer {
         //(sample * (i16::MAX as f64)) as i16
     }
 
-    fn set_square1_enabled(&mut self, enabled: bool) {
+    pub fn set_square1_enabled(&mut self, enabled: bool) {
         self.square1_enabled = enabled;
     }
-    fn set_square2_enabled(&mut self, enabled: bool) {
+    pub fn set_square2_enabled(&mut self, enabled: bool) {
         self.square2_enabled = enabled;
     }
-    fn set_triangle_enabled(&mut self, enabled: bool) {
+    pub fn set_triangle_enabled(&mut self, enabled: bool) {
         self.triangle_enabled = enabled;
     }
-    fn set_noise_enabled(&mut self, enabled: bool) {
+    pub fn set_noise_enabled(&mut self, enabled: bool) {
         self.noise_enabled = enabled;
     }
-    fn set_dmc_enabled(&mut self, enabled: bool) {
+    pub fn set_dmc_enabled(&mut self, enabled: bool) {
         self.dmc_enabled = enabled;
     }
 }

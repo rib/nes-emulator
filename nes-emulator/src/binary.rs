@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 
 use crate::constants::*;
-use crate::prelude::{TVSystem, NameTableMirror};
+use crate::cartridge::{TVSystemCompatibility, NameTableMirror};
 
 #[derive(Debug)]
 pub enum Type {
@@ -15,7 +15,7 @@ pub enum Type {
 
 /// iNES file header
 /// See: https://www.nesdev.org/wiki/INES
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct INesConfig {
     /// Format version
     /// Version 1: https://www.nesdev.org/wiki/INES
@@ -27,7 +27,7 @@ pub struct INesConfig {
     pub mapper_number: u8,
 
     /// NTSC or PAL
-    pub tv_system: TVSystem,
+    pub tv_system: TVSystemCompatibility,
 
     /// Number of 16K pages of program ROM
     pub n_prg_rom_pages: usize,
@@ -99,7 +99,7 @@ pub struct NsfConfig {
     pub pal_play_speed: u16,
     pub banks: [u8; 8],
     pub is_bank_switched: bool,
-    pub tv_system: TVSystem,
+    pub tv_system: TVSystemCompatibility,
     pub tv_system_byte: u8,
     pub uses_vrc6: bool,
     pub uses_vrc7: bool,
@@ -111,9 +111,11 @@ pub struct NsfConfig {
     pub prg_len: u32
 }
 
+#[derive(Clone, Debug)]
 pub enum NesBinaryConfig {
     Nsf(NsfConfig),
     INes(INesConfig),
+    None
 }
 
 pub fn check_type(binary: &[u8]) -> Type {
@@ -177,10 +179,10 @@ pub fn parse_nsf_header(nsf: &[u8]) -> Result<NsfConfig> {
     }
     let tv_system_byte = nsf[112];
     let tv_system = match tv_system_byte {
-        0 => TVSystem::Ntsc,
-        1 => TVSystem::Pal,
-        2 => TVSystem::Dual,
-        _ => TVSystem::Unknown,
+        0 => TVSystemCompatibility::Ntsc,
+        1 => TVSystemCompatibility::Pal,
+        2 => TVSystemCompatibility::Dual,
+        _ => TVSystemCompatibility::Unknown,
     };
     let uses = nsf[123];
     let uses_vrc6 =      (uses & 0b0000_0001) != 0;
@@ -270,9 +272,9 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
     let _flags9 = ines[9];
     let flags10 = ines[10];
     let tv_system = match flags10 & 0b11 {
-        0 => TVSystem::Ntsc,
-        2 => TVSystem::Pal,
-        1 | 3 => TVSystem::Dual,
+        0 => TVSystemCompatibility::Ntsc,
+        2 => TVSystemCompatibility::Pal,
+        1 | 3 => TVSystemCompatibility::Dual,
 
         _ => { unreachable!() } // Rust compiler should know this is unreachable :/
     };

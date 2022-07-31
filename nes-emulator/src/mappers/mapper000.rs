@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 use log::{error, trace, debug};
 
+use crate::cartridge::NameTableMirror;
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
-use crate::prelude::NameTableMirror;
 
 use super::mirror_vram_address;
 
@@ -43,8 +43,6 @@ impl Mapper0 {
 }
 
 impl Mapper for Mapper0 {
-    fn reset(&mut self) {}
-
     fn clone_mapper(&self) -> Box<dyn Mapper> {
         Box::new(self.clone())
     }
@@ -134,10 +132,12 @@ impl Mapper for Mapper0 {
 #[test]
 fn test_mapper0_vram_mirroring() {
 
+    use crate::cartridge::TVSystemCompatibility;
+
     let cfg = INesConfig {
         version: 1,
         mapper_number: 0,
-        tv_system: crate::prelude::TVSystem::Ntsc,
+        tv_system: TVSystemCompatibility::Ntsc,
         n_prg_rom_pages: 2,
         n_prg_ram_pages: 2,
         n_chr_rom_pages: 2,

@@ -5,6 +5,7 @@ const FIXED_LENGTHS_TABLE: [u8; 32] = [
     192, 24, 72, 26, 16, 28, 32, 30
 ];
 
+#[derive(Clone, Default)]
 pub struct LengthCounter {
     enabled: bool,
     counter: u8,
@@ -14,9 +15,12 @@ pub struct LengthCounter {
 impl LengthCounter {
     pub fn new() -> Self {
         LengthCounter {
+            ..Default::default()
+            /*
             enabled: false,
             counter: 0,
             halt: false,
+            */
         }
     }
 

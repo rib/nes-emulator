@@ -4,7 +4,7 @@ use log::{error, trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::INesConfig;
-use crate::prelude::NameTableMirror;
+use crate::cartridge::NameTableMirror;
 
 use super::mirror_vram_address;
 use super::bank_select_mask;

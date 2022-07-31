@@ -1,3 +1,5 @@
+
+#[derive(Clone, Default)]
 pub struct VolumeEnvelope {
     start_flag: bool,
     loop_flag: bool,
@@ -14,12 +16,16 @@ pub struct VolumeEnvelope {
 impl VolumeEnvelope {
     pub fn new() -> Self {
         Self {
+            ..Default::default()
+
+            /*
             start_flag: false,
             loop_flag: false,
             divider_reload_value: 0,
             divider_counter: 0,
             use_constant_volume: false,
             decay_level: 0,
+            */
         }
     }
 

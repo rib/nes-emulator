@@ -1,8 +1,5 @@
-use std::ops::Add;
-
 use super::cpu::*;
 use crate::system::System;
-use log::{warn, error};
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Opcode {
@@ -96,6 +93,8 @@ pub enum Opcode {
     TOP,
     XAA,
     XAS,
+
+    HALT, // Invalid op codes
 }
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -142,6 +141,7 @@ enum OopsHandling {
 struct FetchedOperand {
     /// The raw operand associated with the instruction, such as an
     /// immediate value, zero page offset or absolute address
+    #[allow(dead_code)]
     pub raw_operand: u16,
 
     /// The effective/decoded operand, after handling any offsets and indirection
@@ -504,7 +504,10 @@ impl Instruction {
 
             0x9b => Instruction { op: Opcode::XAS, mode: AddressingMode::AbsoluteY, cyc: 5, early_intr_poll: false, },
 
-            _ => panic!("Invalid inst_code:{:02x}", inst_code),
+
+            // Invalid op codes
+            0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xb2 | 0xd2 |0xf2 =>
+                Instruction { op: Opcode::HALT, mode: AddressingMode::Implied, cyc: 1, early_intr_poll: false, },
         }
     }
 
@@ -526,173 +529,7 @@ impl Instruction {
         }
     }
 
-    pub fn loads(&self) -> bool {
-        match self.op {
-            Opcode::ADC => true,
-            Opcode::SBC => true,
-            Opcode::AND => true,
-            Opcode::EOR => true,
-            Opcode::ORA => true,
-            Opcode::ASL => true,
-            Opcode::LSR => true,
-            Opcode::ROL => true,
-            Opcode::ROR => true,
-            Opcode::INC => true,
-            Opcode::INX => false,
-            Opcode::INY => false,
-            Opcode::DEC => true,
-            Opcode::DEX => false,
-            Opcode::DEY => false,
-            Opcode::LDA => true,
-            Opcode::LDX => true,
-            Opcode::LDY => true,
-            Opcode::STA => false,
-            Opcode::STX => false,
-            Opcode::STY => false,
-            Opcode::SEC => false,
-            Opcode::SED => false,
-            Opcode::SEI => false,
-            Opcode::CLC => false,
-            Opcode::CLD => false,
-            Opcode::CLI => false,
-            Opcode::CLV => false,
-            Opcode::CMP => true,
-            Opcode::CPX => true,
-            Opcode::CPY => true,
-            Opcode::JMP => false,
-            Opcode::JSR => false,
-            Opcode::RTI => false,
-            Opcode::RTS => false,
-            Opcode::BCC => false,
-            Opcode::BCS => false,
-            Opcode::BEQ => false,
-            Opcode::BMI => false,
-            Opcode::BNE => false,
-            Opcode::BPL => false,
-            Opcode::BVC => false,
-            Opcode::BVS => false,
-            Opcode::PHA => false,
-            Opcode::PHP => false,
-            Opcode::PLA => false,
-            Opcode::PLP => false,
-            Opcode::TAX => false,
-            Opcode::TAY => false,
-            Opcode::TSX => false,
-            Opcode::TXA => false,
-            Opcode::TXS => false,
-            Opcode::TYA => false,
-            Opcode::BRK => false,
-            Opcode::BIT => true,
-            Opcode::NOP => false,
-            Opcode::AAC => true,
-            Opcode::AAX => true,
-            Opcode::ARR => true,
-            Opcode::ASR => true,
-            Opcode::ATX => true,
-            Opcode::AXA => false,
-            Opcode::AXS => true,
-            Opcode::LAR => true,
-            Opcode::LAX => true,
-            Opcode::DCP => true,
-            Opcode::DOP => true,
-            Opcode::ISC => true,
-            Opcode::RLA => true,
-            Opcode::RRA => true,
-            Opcode::SLO => true,
-            Opcode::SRE => true,
-            Opcode::SXA => false,
-            Opcode::SYA => false,
-            Opcode::TOP => false,
-            Opcode::XAA => false,
-            Opcode::XAS => false,
-        }
-
-    }
-
-    pub fn stores(&self) -> bool {
-        match self.op {
-            Opcode::ADC => false,
-            Opcode::SBC => false,
-            Opcode::AND => false,
-            Opcode::EOR => false,
-            Opcode::ORA => false,
-            Opcode::ASL => true,
-            Opcode::LSR => true,
-            Opcode::ROL => true,
-            Opcode::ROR => true,
-            Opcode::INC => true,
-            Opcode::INX => false,
-            Opcode::INY => false,
-            Opcode::DEC => true,
-            Opcode::DEX => false,
-            Opcode::DEY => false,
-            Opcode::LDA => false,
-            Opcode::LDX => false,
-            Opcode::LDY => false,
-            Opcode::STA => true,
-            Opcode::STX => true,
-            Opcode::STY => true,
-            Opcode::SEC => false,
-            Opcode::SED => false,
-            Opcode::SEI => false,
-            Opcode::CLC => false,
-            Opcode::CLD => false,
-            Opcode::CLI => false,
-            Opcode::CLV => false,
-            Opcode::CMP => false,
-            Opcode::CPX => false,
-            Opcode::CPY => false,
-            Opcode::JMP => false,
-            Opcode::JSR => false,
-            Opcode::RTI => false,
-            Opcode::RTS => false,
-            Opcode::BCC => false,
-            Opcode::BCS => false,
-            Opcode::BEQ => false,
-            Opcode::BMI => false,
-            Opcode::BNE => false,
-            Opcode::BPL => false,
-            Opcode::BVC => false,
-            Opcode::BVS => false,
-            Opcode::PHA => false,
-            Opcode::PHP => false,
-            Opcode::PLA => false,
-            Opcode::PLP => false,
-            Opcode::TAX => false,
-            Opcode::TAY => false,
-            Opcode::TSX => false,
-            Opcode::TXA => false,
-            Opcode::TXS => false,
-            Opcode::TYA => false,
-            Opcode::BRK => false,
-            Opcode::BIT => false,
-            Opcode::NOP => false,
-            Opcode::AAC => false,
-            Opcode::AAX => true,
-            Opcode::ARR => false,
-            Opcode::ASR => false,
-            Opcode::ATX => false,
-            Opcode::AXA => true,
-            Opcode::AXS => false,
-            Opcode::LAR => false,
-            Opcode::LAX => false,
-            Opcode::DCP => true,
-            Opcode::DOP => false,
-            Opcode::ISC => true,
-            Opcode::RLA => true,
-            Opcode::RRA => true,
-            Opcode::SLO => true,
-            Opcode::SRE => true,
-            Opcode::SXA => true,
-            Opcode::SYA => true,
-            Opcode::TOP => false,
-            Opcode::XAA => false,
-            Opcode::XAS => false,
-        }
-
-    }
-
-    pub fn disassemble(&self, operand: u16, effective_address: u16, loaded: u8, stored: u8) -> String {
+    pub fn disassemble(&self, operand: u16, effective_address: u16, _loaded: u8, _stored: u8) -> String {
 
         /*
         if self.stores() {
@@ -757,7 +594,7 @@ impl Cpu {
     /// since it also affects when DMC or OAM DMAs will start (they both only start
     /// when the CPU executes it's next read)
     fn nop_pc_fetch_u8(&mut self, system: &mut System) {
-        self.nop_read_system_bus(system, self.pc);
+        self.dummy_read_system_bus(system, self.pc);
     }
 
     /// Fetch 1 byte from PC and after fetching, advance the PC by one
@@ -775,6 +612,11 @@ impl Cpu {
         let upper = self.pc_fetch_u8(system);
         let data = u16::from(lower) | (u16::from(upper) << 8);
         data
+    }
+
+    pub fn pc_peek_instruction(&self, system: &mut System) -> Instruction {
+        let opcode = system.peek(self.pc);
+        Instruction::from(opcode)
     }
 
     /// Fetch the operand.
@@ -804,12 +646,12 @@ impl Cpu {
             },
             AddressingMode::ZeroPageX => {
                 let in_operand = self.pc_fetch_u8(system);
-                self.nop_read_system_bus(system, in_operand as u16); // read while adding X
+                self.dummy_read_system_bus(system, in_operand as u16); // read while adding X
                 FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.x)), oops_cyc: 0 }
             }
             AddressingMode::ZeroPageY => {
                 let in_operand = self.pc_fetch_u8(system);
-                self.nop_read_system_bus(system, in_operand as u16); // read while adding Y
+                self.dummy_read_system_bus(system, in_operand as u16); // read while adding Y
                 FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.y)), oops_cyc: 0 }
             }
             AddressingMode::AbsoluteX => {
@@ -819,7 +661,10 @@ impl Cpu {
                     if (in_operand & 0xff00u16) != (data & 0xff00u16) || oops_handling == OopsHandling::Always {
                         //println!("AbsoluteX oops: operand = {in_operand:x} addr = {data:x}");
                         match oops_handling {
-                            OopsHandling::Always | OopsHandling::Normal => { self.nop_read_system_bus(system, data); },
+                            OopsHandling::Always | OopsHandling::Normal => {
+                                let wrong_addr = in_operand & 0xff00 | data & 0xff; // Address without carry for high byte
+                                self.dummy_read_system_bus(system, wrong_addr);
+                            },
                             OopsHandling::Ignore => {}
                         }
                         1
@@ -834,7 +679,10 @@ impl Cpu {
                 let oops_cyc =
                     if (in_operand & 0xff00u16) != (data & 0xff00u16) || oops_handling == OopsHandling::Always {
                         match oops_handling {
-                            OopsHandling::Always | OopsHandling::Normal => { self.nop_read_system_bus(system, data); },
+                            OopsHandling::Always | OopsHandling::Normal => {
+                                let wrong_addr = in_operand & 0xff00 | data & 0xff; // Address without carry for high byte
+                                self.dummy_read_system_bus(system, wrong_addr);
+                            },
                             OopsHandling::Ignore => {}
                         }
                         1
@@ -858,7 +706,10 @@ impl Cpu {
                 //let data = signed_addr as u16;
                 let oops_cyc = if (data & 0xff00u16) != (self.pc & 0xff00u16) || oops_handling == OopsHandling::Always {
                     match oops_handling {
-                        OopsHandling::Always | OopsHandling::Normal => { self.nop_read_system_bus(system, data); },
+                        OopsHandling::Always | OopsHandling::Normal => {
+                            let wrong_addr = self.pc & 0xff00 | data & 0xff; // Address without carry for high byte
+                            self.dummy_read_system_bus(system, wrong_addr);
+                        },
                         OopsHandling::Ignore => {}
                     }
                     1
@@ -888,7 +739,7 @@ impl Cpu {
             AddressingMode::IndirectX => {
                 let src_addr = self.pc_fetch_u8(system);
 
-                self.nop_read_system_bus(system, src_addr as u16); // dummy read while adding X
+                self.dummy_read_system_bus(system, src_addr as u16); // dummy read while adding X
                 let dst_addr = src_addr.wrapping_add(self.x);
 
                 let data_lower = u16::from(self.read_system_bus(system, u16::from(dst_addr)));
@@ -909,7 +760,10 @@ impl Cpu {
                 let indirect = base_data.wrapping_add(u16::from(self.y));
                 let oops_cyc = if (base_data & 0xff00u16) != (indirect & 0xff00u16) || oops_handling == OopsHandling::Always {
                     match oops_handling {
-                        OopsHandling::Always | OopsHandling::Normal => { self.nop_read_system_bus(system, indirect); },
+                        OopsHandling::Always | OopsHandling::Normal => {
+                            let wrong_addr = base_data & 0xff00 | indirect & 0xff; // Address without carry for high byte
+                            self.dummy_read_system_bus(system, wrong_addr);
+                        },
                         OopsHandling::Ignore => {}
                     }
                     1
@@ -945,10 +799,8 @@ impl Cpu {
             AddressingMode::Accumulator => (self.fetch_operand(system, mode, oops_handling), self.a),
             // Immediate value uses 1 byte of data immediately after opcode as it is
             AddressingMode::Immediate => {
-                //let FetchedOperand { data, fetch_cyc: cyc } = self.fetch_operand(system, mode, false);
                 let fetched_operand = self.fetch_operand(system, mode, oops_handling);
                 debug_assert!(fetched_operand.operand < 0x100u16);
-                //(FetchedOperand { data, fetch_cyc: cyc }, data as u8)
                 (fetched_operand, fetched_operand.operand as u8)
             }
             // Others pull back the data from the returned address. May not be used
@@ -956,10 +808,6 @@ impl Cpu {
                 let fetched_operand = self.fetch_operand(system, mode, oops_handling);
                 let data = self.read_system_bus(system, fetched_operand.operand);
                 (fetched_operand, data)
-
-                //let FetchedOperand { data: addr, fetch_cyc: cyc } = self.fetch_operand(system, mode, false);
-                //let data = system.read_u8(addr, false);
-                //(FetchedOperand { data: addr, fetch_cyc: cyc }, data)
             }
         };
 
@@ -971,20 +819,36 @@ impl Cpu {
         (fetched, value)
     }
 
+    // TODO: experiment with something like this for enabling the debugger
+    // to step single cycles, within an instruction:
+    // https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=3cea23f5d8935a3463dcaad97212af88
+    //
     /// Execute the next instruction
-    /// https://www.nesdev.org/obelisk-6502-guide/reference.html
     pub fn step_instruction(&mut self, system: &mut System) {
         //println!("CPU: step_instruction()");
 
-        if self.breakpoints_paused == false && self.breakpoints.len() > 0 {
-            for b in &self.breakpoints {
-                if b.addr == self.pc {
-                    self.breakpoint_hit = true;
+        #[cfg(feature="debugger")]
+        {
+            if self.debugger.breakpoints.len() > 0 {
+                let mut tmp = std::mem::take(&mut self.debugger.breakpoints);
+                let mut remove = vec![];
+                for bp in tmp.iter_mut() {
+                    if bp.addr == self.pc {
+                        self.debugger.breakpoint_hit = true;
+                        if (bp.callback)(self, bp.addr) == BreakpointCallbackAction::Remove {
+                            remove.push(bp.handle);
+                        }
+                    }
+                }
+                std::mem::swap(&mut tmp, &mut self.debugger.breakpoints);
+                for h in remove {
+                    self.remove_breakpoint(h);
+                }
+                if self.debugger.breakpoint_hit {
                     return;
                 }
             }
         }
-        self.breakpoints_paused = false;
 
         // Note: we may increment self.clock mid-instruction just so long
         // as we are sure we won't push the clock into the future (to allow
@@ -992,6 +856,7 @@ impl Cpu {
         //
         // At the end of the instruction we will correct the final clock relative
         // to this start_cycle
+        #[cfg(debug_assertions)]
         let start_cycle = self.clock;
 
         #[cfg(debug_assertions)]
@@ -1122,7 +987,7 @@ impl Cpu {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
                 if mode != AddressingMode::Accumulator {
-                    self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                    self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 }
                 let result = arg.wrapping_shl(1);
 
@@ -1145,7 +1010,7 @@ impl Cpu {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
                 if mode != AddressingMode::Accumulator {
-                    self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                    self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 }
                 let result = arg.wrapping_shr(1);
 
@@ -1168,7 +1033,7 @@ impl Cpu {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
                 if mode != AddressingMode::Accumulator {
-                    self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                    self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 }
                 let result =
                     arg.wrapping_shl(1) | (if self.carry_flag() { 0x01 } else { 0x00 });
@@ -1192,7 +1057,7 @@ impl Cpu {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
                 if mode != AddressingMode::Accumulator {
-                    self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                    self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 }
                 let result =
                     arg.wrapping_shr(1) | (if self.carry_flag() { 0x80 } else { 0x00 });
@@ -1215,7 +1080,7 @@ impl Cpu {
             Opcode::INC => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 let result = arg.wrapping_add(1);
 
                 let is_zero = result == 0;
@@ -1256,7 +1121,7 @@ impl Cpu {
             Opcode::DEC => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 let result = arg.wrapping_sub(1);
 
                 let is_zero = result == 0;
@@ -1445,12 +1310,12 @@ impl Cpu {
                 //let FetchedOperand { operand: addr, oops_cyc: _, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                 let addr_lo = self.pc_fetch_u8(system) as u16;
 
-                self.nop_read_system_bus(system, self.sp as u16 + 0x100); // "internal operation (predecrement S?)"
+                self.dummy_read_system_bus(system, self.sp as u16 + 0x100); // "internal operation (predecrement S?)"
 
                 let opcode_addr = inst_pc;
                 let ret_addr = opcode_addr + 2;
-                self.stack_push(system, (ret_addr >> 8) as u8);
-                self.stack_push(system, (ret_addr & 0xff) as u8);
+                self.stack_push(system, (ret_addr >> 8) as u8, StackByteTags::ADDR_HI);
+                self.stack_push(system, (ret_addr & 0xff) as u8, StackByteTags::ADDR_LO);
 
                 let addr_hi = (self.pc_fetch_u8(system) as u16) << 8;
                 self.pc = addr_hi | addr_lo;
@@ -1460,7 +1325,7 @@ impl Cpu {
             Opcode::RTI => {
                 self.nop_pc_fetch_u8(system); // read next instruction byte but throw it away
 
-                self.nop_read_system_bus(system, self.sp as u16 + 0x100); // dummy read while incrementing stack pointer S
+                self.dummy_read_system_bus(system, self.sp as u16 + 0x100); // dummy read while incrementing stack pointer S
                 self.p = unsafe { Flags::from_bits_unchecked(self.stack_pop(system)) & Flags::REAL };
                 let pc_lower = self.stack_pop(system);
                 let pc_upper = self.stack_pop(system);
@@ -1469,12 +1334,12 @@ impl Cpu {
             }
             Opcode::RTS => {
                 self.nop_pc_fetch_u8(system); // read next instruction byte but throw it away
-                self.nop_read_system_bus(system, self.sp as u16 + 0x100); // dummy read while incrementing stack pointer S
+                self.dummy_read_system_bus(system, self.sp as u16 + 0x100); // dummy read while incrementing stack pointer S
                 let pc_lower = self.stack_pop(system);
                 let pc_upper = self.stack_pop(system);
 
                 self.pc = (((pc_upper as u16) << 8) | (pc_lower as u16)) + 1;
-                self.nop_read_system_bus(system, self.pc); // dummy read while incrementing PC
+                self.dummy_read_system_bus(system, self.pc); // dummy read while incrementing PC
 
                 expected_cyc
             }
@@ -1605,19 +1470,19 @@ impl Cpu {
             Opcode::PHA => {
                 self.nop_pc_fetch_u8(system); // discard operand
 
-                self.stack_push(system, self.a);
+                self.stack_push(system, self.a, StackByteTags::A);
                 expected_cyc
             }
             Opcode::PHP => {
                 self.nop_pc_fetch_u8(system); // discard operand
 
-                self.stack_push(system, (self.p | Flags::BREAK_HIGH | Flags::BREAK_LOW).bits());
+                self.stack_push(system, (self.p | Flags::BREAK_HIGH | Flags::BREAK_LOW).bits(), StackByteTags::STATUS);
                 expected_cyc
             }
             Opcode::PLA => {
                 self.nop_pc_fetch_u8(system); // discard operand
 
-                self.nop_read_system_bus(system, self.sp as u16 + 0x100); // increment stack pointer S
+                self.dummy_read_system_bus(system, self.sp as u16 + 0x100); // increment stack pointer S
                 let result = self.stack_pop(system);
 
                 let is_zero = result == 0;
@@ -1631,7 +1496,7 @@ impl Cpu {
             Opcode::PLP => {
                 self.nop_pc_fetch_u8(system); // discard operand
 
-                self.nop_read_system_bus(system, self.sp as u16 + 0x100); // increment stack pointer S
+                self.dummy_read_system_bus(system, self.sp as u16 + 0x100); // increment stack pointer S
                 self.p = unsafe { Flags::from_bits_unchecked(self.stack_pop(system)) & Flags::REAL };
                 //println!("Status after PLP = {:?}", self.p);
                 expected_cyc
@@ -1899,7 +1764,7 @@ impl Cpu {
             Opcode::DCP => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while decrementing
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while decrementing
                 let dec_result = arg.wrapping_sub(1);
 
                 #[cfg(feature="trace")]
@@ -1928,7 +1793,7 @@ impl Cpu {
             Opcode::ISC => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while modifying
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while modifying
                 let inc_result = arg.wrapping_add(1);
 
                 self.write_system_bus(system, addr, inc_result);
@@ -1953,7 +1818,7 @@ impl Cpu {
             Opcode::RLA => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while shifting
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while shifting
                 let result_rol =
                     arg.wrapping_shl(1) | (if self.carry_flag() { 0x01 } else { 0x00 });
 
@@ -1977,7 +1842,7 @@ impl Cpu {
             Opcode::RRA => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while shifting
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while shifting
                 let result_ror =
                     arg.wrapping_shr(1) | (if self.carry_flag() { 0x80 } else { 0x00 });
 
@@ -2008,7 +1873,7 @@ impl Cpu {
             Opcode::SLO => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while shifting
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while shifting
                 let result_asl = arg.wrapping_shl(1);
 
                 let is_carry = (arg & 0x80) == 0x80;
@@ -2030,7 +1895,7 @@ impl Cpu {
             Opcode::SRE => {
                 let (FetchedOperand { operand: addr, ..}, arg) = self.fetch_operand_and_value(system, mode, OopsHandling::Always);
 
-                self.nop_write_system_bus(system, addr, arg); // redundant write while shifting
+                self.dummy_write_system_bus(system, addr, arg); // redundant write while shifting
                 let result_lsr = arg.wrapping_shr(1);
 
                 let is_carry = (arg & 0x01) == 0x01;
@@ -2108,6 +1973,10 @@ impl Cpu {
                 // TODO
                 expected_cyc
             },
+
+            Opcode::HALT => {
+                panic!("Invalid opcode {inst_code:02x}");
+            }
         };
 
         // "The output from the edge detector and level detector are polled at
@@ -2133,6 +2002,8 @@ impl Cpu {
             self.trace.instruction_op_code = inst_code;
         }
 
+        // Cross-reference our predicted cycle count with the actual read/write cycle count
+        // (ignoring cycles that elapsed while suspended for the DMA unit)
         #[cfg(debug_assertions)]
         {
             let final_clock = start_cycle + (self.non_instruction_cycles as u64) + cyc as u64;

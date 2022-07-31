@@ -4,7 +4,7 @@ use log::{trace, debug};
 use crate::constants::*;
 use crate::mappers::Mapper;
 use crate::binary::NsfConfig;
-use crate::prelude::NameTableMirror;
+use crate::cartridge::NameTableMirror;
 
 use super::mirror_vram_address;
 
@@ -60,8 +60,6 @@ impl Mapper31 {
 }
 
 impl Mapper for Mapper31 {
-    fn reset(&mut self) {}
-
     fn clone_mapper(&self) -> Box<dyn Mapper> {
         Box::new(self.clone())
     }

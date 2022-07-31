@@ -1,47 +1,81 @@
 use std::time::Duration;
 use std::time::Instant;
 
-use log::{warn};
 use anyhow::Result;
 
 use crate::apu::apu::Apu;
-use crate::binary;
+//use crate::binary;
 use crate::binary::NesBinaryConfig;
-use crate::binary::NsfConfig;
+//use crate::cartridge;
+use crate::framebuffer::*;
+use crate::cartridge::*;
 use crate::constants::*;
-use crate::prelude::*;
+#[cfg(feature="trace")]
+use crate::hook::{HooksList, HookHandle};
 use crate::system::*;
 use crate::cpu::cpu::*;
 use crate::ppu::*;
-use crate::ppusim::{PpuSim};
 
-const NTSC_CPU_CLOCK_HZ: u32 = 1_789_166;
+#[cfg(feature="nsf-player")]
+use crate::binary::NsfConfig;
 
+pub type FnInstructionTraceHook = dyn FnMut(&mut Nes, &TraceState);
+
+/// A target for progressing the emulator that provides a limit on how much time
+/// is spent emulating before giving control back to the caller.
 #[derive(Clone, Copy)]
 pub enum ProgressTarget {
     /// Progress until the CPU clock reaches the given count
+    ///
+    /// It's recommended that graphical front ends should calculate clock targets
+    /// according to the known frequency of the CPU combined with monitoring
+    /// the performance of the emulator so that upper limits can be set to ensure
+    /// the UI can remain interactive, even if emulation is not able to run
+    /// at full speed (such as for debug builds)
+    ///
+    /// To help with calculating target clock counts, see:
+    /// [`Nes::cpu_clocks_for_duration`] and [`Nes::cpu_clocks_for_time_since_power_cycle`]
     Clock(u64),
 
-    /// Progress up to the given wall clock time, relative to the [`Nes::poweron`] time
-    Time(Instant)
+    /// Progress up to the given time, relative to the [`Nes::power_cycle`] time
+    ///
+    /// Internally the target is converted into a clock target by
+    /// measuring the duration between this instant and `start_timestamp` (given to
+    /// [`Nes::power_cycle`]) and using the CPU's clock frequency to calculate
+    /// what the clock counter should be at the given timestamp in the future.
+    ///
+    /// If wall-clock timestamps are given (`Instant::now()`) then the emulation
+    /// speed will appear to match that of the original hardware, so long as the
+    /// emulator is keeping up.
+    ///
+    /// If the emulator can't keep up with wall-clock time (for example with
+    /// a debug build) then the target will take increasingly longer and longer
+    /// to reach and it will not be possible to interact with the emulator.
+    ///
+    /// It's therefore generally recommended for graphical front ends to use a
+    /// carefully managed [`ProgressTarget::Clock`] target instead that can
+    /// impose strict limits on the `ProgressTarget` that can ensure any UI
+    /// remains interactive even if the emulator is not currently able to keep
+    /// up.
+    Time(Instant),
+
+    /// Progress until a new frame is ready
+    ///
+    /// This is generally only recommended for batched, non-interactive emulation
+    /// in case the emulator is unable to run at full speed (such as for debug
+    /// builds)
+    FrameReady
 }
 
 pub enum ProgressStatus {
     FrameReady,
     ReachedTarget,
-    Error
+    Breakpoint,
 }
 
-pub struct Nes {
-    reference_timestamp: Instant,
-    reference_cpu_clock: u64,
-
-    cpu: Cpu,
-    //cpu_clock: u64,
-    //ppu_clock: u64,
-    //apu_clock: u64,
-    system: System,
-
+#[cfg(feature="nsf-player")]
+#[derive(Clone, Debug, Default)]
+struct NsfPlayer {
     nsf_config: Option<NsfConfig>,
     nsf_initialized: bool,
     nsf_waiting: bool,
@@ -49,92 +83,159 @@ pub struct Nes {
     nsf_last_step_cycle: u64,
     nsf_current_track: u8,
 }
+#[cfg(feature="nsf-player")]
+impl NsfPlayer {
+    pub(crate) fn restart(&mut self) {
+        *self = Self {
+            nsf_config: self.nsf_config.clone(),
+            ..Default::default()
+        };
+    }
+}
+
+
+/// The top-level representation of a full NES console
+pub struct Nes {
+    pub model: Model,
+    cpu_clock_hz: u32,
+    cpu_clocks_per_frame: f32,
+
+    cpu: Cpu,
+    reference_timestamp: Instant,
+    reference_cpu_clock: u64,
+
+    system: System,
+
+    #[cfg(feature="nsf-player")]
+    nsf_player: NsfPlayer,
+
+    #[cfg(feature="trace")]
+    trace_hooks: HooksList<FnInstructionTraceHook>,
+}
 
 impl Nes {
-    pub fn new(audio_sample_rate: u32) -> Nes {
 
+    /// Creates a new Nes console, powered on but with no cartridge inserted.
+    ///
+    /// The next step is to load and insert a cartridge, either manually via
+    /// [`Cartridge::from_binary`] and [`Nes::insert_cartridge`] or by calling [`Nes::open_binary`]
+    ///
+    /// After a cartridge has been inserted then the Nes should be reset again
+    /// either via [`Nes::reset`] or [`Nes:power_cycle`]
+    ///
+    /// Nes emulation can then be progressed by repeatedly calling [`Nes:progress`]
+    pub fn new(model: Model, audio_sample_rate: u32, start_timestamp: Instant) -> Nes {
         let cpu = Cpu::default();
-        let ppu = Ppu::default();
-        let ppu_sim = PpuSim::new(crate::ppusim::Revision::RP2C02G);
+        let system = System::new(model, audio_sample_rate, Cartridge::none());
+        let (cpu_clock_hz, cpu_clocks_per_frame) = match model {
+            Model::Ntsc => (NTSC_CPU_CLOCK_HZ, 29780.5),
+            Model::Pal => (PAL_CPU_CLOCK_HZ, 33247.5),
+        };
+        let mut nes = Nes {
+            model,
+            cpu_clock_hz,
+            cpu_clocks_per_frame,
 
-        let apu = Apu::new(NTSC_CPU_CLOCK_HZ, audio_sample_rate);
-
-        let system = System::new(ppu, ppu_sim, apu, Cartridge::none());
-        Nes {
-            reference_timestamp: Instant::now(),
+            reference_timestamp: start_timestamp,
             reference_cpu_clock: 0,
 
             cpu,
-            //cpu_clock: 0,
-            //ppu_clock: 0,
-            //apu_clock: 0,
             system,
 
-            nsf_config: None,
-            nsf_initialized: false,
-            nsf_waiting: false,
-            nsf_step_period: 0,
-            nsf_last_step_cycle: 0,
-            nsf_current_track: 0,
-        }
+            #[cfg(feature="nsf-player")]
+            nsf_player: NsfPlayer {
+                nsf_config: None,
+                nsf_initialized: false,
+                nsf_waiting: false,
+                nsf_step_period: 0,
+                nsf_last_step_cycle: 0,
+                nsf_current_track: 0,
+            },
+
+            #[cfg(feature="trace")]
+            trace_hooks: HooksList::default(),
+        };
+
+        nes.power_cycle(start_timestamp);
+        nes
     }
 
-    fn try_open_binary(&mut self, binary: &[u8]) -> Result<()> {
-        match binary::parse_any_header(binary)? {
-            NesBinaryConfig::INes(ines_config) => {
-                let cartridge = Cartridge::from_ines_binary(&ines_config, binary)?;
-                self.insert_cartridge(Some(cartridge));
-            }
-            NesBinaryConfig::Nsf(nsf_config) => {
-                let cartridge = Cartridge::from_nsf_binary(&nsf_config, binary)?;
-                self.nsf_config = Some(nsf_config);
-                self.insert_cartridge(Some(cartridge));
-            }
-        }
-
-        Ok(())
-    }
-
+    /// Loads the given `binary` as a `Cartridge` and inserts the loaded cartridge
+    ///
+    /// It's also necessary to explicitly power cycle or reset the Nes via [`Nes::power_cycle`]
+    /// or [`Nes::reset`].
+    ///
+    /// This may fail if opening an NSF binary if the "nsf-player" feature is not enabled.
     pub fn open_binary(&mut self, binary: &[u8]) -> Result<()> {
-
-        if let Err(err) = self.try_open_binary(binary) {
-            log::warn!("Failed to open binary: {:?}", err);
-            self.insert_cartridge(None);
-            Err(err)?
+        match Cartridge::from_binary(binary) {
+            Ok(cartridge) => {
+                if let Err(err) = self.insert_cartridge(Some(cartridge)) {
+                    log::error!("Failed to insert cartridge: {:?}", err);
+                    self.insert_cartridge(None)?;
+                    Err(err)?
+                }
+            }
+            Err(err) => {
+                log::error!("Failed to open binary: {:?}", err);
+                self.insert_cartridge(None)?;
+                Err(err)?
+            }
         }
         Ok(())
     }
 
-    pub fn insert_cartridge(&mut self, cartridge: Option<Cartridge>) {
+    /// Inserts the given cartridge
+    ///
+    /// It's also necessary to explicitly power cycle or reset the Nes via [`Nes::power_cycle`]
+    /// or [`Nes::reset`].
+    ///
+    /// This may fail if inserting an NSF cartridge if the "nsf-player" feature is not enabled.
+    pub fn insert_cartridge(&mut self, cartridge: Option<Cartridge>) -> Result<()> {
         if let Some(cartridge) = cartridge {
-            self.system.cartridge = cartridge;
+            if let NesBinaryConfig::Nsf(nsf_config) = &cartridge.config {
+                #[cfg(feature="nsf-player")]
+                {
+                    self.nsf_player.nsf_config = Some(nsf_config.clone());
+                    self.system.cartridge = cartridge;
+                }
+                #[cfg(not(feature="nsf-player"))]
+                {
+                    let _ = nsf_config;
+                    Err(anyhow::anyhow!("NSF cartridges not supported (missing \"nsf-player\" feature"))?
+                }
+            } else {
+                self.system.cartridge = cartridge;
+            }
         } else {
             self.system.cartridge = Cartridge::none();
         }
+        Ok(())
     }
 
+    #[cfg(feature="nsf-player")]
     fn nsf_init(&mut self) {
-        if let Some(ref nsf_config) = self.nsf_config {
+        #[cfg(feature="nsf-player")]
+        if let Some(ref nsf_config) = self.nsf_player.nsf_config {
 
             // TODO: handle PAL...
-            self.nsf_step_period = ((nsf_config.ntsc_play_speed as u64 * NTSC_CPU_CLOCK_HZ as u64) / 1_000_000u64) as u64;
-            self.nsf_last_step_cycle = self.cpu.clock;
+            self.nsf_player.nsf_step_period = ((nsf_config.ntsc_play_speed as u64 * NTSC_CPU_CLOCK_HZ as u64) / 1_000_000u64) as u64;
+            self.nsf_player.nsf_last_step_cycle = self.cpu.clock;
 
             // "1. Write $00 to all RAM at $0000-$07FF and $6000-$7FFF."
             // (already assumed to be the poweron state)
 
             // 2. Initialize the sound registers by writing $00 to $4000-$4013, and $00 then $0F to $4015.
             for i in 0..0x13 {
-                self.system.cpu_write(0x4000 + i, 0x00, self.cpu.clock);
+                self.system.cpu_write(0x4000 + i, 0x00);
                 self.cpu.clock +=1;
             }
-            self.system.cpu_write(0x4015, 0x00, self.cpu.clock);
+            self.system.cpu_write(0x4015, 0x00);
             self.cpu.clock +=1;
-            self.system.cpu_write(0x4015, 0x0f, self.cpu.clock);
+            self.system.cpu_write(0x4015, 0x0f);
             self.cpu.clock +=1;
 
             // 3. Initialize the frame counter to 4-step mode ($40 to $4017).
-            self.system.cpu_write(0x4017, 0x40, self.cpu.clock);
+            self.system.cpu_write(0x4017, 0x40);
             self.cpu.clock +=1;
 
             // 4. If the tune is bank switched, load the bank values from $070-$077 into $5FF8-$5FFF.
@@ -149,94 +250,125 @@ impl Nes {
 
             // 7. Call the music INIT routine.
             let init = nsf_config.init_address;
-            self.system.cpu_write(0x5001, (init & 0xff) as u8, self.cpu.clock);
+            self.system.cpu_write(0x5001, (init & 0xff) as u8);
             self.cpu.clock +=1;
-            self.system.cpu_write(0x5002, ((init & 0xff00) >> 8) as u8, self.cpu.clock);
+            self.system.cpu_write(0x5002, ((init & 0xff00) >> 8) as u8);
             self.cpu.clock +=1;
             //self.cpu.add_break(0x5003, false); // break when we hit the infinite loop in the NSF bios
-            self.nsf_initialized = false;
-            self.nsf_current_track = first_track;
+            self.nsf_player.nsf_initialized = false;
+            self.nsf_player.nsf_current_track = first_track;
             self.cpu.pc = 0x5000;
 
-            println!("Calling NSF init code: period = {}", self.nsf_step_period);
+            println!("Calling NSF init code: period = {}", self.nsf_player.nsf_step_period);
         }
     }
 
-    /// Assumes everything is Default initialized beforehand
-    pub fn poweron(&mut self, start_timestamp: Instant) {
-        debug_assert!(self.reference_cpu_clock == 0); // We don't currently support calling poweron more than once.
+    /// Initializes the hardware as if the Nes were powered off and then on again.
+    ///
+    /// Where appropriate this will preserve debug state (such as breakpoints and PPU hooks)
+    pub fn power_cycle(&mut self, start_timestamp: Instant) {
+        self.system.power_cycle();
+
+        self.cpu.power_cycle();
+        self.reference_cpu_clock = 0;
         self.reference_timestamp = start_timestamp;
 
-        if self.nsf_config.is_some() {
-            self.nsf_init();
-        } else {
+        #[cfg(feature="nsf-player")]
+        {
+            self.nsf_player.restart();
+
+            if self.nsf_player.nsf_config.is_some() {
+                self.nsf_init();
+            } else {
+                self.cpu.handle_interrupt(&mut self.system, Interrupt::RESET);
+            }
+        }
+        #[cfg(not(feature="nsf-player"))]
+        {
             self.cpu.handle_interrupt(&mut self.system, Interrupt::RESET);
         }
     }
 
+    /// Raises a reset interrupt for the CPU as if the reset button were pressed on the Nes
     pub fn reset(&mut self) {
-        self.cpu.p |= Flags::INTERRUPT;
-        self.cpu.sp = self.cpu.sp.wrapping_sub(3);
-        self.cpu.handle_interrupt(&mut self.system, Interrupt::RESET);
+        self.system.reset();
+        self.cpu.reset(&mut self.system);
 
-        self.system.apu.reset();
+        #[cfg(feature="nsf-player")]
+        self.nsf_player.restart();
     }
 
+    /// Get a mutable reference to the system bus, which also owns the PPU and APU
     pub fn system_mut(&mut self) -> &mut System {
         &mut self.system
     }
-    pub fn system_cpu(&mut self) -> &mut Cpu {
+
+    /// Get a mutable reference to the CPU
+    pub fn cpu_mut(&mut self) -> &mut Cpu {
         &mut self.cpu
     }
-    pub fn system_ppu(&mut self) -> &mut Ppu {
+
+    /// Get a mutable reference to the PPU
+    pub fn ppu_mut(&mut self) -> &mut Ppu {
         &mut self.system.ppu
     }
-    pub fn system_apu(&mut self) -> &mut Apu {
+
+    /// Get a mutable reference to the APU
+    pub fn apu_mut(&mut self) -> &mut Apu {
         &mut self.system.apu
     }
 
+    /// Read a value from the system bus, without side effects
     pub fn peek_system_bus(&mut self, addr: u16) -> u8 {
         self.system.peek(addr)
     }
 
+    /// Read a value from the PPU bus, without side effects
     pub fn peek_ppu_bus(&mut self, addr: u16) -> u8 {
         self.system.ppu.unbuffered_ppu_bus_peek(&mut self.system.cartridge, addr)
     }
 
+    /// Allocate a new framebuffer that is suitable for using as a PPU render target
+    ///
+    /// To configure the PPU to start rendering to this framebuffer then call [`Ppu:swap_framebuffer`]
     pub fn allocate_framebuffer(&self) -> Framebuffer {
         self.system.ppu.alloc_framebuffer()
-        //Framebuffer::new(FRAMEBUFFER_WIDTH, FRAMEBUFFER_HEIGHT, PixelFormat::RGBA8888)
     }
 
-    // Aiming for Meson compatible trace format which can be used for cross referencing
+    /// Add a hook function to trace all CPU instructions executed
+    ///
+    /// Debuggers can use this to display a real-time disassembly trace of instructions or
+    /// to write a disassembly log to a file.
+    ///
+    /// The `Instruction` referenced in the `TraceState` can be disassembled via [`Instruction::disassemble`]
+    /// for display
     #[cfg(feature="trace")]
-    fn display_trace(&mut self) {
+    pub fn add_cpu_instruction_trace_hook(&mut self, func: Box<FnInstructionTraceHook>) -> HookHandle {
+        self.trace_hooks.add_hook(func)
+    }
+
+    /// Remove a CPU instruction tracing hook
+    #[cfg(feature="trace")]
+    pub fn remove_cpu_instruction_trace_hook(&mut self, handle: HookHandle) {
+        self.trace_hooks.remove_hook(handle);
+    }
+
+    #[cfg(feature="trace")]
+    fn call_cpu_instruction_trace_hooks(&mut self) {
         let trace = &mut self.cpu.trace;
-        if trace.last_display_cycle_count == trace.cycle_count {
+        if trace.last_hook_cycle_count == trace.cycle_count {
             return;
         }
-        trace.last_display_cycle_count = trace.cycle_count;
+        trace.last_hook_cycle_count = trace.cycle_count;
 
-        let pc = trace.instruction_pc;
-        let op = trace.instruction_op_code;
-        let operand_len = trace.instruction.len() - 1;
-        let bytecode_str = if operand_len == 2 {
-            let lsb = trace.instruction_operand & 0xff;
-            let msb = (trace.instruction_operand & 0xff00) >> 8;
-            format!("${op:02X} ${lsb:02X} ${msb:02X}")
-        } else if operand_len == 1{
-            format!("${op:02X} ${:02X}", trace.instruction_operand)
-        } else {
-            format!("${op:02X}")
-        };
-        let disassembly = trace.instruction.disassemble(trace.instruction_operand, trace.effective_address, trace.loaded_mem_value, trace.stored_mem_value);
-        let a = trace.saved_a;
-        let x = trace.saved_x;
-        let y = trace.saved_y;
-        let sp = trace.saved_sp & 0xff;
-        let p = trace.saved_p.to_flags_string();
-        let cpu_cycles = trace.cycle_count;
-        println!("{pc:0X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}");
+        let trace = self.cpu.trace.clone();
+        if self.trace_hooks.hooks.len() != 0 {
+            let mut hooks = std::mem::take(&mut self.trace_hooks);
+            for hook in hooks.hooks.iter_mut() {
+                (hook.func)(self, &trace);
+            }
+            std::mem::swap(&mut self.trace_hooks, &mut hooks);
+        }
     }
 
     /// Returns the number of CPU clocks that will cover the given `duration`
@@ -254,123 +386,220 @@ impl Nes {
     /// Based on the power on time for the NES, (or the last reference point that was saved) this
     /// calculates the number of (cpu) clock cycles that should have elapsed by the time we reach
     /// the `target_timestamp`
-    pub fn cpu_clocks_for_time_since_poweron(&self, target_timestamp: Instant) -> u64 {
+    pub fn cpu_clocks_for_time_since_power_cycle(&self, target_timestamp: Instant) -> u64 {
         let delta = target_timestamp - self.reference_timestamp;
         let delta_clocks = self.cpu_clocks_for_duration(delta);
         self.reference_cpu_clock + delta_clocks
     }
 
-    pub fn progress(&mut self, target: ProgressTarget) -> ProgressStatus {
+    /// Account of any PPU clock drift, either due to having a a non-integer CPU:PPU clock ratio
+    /// with PAL or due to PPU dot breakpoints that may have stalled the PPU for part of an CPU
+    /// instruction
+    ///
+    /// Returns false if a PPU dot breakpoint is hit or if a frame becomes ready to draw
+    /// (it won't clear the status flags for breakpoints or ready frames)
+    fn catch_up_ppu_drift(&mut self) -> bool {
+        let expected_ppu_clock = self.cpu.clock * 3;
 
-        //println!("NES: progress()");
+        //println!("cpu clock = {}, expected PPU clock = {}, actual ppu clock = {}", self.cpu.clock, expected_ppu_clock, self.system.ppu_clock());
+        let ppu_delta = expected_ppu_clock - self.system.ppu_clock();
 
-        let cpu_clock_target = match target {
-            ProgressTarget::Time(target_timestamp) => self.cpu_clocks_for_time_since_poweron(target_timestamp),
-            ProgressTarget::Clock(clock) => clock
-        };
-
-        //let rental = framebuffer.rent_data();
-        //if let Some(mut fb_data) = rental {
-        //    let fb = fb_data.data.as_mut_ptr();
-            loop {
-                // We treat the CPU as our master clock and the PPU is driven according
-                // to the forward progress of the CPU's clock.
-
-                // For now just assuming NTSC which has an exact 1:3 ratio between cpu
-                // clocks and PPU and so we shouldn't actually end up with anything to
-                // catch up on here but conceptually we would have catch up to do when
-                // emulating a PAL PPU
-
-                let expected_ppu_clock = self.cpu.clock * 3;
-
-                //println!("cpu clock = {}, expected PPU clock = {}, actual ppu clock = {}", self.cpu.clock, expected_ppu_clock, self.system.ppu_clock());
-                let ppu_delta = expected_ppu_clock - self.system.ppu_clock();
-
-                // Let the PPU catch up with the CPU clock before progressing the CPU
-                // in case we need to quit to allow a redraw (so we will resume
-                // catching afterwards)
-                for _ in 0..ppu_delta {
-                    self.system.ppu_step();
-
-                    #[cfg(feature="sim")]
-                    let _status = self.system.ppu_sim_step();
-                }
-
-                if self.system.ppu.frame_ready {
-                    self.system.ppu.frame_ready = false;
-                    self.system.pad1.update_button_press_latches();
-                    self.system.pad2.update_button_press_latches();
-                    return ProgressStatus::FrameReady;
-                }
-
-                self.cpu.step_instruction(&mut self.system);
-                //println!("cpu clock = {}, apu clock = {}", self.cpu.clock, self.system.apu_clock());
-                debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
-                if self.cpu.breakpoint_hit {
-                    self.cpu.remove_break(self.cpu.pc, true);
-                }
-
-                // TODO add feature check for nsf_player
-                if self.nsf_config.is_some() {
-
-                    if self.cpu.pc == 0x5003 {
-                        self.nsf_waiting = true;
-                        if !self.nsf_initialized {
-                            self.nsf_initialized = true;
-                            println!("Initialized NSF playback");
-                        }
-                    }
-
-                    if self.nsf_initialized {
-                        if self.cpu.clock - self.nsf_last_step_cycle > self.nsf_step_period && self.nsf_waiting {
-                            self.nsf_player_step();
-                        }
-                        //println!("progress = {} / {}", self.nsf_step_progress, self.nsf_step_period);
-                    }
-                }
-
-                #[cfg(feature="trace")]
-                self.display_trace();
-
-                if self.cpu.clock >= cpu_clock_target {
-                    return ProgressStatus::ReachedTarget;
-                }
+        for _ in 0..ppu_delta {
+            if !self.system.ppu.step(&mut self.system.cartridge) {
+                // Will return false if we hit a PPU dot breakpoint
+                return false;
             }
-        //} else {
-        //    warn!("Can't tick with framebuffer that's still in use!");
-        //    return ProgressStatus::Error;
-        //}
+
+            #[cfg(feature="sim")]
+            let _status = self.system.ppu_sim_step();
+
+            if self.system.ppu.frame_ready {
+                return false;
+            }
+        }
+
+        true
     }
 
+    #[cfg(feature="nsf-player")]
     fn nsf_player_step(&mut self) {
-        if let Some(ref config) = self.nsf_config {
+        if let Some(ref config) = self.nsf_player.nsf_config {
             println!("Calling NSF play code");
             let play = config.play_address;
-            self.system.cpu_write(0x5001, (play & 0xff) as u8, self.cpu.clock);
+            self.system.cpu_write(0x5001, (play & 0xff) as u8);
             self.cpu.clock += 1;
-            self.system.cpu_write(0x5002, ((play & 0xff00) >> 8) as u8, self.cpu.clock);
+            self.system.cpu_write(0x5002, ((play & 0xff00) >> 8) as u8);
             self.cpu.clock += 1;
             self.cpu.pc = 0x5000;
         } else {
             unreachable!();
         }
-        self.nsf_last_step_cycle = self.cpu.clock;
+        self.nsf_player.nsf_last_step_cycle = self.cpu.clock;
+    }
+
+    #[cfg(feature="nsf-player")]
+    #[inline]
+    fn nsf_player_progress(&mut self) {
+        if self.nsf_player.nsf_config.is_some() {
+            if self.cpu.pc == 0x5003 {
+                self.nsf_player.nsf_waiting = true;
+                if !self.nsf_player.nsf_initialized {
+                    self.nsf_player.nsf_initialized = true;
+                    log::debug!("Initialized NSF playback");
+                }
+            }
+
+            if self.nsf_player.nsf_initialized {
+                if self.cpu.clock - self.nsf_player.nsf_last_step_cycle > self.nsf_player.nsf_step_period && self.nsf_player.nsf_waiting {
+                    self.nsf_player_step();
+                }
+                //println!("progress = {} / {}", self.nsf_step_progress, self.nsf_step_period);
+            }
+        }
+    }
+
+    #[cfg(feature="debugger")]
+    fn clear_breakpoint_flags(&mut self) {
+        self.cpu.debugger.breakpoint_hit = false;
+        self.system.watch_hit = false;
+        self.system.ppu.debugger.breakpoint_hit = false;
+    }
+
+    #[cfg(feature="debugger")]
+    fn check_for_breakpoint(&mut self) -> bool {
+        if self.cpu.debugger.breakpoint_hit | self.system.watch_hit | self.system.ppu.debugger.breakpoint_hit {
+            self.clear_breakpoint_flags();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Progresses the emulation of all the NES components, including the CPU, PPU and APU
+    ///
+    /// Note: if progress is paused by the user then [`Self::set_progress_time`] should
+    /// be called when resuming to update the internal time for the emulator, so that
+    /// it won't try and catch up for lost time (when using a [`ProgressTarget::Time`] target)
+    pub fn progress(&mut self, target: ProgressTarget) -> ProgressStatus {
+        //println!("NES: progress()");
+
+        // We treat the CPU as our master clock and the PPU is driven according
+        // to the forward progress of the CPU's clock.
+        let cpu_clock_target = match target {
+            ProgressTarget::Time(target_timestamp) => self.cpu_clocks_for_time_since_power_cycle(target_timestamp),
+            ProgressTarget::Clock(clock) => clock,
+            ProgressTarget::FrameReady => u64::MAX,
+        };
+
+        loop {
+            // Let the PPU catch up with the CPU clock before progressing the CPU
+            // in case we need to quit to allow a redraw (so we will resume
+            // catching afterwards)
+            self.catch_up_ppu_drift();
+
+            #[cfg(feature="debugger")]
+            if self.check_for_breakpoint() {
+                return ProgressStatus::Breakpoint;
+            }
+
+            if self.system.ppu.frame_ready {
+                self.system.ppu.frame_ready = false;
+                self.system.port1.update_button_press_latches();
+                self.system.port2.update_button_press_latches();
+                return ProgressStatus::FrameReady;
+            }
+
+            self.cpu.step_instruction(&mut self.system);
+            debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
+
+            #[cfg(feature="nsf-player")]
+            self.nsf_player_progress();
+
+            #[cfg(feature="trace")]
+            self.call_cpu_instruction_trace_hooks();
+
+            if self.cpu.clock >= cpu_clock_target {
+                return ProgressStatus::ReachedTarget;
+            }
+        }
+    }
+
+    /// Set the current time that is referenced whenever a [`ProgrssTarget::Time`] target is given to [`Self::progress`]
+    ///
+    /// This should be called (when resuming) if the emulator is explicitly paused by the user to
+    /// stop the emulator from trying to catch up for lost time.
+    pub fn set_progress_time(&mut self, timestamp: Instant) {
+        self.reference_cpu_clock = self.cpu.clock;
+        self.reference_timestamp = timestamp;
+    }
+
+    /// Simply steps the CPU (and system) forward by a single instruction
+    pub fn step_instruction_in(&mut self) {
+        self.cpu.step_instruction(&mut self.system);
+        debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
+
+        // Ignore break/watch points while single stepping
+        #[cfg(feature="debugger")]
+        self.clear_breakpoint_flags();
+
+        self.catch_up_ppu_drift();
+
+        #[cfg(feature="nsf-player")]
+        self.nsf_player_progress();
+
+        #[cfg(feature="trace")]
+        self.call_cpu_instruction_trace_hooks();
+    }
+
+    /// Creates a temporary breakpoint for stepping over an instruction
+    ///
+    /// Returns the address of the breakpoint which should be cleared when
+    /// execution next stops.
+    ///
+    /// NB: It's possible a different breakpoint will be hit and so this
+    /// should always be explicitly removed via [`Cpu::remove_break`]
+    #[cfg(feature="debugger")]
+    pub fn add_tmp_step_over_breakpoint(&mut self) -> BreakpointHandle {
+        let current_instruction = self.cpu.pc_peek_instruction(&mut self.system);
+        let break_addr = self.cpu.pc.wrapping_add(current_instruction.len() as u16);
+        self.cpu.add_break(break_addr, Box::new(|_cpu, _addr| { BreakpointCallbackAction::Remove }))
+    }
+
+    /// Creates a temporary breakpoint for stepping out of a function
+    ///
+    /// Returns the address of the breakpoint which should be cleared when
+    /// execution next stops. Will return None if no outer frame was found.
+    ///
+    /// NB: It's possible a different breakpoint will be hit and so this
+    /// should always be explicitly removed via [`Cpu::remove_break`]
+    #[cfg(feature="debugger")]
+    pub fn add_tmp_step_out_breakpoint(&mut self) -> Option<BreakpointHandle> {
+        let mut out_addr = None;
+        for (addr, _) in self.cpu.backtrace(&mut self.system) {
+            out_addr = Some(addr);
+            break;
+        }
+        if let Some(out_addr) = out_addr {
+            Some(self.cpu.add_break(out_addr, Box::new(|_cpu, _addr| { BreakpointCallbackAction::Remove })))
+        } else {
+            None
+        }
     }
 
     pub fn cpu_clock_hz(&self) -> u64 {
-        NTSC_CPU_CLOCK_HZ as u64
+        self.cpu_clock_hz as u64
     }
 
     pub fn cpu_clocks_per_frame(&self) -> f32 {
-        29780.5 // NTSC
+        self.cpu_clocks_per_frame
     }
 
     pub fn cpu_clock(&self) -> u64 {
         self.cpu.clock
     }
 
-
     pub fn debug_sample_nametable(&mut self, x: usize, y: usize) -> [u8; 3] {
         self.system.ppu.peek_vram_four_screens(x, y, &mut self.system.cartridge)
     }
+
 }
