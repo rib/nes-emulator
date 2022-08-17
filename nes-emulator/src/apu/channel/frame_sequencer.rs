@@ -1,6 +1,8 @@
 //use crate::emulation::CPU_CLOCK_HZ;
 
-#[derive(Clone, Copy, Debug)]
+use crate::trace::{TraceEvent, TraceBuffer};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameSequencerStatus {
     None,
     QuarterFrame,
@@ -89,7 +91,7 @@ impl FrameSequencer {
         self.interrupt_flagged = false;
     }
 
-    pub fn step(&mut self, apu_clock: u64) -> FrameSequencerStatus {
+    pub fn step(&mut self, apu_clock: u64, trace: &mut TraceBuffer) -> FrameSequencerStatus {
 
         if self.queue_clock_reset {
             // Note: we must only ever reset the clock to zero on an even clock cycle
@@ -208,6 +210,11 @@ impl FrameSequencer {
         //if self.clock == 14913 {
         //    println!("half frame: status = {status:?}");
         //}
+
+        #[cfg(feature="trace-events")]
+        if status != FrameSequencerStatus::None {
+            trace.push(TraceEvent::ApuFrameSeqFrame { clk_lower: (apu_clock & 0xff) as u8, status });
+        }
 
         self.clock += 1;
         status

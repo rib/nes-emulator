@@ -600,7 +600,7 @@ impl Cpu {
     /// Fetch 1 byte from PC and after fetching, advance the PC by one
     fn pc_fetch_u8(&mut self, system: &mut System) -> u8 {
         //println!("calling system.read_u8({:x}", self.pc);
-        let data = self.read_system_bus(system, self.pc);
+        let data = self.fetch_system_bus(system, self.pc);
         self.pc = self.pc + 1;
 
         data
@@ -829,22 +829,22 @@ impl Cpu {
 
         #[cfg(feature="debugger")]
         {
-            if self.debugger.breakpoints.len() > 0 {
-                let mut tmp = std::mem::take(&mut self.debugger.breakpoints);
+            if self.debug.breakpoints.len() > 0 {
+                let mut tmp = std::mem::take(&mut self.debug.breakpoints);
                 let mut remove = vec![];
                 for bp in tmp.iter_mut() {
                     if bp.addr == self.pc {
-                        self.debugger.breakpoint_hit = true;
+                        self.debug.breakpoint_hit = true;
                         if (bp.callback)(self, bp.addr) == BreakpointCallbackAction::Remove {
                             remove.push(bp.handle);
                         }
                     }
                 }
-                std::mem::swap(&mut tmp, &mut self.debugger.breakpoints);
+                std::mem::swap(&mut tmp, &mut self.debug.breakpoints);
                 for h in remove {
                     self.remove_breakpoint(h);
                 }
-                if self.debugger.breakpoint_hit {
+                if self.debug.breakpoint_hit {
                     return;
                 }
             }
@@ -898,7 +898,7 @@ impl Cpu {
             //  ref:
             //    "The branch instructions have more subtle interrupt polling behavior. Interrupts are always polled
             //     before the second CPU cycle (the operand fetch)"
-            self.instruction_poll_interrupts();
+            self.instruction_poll_interrupts(system);
         }
 
         let cyc = match opcode {
@@ -1351,7 +1351,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1366,7 +1366,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1381,7 +1381,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1396,7 +1396,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1411,7 +1411,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1426,7 +1426,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1441,7 +1441,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1456,7 +1456,7 @@ impl Cpu {
                     let FetchedOperand { operand: addr, oops_cyc, .. } = self.fetch_operand(system, mode, OopsHandling::Normal);
                     self.pc = addr;
                     if oops_cyc != 0 { // "Additionally, for taken branches that cross a page boundary, interrupts are polled before the PCH fixup cycle"
-                        self.instruction_poll_interrupts();
+                        self.instruction_poll_interrupts(system);
                     }
                     self.nop_pc_fetch_u8(system);
                     expected_cyc + oops_cyc + 1
@@ -1991,7 +1991,7 @@ impl Cpu {
         // Note: Relative mode instructions are handled as part of the branch instructions since:
         //  "The branch instructions have more subtle interrupt polling behavior."
         if !early_intr_poll {
-            self.instruction_poll_interrupts();
+            self.instruction_poll_interrupts(system);
         }
 
         #[cfg(feature="trace")]

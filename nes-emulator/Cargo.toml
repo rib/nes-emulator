@@ -5,12 +5,13 @@ authors = ["Robert Bragg <robert@sixbynine.org>", "K <kamiyaowl@gmail.com>"]
 edition = "2021"
 
 [features]
-default = [ "unsafe-opt", "nsf-player", "debugger", "ppu-hooks" ]
+default = [ "unsafe-opt", "nsf-player", "debugger", "ppu-hooks", "trace-events", "io-stats" ]
 unsafe-opt = []
 trace = []
 trace-events = []
+io-stats = []
 ppu-hooks = []
-sim = []
+ppu-sim = []
 nsf-player = []
 debugger = []
 

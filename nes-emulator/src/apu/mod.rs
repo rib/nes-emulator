@@ -1,8 +1,8 @@
 use crate::apu::channel::frame_sequencer::FrameSequencer;
 
 pub mod apu;
-mod channel;
-mod mixer;
+pub mod channel;
+pub mod mixer;
 
 pub trait AudioOutput {
     fn output(&mut self, sample: (i16, i16));

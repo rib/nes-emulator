@@ -1,7 +1,8 @@
-use std::path::PathBuf;
-
+#[cfg(feature="ppu-sim")]
 #[cfg(target_os="windows")]
 fn build_ppu_sim() {
+    use std::path::PathBuf;
+
     let src = vec![
         "breaknes/Common/BaseLogicLib/BaseLogic.cpp",
         "breaknes/Common/BaseLogicLib/pch.cpp",
@@ -90,6 +91,7 @@ fn build_ppu_sim() {
 fn main() {
     // Note: for now PPUSim is only supported on Windows since it depends on
     // various MSVC extensions
+    #[cfg(feature="ppu-sim")]
     #[cfg(target_os="windows")]
     build_ppu_sim();
 }

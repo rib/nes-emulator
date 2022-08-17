@@ -1,11 +1,29 @@
 use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
 use crate::apu::channel::square_channel::SquareChannel;
 use crate::system::{DmcDmaRequest, Model};
+use crate::trace::TraceBuffer;
 use super::channel::triangle_channel::TriangleChannel;
 use super::channel::noise_channel::NoiseChannel;
 use super::channel::dmc_channel::DmcChannel;
 use crate::apu::mixer::Mixer;
 
+#[cfg(feature="trace-events")]
+use crate::trace::TraceEvent;
+
+/// Debugger state attached to an APU instance that won't be cloned if the APU
+/// is cloned, and some debug state may be partially preserved through a power cycle
+#[derive(Default)]
+pub struct NoCloneDebugState {
+    #[cfg(feature="trace-events")]
+    pub trace_events_current: TraceBuffer,
+    #[cfg(feature="trace-events")]
+    pub trace_events_prev: TraceBuffer,
+}
+impl Clone for NoCloneDebugState {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Apu {
@@ -21,6 +39,8 @@ pub struct Apu {
     pub mixer: Mixer,
     output_timer: u16,
     output_step: u16,
+
+    pub debug: NoCloneDebugState,
 }
 
 impl Apu {
@@ -57,6 +77,13 @@ impl Apu {
         self.dmc_channel.power_cycle();
         self.mixer.power_cycle();
         self.output_timer = 0;
+
+        #[cfg(feature="trace-events")]
+        {
+            self.debug.trace_events_current.clear();
+            self.debug.trace_events_prev.clear();
+        }
+
         // Keep output_step
     }
 
@@ -69,6 +96,28 @@ impl Apu {
         self.dmc_channel.clear_interrupt();
     }
 
+    /// Records an internal event into the back trace buffer
+    ///
+    /// This is a debug mechanism for being able to track mid-frame events which a
+    /// debug tool can plot onto an expanded (341 x 262) framebuffer view covering
+    /// the full dot clock range for a frame
+    #[cfg(feature="trace-events")]
+    #[inline(always)]
+    pub fn trace(&mut self, event: TraceEvent) {
+        self.debug.trace_events_current.push(event);
+    }
+
+    #[cfg(feature="trace-events")]
+    #[inline(always)]
+    pub fn trace_cpu_clock_line_sync(&mut self, cpu_clock: u64, new_frame: bool) {
+        debug_assert_eq!(cpu_clock, self.clock);
+        if new_frame {
+            std::mem::swap(&mut self.debug.trace_events_current, &mut self.debug.trace_events_prev);
+            self.debug.trace_events_current.clear();
+        }
+        self.trace(TraceEvent::CpuClockLineSync { cpu_clk: cpu_clock } );
+    }
+
     // NB: we clock the APU with the CPU clock but many aspects of the APU
     // are only clocked every other CPU cycle
     pub fn step(&mut self)  -> Option<DmcDmaRequest> {
@@ -78,7 +127,7 @@ impl Apu {
 
         let dma_request = self.dmc_channel.step_dma_reader();
 
-        let frame_sequencer_output = self.frame_sequencer.step(self.clock);
+        let frame_sequencer_output = self.frame_sequencer.step(self.clock, &mut self.debug.trace_events_current);
         if !matches!(frame_sequencer_output, FrameSequencerStatus::None) {
             debug_assert!(self.clock % 2 == 1);
         }

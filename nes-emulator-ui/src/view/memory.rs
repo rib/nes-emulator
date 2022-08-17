@@ -20,14 +20,14 @@ impl Debug for AddressSpace {
 }
 
 pub struct MemView {
-    pub show: bool,
+    pub visible: bool,
     selected_space: AddressSpace,
     tmp_row_values: Vec<u8>,
 }
 impl MemView {
     pub fn new() -> Self {
         Self {
-            show: false,
+            visible: false,
             selected_space: AddressSpace::System,
             tmp_row_values: vec![],
         }

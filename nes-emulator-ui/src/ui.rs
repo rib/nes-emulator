@@ -18,7 +18,7 @@ use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
 use nes_emulator::{nes::*, system::Model, port::ControllerButton, hook::HookHandle, cpu::cpu::BreakpointHandle};
 use nes_emulator::framebuffer::*;
 
-use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView}};
+use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView, debugger::DebuggerView}};
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
@@ -252,11 +252,17 @@ pub struct EmulatorUi {
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
 
+    #[cfg(feature="cpu-debugger")]
+    debugger_view: DebuggerView,
+
     #[cfg(feature="macro-builder")]
     macro_builder_view: MacroBuilderView,
 
     nametables_view: NametablesView,
+
+    #[cfg(feature="sprite-view")]
     sprites_view: SpritesView,
+
     mem_view: MemView,
     trace_events_view: TraceEventsView,
 
@@ -360,16 +366,22 @@ impl EmulatorUi {
             queue_framebuffer_upload: false,
             last_frame_time: now,
 
+            #[cfg(feature="cpu-debugger")]
+            debugger_view: DebuggerView::new(),
+
             #[cfg(feature="macro-builder")]
             macro_builder_view: MacroBuilderView::new(ctx, args, rom_dirs.clone(), loaded_rom.clone(), view_request_sender.clone(), false),
             nametables_view: NametablesView::new(ctx),
+
+            #[cfg(feature="sprite-view")]
             sprites_view: SpritesView::new(ctx),
+
+            trace_events_view: TraceEventsView::new(ctx),
+
             mem_view: MemView::new(),
 
             view_request_sender,
             view_requests_rx: rx,
-
-            trace_events_view: TraceEventsView::new(ctx),
 
             rom_dirs,
             loaded_rom,
@@ -598,11 +610,15 @@ impl EmulatorUi {
                         self.front_framebuffer = self.nes.ppu_mut().swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
 
                         self.queue_framebuffer_upload = true;
-                        if self.nametables_view.show {
+                        if self.nametables_view.visible {
                             self.nametables_view.update(&mut self.nes);
                         }
-                        if self.sprites_view.show {
+                        #[cfg(feature="sprite-view")]
+                        if self.sprites_view.visible {
                             self.sprites_view.update(&mut self.nes);
+                        }
+                        if self.trace_events_view.visible {
+                            self.trace_events_view.update(&mut self.nes);
                         }
                     },
                     ProgressStatus::ReachedTarget => {
@@ -760,16 +776,16 @@ impl EmulatorUi {
             ui.spacing();
             ui.label("Tools");
             ui.group(|ui| {
-                ui.checkbox(&mut self.mem_view.show, "Show Memory");
-                ui.checkbox(&mut self.nametables_view.show, "Show Nametables");
+                ui.checkbox(&mut self.mem_view.visible, "Show Memory");
+                ui.checkbox(&mut self.nametables_view.visible, "Show Nametables");
 
                 ui.add_enabled_ui(cfg!(feature="sprite-view"), |ui| {
-                    let resp = ui.checkbox(&mut self.sprites_view.show, "Show Sprites")
+                    let resp = ui.checkbox(&mut self.sprites_view.visible, "Show Sprites")
                         .on_disabled_hover_text("\"sprite-view\" feature not enabled");
                     #[cfg(feature="sprite-view")]
                     {
                         if resp.changed {
-                            self.sprites_view.set_visible(&mut self.nes, self.sprites_view.show);
+                            self.sprites_view.set_visible(&mut self.nes, self.sprites_view.visible);
                         }
                     }
                 });
@@ -790,7 +806,11 @@ impl EmulatorUi {
                         }
                     }
                 });
-                ui.checkbox(&mut self.trace_events_view.show, "Show Events");
+                let mut visible = self.trace_events_view.visible;
+                let resp = ui.checkbox(&mut visible, "Show Events");
+                if resp.changed() {
+                    self.trace_events_view.set_visible(&mut self.nes, visible);
+                }
             });
         });
 
@@ -798,12 +818,19 @@ impl EmulatorUi {
             ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
         });
 
-        if self.nametables_view.show {
+        #[cfg(feature="cpu-debugger")]
+        {
+            if self.debugger_view.visible {
+                self.debugger_view.draw(&mut self.nes, ctx);
+            }
+        }
+
+        if self.nametables_view.visible {
             self.nametables_view.draw(ctx);
         }
 
         #[cfg(feature="sprite-view")]
-        if self.sprites_view.show {
+        if self.sprites_view.visible {
             self.sprites_view.draw(&mut self.nes, ctx);
         }
 
@@ -813,10 +840,10 @@ impl EmulatorUi {
                 self.macro_builder_view.draw(&mut self.nes, ctx);
             }
         }
-        if self.trace_events_view.show {
-            self.trace_events_view.draw(ctx);
+        if self.trace_events_view.visible {
+            self.trace_events_view.draw(&mut self.nes, ctx);
         }
-        if self.mem_view.show {
+        if self.mem_view.visible {
             self.mem_view.draw(&mut self.nes, ctx);
         }
 
@@ -835,6 +862,10 @@ impl EmulatorUi {
         #[cfg(feature="macro-builder")]
         {
             self.macro_builder_view.set_paused(paused, &mut self.nes);
+        }
+        #[cfg(feature="trace-events")]
+        {
+            self.trace_events_view.set_paused(paused, &mut self.nes);
         }
 
         if paused == false {

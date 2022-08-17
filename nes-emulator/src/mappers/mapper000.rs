@@ -81,7 +81,7 @@ impl Mapper for Mapper0 {
         match addr {
             0x6000..=0x7fff => {
                 let ram_offset = (addr - 0x6000) as usize;
-                self.prg_ram[ram_offset] = data;
+                arr_write!(self.prg_ram, ram_offset, data);
             }
             _ => { trace!("unhandled system bus write in cartridge"); }
         }

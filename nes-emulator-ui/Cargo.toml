@@ -9,10 +9,10 @@ path = "src/main.rs"
 name = "nes_emulator"
 
 [features]
-default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder" ]
+default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder", "trace-events" ]
 unsafe-opt = [ "nes-emulator/unsafe-opt" ]
 nsf-player = [ "nes-emulator/nsf-player" ]
-ppu-simulator = [ "nes-emulator/sim" ]
+ppu-simulator = [ "nes-emulator/ppu-sim" ]
 
 cpu-trace = [ "nes-emulator/trace" ]
 cpu-debugger = [ "nes-emulator/debugger" ]
@@ -45,4 +45,5 @@ sha2 = "0.10"
 hex-literal = "0.3"
 crc32fast = "1"
 nes-emulator = { path = "../nes-emulator", default-features = false, features = ["unsafe-opt"] }
+bitflags = "1"
 
