@@ -210,11 +210,11 @@ pub struct Position(pub u8, pub u8);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum LineStatus {
     /// Lines 0..=239
+    #[default]
     Visible,
     /// Line 240
     PostRender,
     /// Lines 241..=260
-    #[default]
     VerticalBlanking,
     /// Line 261
     PreRender,
@@ -435,7 +435,8 @@ impl Ppu {
 
         let framebuffer = Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGBA8888);
         let framebuffer = framebuffer.rent_data().unwrap();
-        let start_line = 241;
+        //let start_line = 241;
+        let start_line = 0;
         Self {
             nes_model,
             io_latch_decay_clock_period,
@@ -885,8 +886,10 @@ impl Ppu {
                     // "During VBlank and when rendering is disabled, the value on
                     // the PPU address bus is the current value of the v register."
                     if !self.is_rendering() {
-                        //println!("Notifying cartridge of PPUADDR update");
+                        //println!("Notifying cartridge of PPUADDR update {:04X}", self.shared_v_register);
                         cartridge.ppu_bus_nop_io(self.shared_v_register);
+                    } else {
+                        //println!("PPU_ADDR write with rendering enabled")
                     }
                     //println!("PPU ADDR write 2 = {data:02x}, new PPU DATA address = 0x{:04x}, scroll_tile_x = {}, scroll_tile_y = {}", self.shared_v_register, self.scroll_tile_x(), self.scroll_tile_y());
                 } else {
@@ -1281,7 +1284,7 @@ impl Ppu {
 
     /// Calculate the pattern table row address (lower plane) for the 8x16 sprite currently being fetched
     fn current_sprite8x16_pattern_table_row_address(&self) -> u16 {
-        // XXX: if the 'current' sprite state was store in the Ppu struct we could avoid
+        // XXX: if the 'current' sprite state was stored in the Ppu struct we could avoid
         // a bunch of bounds checks here
         let sprite_index_byte = self.secondary_oam[self.sprite_fetch_index * 4 + 1];
         let sprite_tile_index = sprite_index_byte & 0xfe;
@@ -2051,7 +2054,7 @@ impl Ppu {
             }
             LineStatus::VerticalBlanking => {
                 if self.line == 241 && self.dot == 1 {
-                    //println!("IN VBLANK");
+                    //println!("IN VBLANK {}", self.clock);
                     self.status.set(StatusFlags::IN_VBLANK, true);
                     self.update_nmi();
                 }
@@ -2069,7 +2072,7 @@ impl Ppu {
                         }
                     }
                 } else if self.dot == 1 {
-                    //println!("OUT OF VBLANK");
+                    //println!("OUT OF VBLANK {}", self.clock);
                     self.status.set(StatusFlags::IN_VBLANK, false);
                     self.update_nmi();
 

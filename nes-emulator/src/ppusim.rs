@@ -3,6 +3,7 @@
 #![allow(non_snake_case)]
 #![allow(unused)]
 
+use std::ops::Deref;
 use std::ops::Index;
 
 use anyhow::anyhow;
@@ -18,8 +19,9 @@ mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Revision {
+    #[default]
     RP2C02G = ffi::PPUSim_Revision_RP2C02G as isize,
     RP2C02H = ffi::PPUSim_Revision_RP2C02H as isize,
     RP2C03B = ffi::PPUSim_Revision_RP2C03B as isize,
@@ -39,6 +41,7 @@ pub enum Revision {
     UMC_UA6538 = ffi::PPUSim_Revision_UMC_UA6538 as isize,
 }
 
+#[derive(Default)]
 struct AddressLatch {
     value: u8,
 }
@@ -56,8 +59,9 @@ impl AddressLatch {
 /// One = 1,
 /// Z = (uint8_t)-1,
 /// X = (uint8_t)-2,
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 enum TriState {
+    #[default]
     Zero,
     One,
     Z,
@@ -110,8 +114,20 @@ enum OutputPad
     n_WR = ffi::PPUSim_OutputPad_n_WR as isize,
 }
 
+struct PpuFfi{
+    pub ptr: *mut ffi::PPUSim_PPU
+}
+impl Default for PpuFfi {
+    fn default() -> Self {
+        Self {
+            ptr: std::ptr::null_mut()
+        }
+    }
+}
 
+#[derive(Default)]
 pub struct PpuSim {
+    pub nes_model: Model,
     revision: Revision,
 
     pub framebuffer: FramebufferDataRental,
@@ -137,7 +153,7 @@ pub struct PpuSim {
     data_bus_address: u16,
     data_bus_write: bool,
     data_bus_write_value: u8,
-    data_bus: u8,
+    pub data_bus: u8,
 
     pending_reset: bool,
     reset_half_clock_count: usize,
@@ -160,7 +176,7 @@ pub struct PpuSim {
 
     //address: [TriState; 14],
 
-    ppu: *mut ffi::PPUSim_PPU,
+    ppu: PpuFfi,
 
     inputs: [u8; ffi::PPUSim_InputPad_Max as usize],
     outputs: [u8; ffi::PPUSim_OutputPad_Max as usize],
@@ -212,6 +228,8 @@ impl PpuSim {
         let outputs =  [0u8; ffi::PPUSim_OutputPad_Max as usize];
 
         let mut sim = Self {
+            nes_model,
+            revision,
 
             framebuffer,
             frame_ready: false,
@@ -244,8 +262,7 @@ impl PpuSim {
             ppu_bus_latch_read_neg: TriState::X,
             ppu_bus_latch_write_neg: TriState::X,
 
-            revision,
-            ppu,
+            ppu: PpuFfi { ptr: ppu },
             inputs,
             outputs,
 
@@ -256,6 +273,12 @@ impl PpuSim {
 
         sim
     }
+
+    //pub fn power_cycle(&mut self) {
+    //    *self = Self {
+    //        ..PpuSim::new(self.nes_model)
+    //    }
+    //}
 
     /// Returns the number of CLK cycles per PCLK (there doesn't seem to be a utility for
     /// this in PPUSim itself
@@ -294,45 +317,45 @@ impl PpuSim {
     //}
 
     pub fn debug_set_force_render_enabled(&mut self, enabled: bool) {
-        unsafe { ffi::PPUSim_PPU_Dbg_RenderAlwaysEnabled(self.ppu, enabled) };
+        unsafe { ffi::PPUSim_PPU_Dbg_RenderAlwaysEnabled(self.ppu.ptr, enabled) };
     }
 
     pub fn set_raw_output(&mut self, raw_output: bool) {
-        unsafe { ffi::PPUSim_PPU_SetRAWOutput(self.ppu, raw_output) };
+        unsafe { ffi::PPUSim_PPU_SetRAWOutput(self.ppu.ptr, raw_output) };
     }
 
     pub fn debug_read_registers(&self) -> ffi::PPUSim_PPU_Registers {
         let mut regs = ffi::PPUSim_PPU_Registers::default();
-        unsafe { ffi::PPUSim_PPU_GetDebugInfo_Regs(self.ppu, &mut regs) };
+        unsafe { ffi::PPUSim_PPU_GetDebugInfo_Regs(self.ppu.ptr, &mut regs) };
         regs
     }
 
     pub fn debug_read_wires(&self) -> ffi::PPUSim_PPU_Interconnects {
         let mut wires = ffi::PPUSim_PPU_Interconnects::default();
-        unsafe { ffi::PPUSim_PPU_GetDebugInfo_Wires(self.ppu, &mut wires) };
+        unsafe { ffi::PPUSim_PPU_GetDebugInfo_Wires(self.ppu.ptr, &mut wires) };
         wires
     }
 
     pub fn debug_set_control_register(&mut self, value: u8) {
-        unsafe { ffi::PPUSim_PPU_Dbg_SetCTRL0(self.ppu, value) };
+        unsafe { ffi::PPUSim_PPU_Dbg_SetCTRL0(self.ppu.ptr, value) };
     }
 
     pub fn debug_set_mask_register(&mut self, value: u8) {
-        unsafe { ffi::PPUSim_PPU_Dbg_SetCTRL1(self.ppu, value) };
+        unsafe { ffi::PPUSim_PPU_Dbg_SetCTRL1(self.ppu.ptr, value) };
     }
 
     pub fn pclk(&self) -> u64 {
-        unsafe { ffi::PPUSim_PPU_GetPCLKCounter(self.ppu) }
+        unsafe { ffi::PPUSim_PPU_GetPCLKCounter(self.ppu.ptr) }
     }
     pub fn reset_pclk(&self) {
-        unsafe { ffi::PPUSim_PPU_ResetPCLKCounter(self.ppu) }
+        unsafe { ffi::PPUSim_PPU_ResetPCLKCounter(self.ppu.ptr) }
     }
 
     pub fn h_counter(&self) -> u64 {
-        unsafe { ffi::PPUSim_PPU_GetHCounter(self.ppu) }
+        unsafe { ffi::PPUSim_PPU_GetHCounter(self.ppu.ptr) }
     }
     pub fn v_counter(&self) -> u64 {
-        unsafe { ffi::PPUSim_PPU_GetVCounter(self.ppu) }
+        unsafe { ffi::PPUSim_PPU_GetVCounter(self.ppu.ptr) }
     }
 
     /// Sets the reset pin for four half clock cycles (to ensure the PPU resets all internal circuits)
@@ -390,8 +413,8 @@ impl PpuSim {
         self.ppu_bus_latch_address = address;
         self.ppu_bus_latch_read_neg = read_enable_neg;
         self.ppu_bus_latch_write_neg = write_enable_neg;
-        //self.ppu_bus_latch_data = self.address_bus_lo;
-        //self.ppu_bus_latch_pclk = self.pclk();
+        //self.ppu.ptr_bus_latch_data = self.address_bus_lo;
+        //self.ppu.ptr_bus_latch_pclk = self.pclk();
     }
 
     pub fn step_half(&mut self, cartridge: &mut Cartridge) {
@@ -415,11 +438,12 @@ impl PpuSim {
         let h_cnt = self.h_counter() as usize;
         let v_cnt = self.v_counter() as usize;
         unsafe {
+            assert!(!self.ppu.ptr.is_null());
             let mut vout_raw: ffi::PPUSim_VideoOutSignal = std::mem::zeroed();;
-            ffi::PPUSim_PPU_sim(self.ppu, self.inputs.as_mut_ptr(), self.outputs.as_mut_ptr(), &mut _ext, &mut self.data_bus, &mut self.address_bus_lo, &mut self.address_bus_hi, &mut vout_raw);
+            ffi::PPUSim_PPU_sim(self.ppu.ptr, self.inputs.as_mut_ptr(), self.outputs.as_mut_ptr(), &mut _ext, &mut self.data_bus, &mut self.address_bus_lo, &mut self.address_bus_hi, &mut vout_raw);
             if v_cnt < 240 && h_cnt < 256 {
                 let mut vout_rgb: ffi::PPUSim_VideoOutSignal = std::mem::zeroed();
-                ffi::PPUSim_PPU_ConvertRAWToRGB(self.ppu, &mut vout_raw, &mut vout_rgb);
+                ffi::PPUSim_PPU_ConvertRAWToRGB(self.ppu.ptr, &mut vout_raw, &mut vout_rgb);
                 const FRAMEBUFFER_BPP: usize = 4;
                 const FRAMEBUFFER_STRIDE: usize = 256 * FRAMEBUFFER_BPP;
 
@@ -475,7 +499,7 @@ impl PpuSim {
 impl Drop for PpuSim {
     fn drop(&mut self) {
         unsafe {
-            ffi::ppu_sim_drop(self.ppu);
+            ffi::ppu_sim_drop(self.ppu.ptr);
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
 use crate::apu::channel::square_channel::SquareChannel;
+use crate::constants::CPU_START_CYCLE;
 use crate::system::{DmcDmaRequest, Model};
 use crate::trace::TraceBuffer;
 use super::channel::triangle_channel::TriangleChannel;
@@ -30,11 +31,11 @@ pub struct Apu {
     pub clock: u64,
     pub sample_rate: u32,
     pub sample_buffer: Vec<f32>,
-    frame_sequencer: FrameSequencer,
-    square_channel1: SquareChannel,
-    square_channel2: SquareChannel,
-    triangle_channel: TriangleChannel,
-    noise_channel: NoiseChannel,
+    pub frame_sequencer: FrameSequencer,
+    pub square_channel1: SquareChannel,
+    pub square_channel2: SquareChannel,
+    pub triangle_channel: TriangleChannel,
+    pub noise_channel: NoiseChannel,
     pub dmc_channel: DmcChannel,
     pub mixer: Mixer,
     output_timer: u16,
@@ -48,12 +49,13 @@ impl Apu {
         let cpu_clock_hz = nes_model.cpu_clock_hz();
         let output_step = (cpu_clock_hz / sample_rate) as u16;
         Apu {
+            clock: CPU_START_CYCLE,
             sample_rate,
             output_step,
             frame_sequencer: FrameSequencer::new(),
-            square_channel1: SquareChannel::new(false),
-            square_channel2: SquareChannel::new(true /* two's compliment sweep negate */),
-            triangle_channel: TriangleChannel::new(),
+            square_channel1: SquareChannel::new(nes_model, false),
+            square_channel2: SquareChannel::new(nes_model, true /* two's compliment sweep negate */),
+            triangle_channel: TriangleChannel::new(nes_model),
             noise_channel: NoiseChannel::new(),
             dmc_channel: DmcChannel::new(nes_model),
             mixer: Mixer::new(),
@@ -67,7 +69,7 @@ impl Apu {
     }
 
     pub fn power_cycle(&mut self) {
-        self.clock = 0;
+        self.clock = CPU_START_CYCLE;
         self.sample_buffer.clear();
         self.frame_sequencer.power_cycle();
         self.square_channel1.power_cycle();
@@ -128,7 +130,7 @@ impl Apu {
         let dma_request = self.dmc_channel.step_dma_reader();
 
         let frame_sequencer_output = self.frame_sequencer.step(self.clock, &mut self.debug.trace_events_current);
-        if !matches!(frame_sequencer_output, FrameSequencerStatus::None) {
+        if !frame_sequencer_output.is_empty() {
             debug_assert!(self.clock % 2 == 1);
         }
 
@@ -155,6 +157,8 @@ impl Apu {
                 self.triangle_channel.output(),
                 self.noise_channel.output(),
                 self.dmc_channel.output(),
+                self.clock,
+                &mut self.debug.trace_events_current,
             );
 
             // TODO: high-pass + low-pass filters
@@ -247,9 +251,11 @@ impl Apu {
             0x4015 => { // Status
                 // "Reading this register clears the frame interrupt flag (but not the DMC interrupt flag)."
                 // TODO: "If an interrupt flag was set at the same moment of the read, it will read back as 1 but it will not be cleared"
-                self.frame_sequencer.clear_irq();
-                self.read_4015_status()
 
+                // Read status _before_ clearing the IRQ flag (which is part of the status)
+                let status = self.read_4015_status();
+                self.frame_sequencer.clear_irq();
+                status
             }
             _ => (0, 0xff )
         }

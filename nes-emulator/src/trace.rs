@@ -15,6 +15,7 @@ bitflags! {
 
         const IRQ_POLLED = 1<<4;
         const NMI_POLLED = 1<<5;
+        const BRK_POLLED = 1<<6;
     }
 }
 
@@ -110,7 +111,7 @@ pub enum TraceEvent {
     ApuFrameSeqFrame { clk_lower: u8, status: FrameSequencerStatus },
     ApuSquareOut { clk_lower: u8, index: u8, envelope: u8, sweep_count: u8, timer: u8, output: u8 },
     ApuNoiseOut { clk_lower: u8, envelope: u8, sweep_count: u8, timer: u8, output: u8 },
-    ApuMixerOut { clk_lower: u8, output: u8 },
+    ApuMixerOut { clk_lower: u8, output: f32, square1: u8, square2: u8, triangle: u8, noise: u8, dmc: u8 },
 
     CpuRead { clk_lower: u8, addr: u16, value: u8 },
     CpuWrite { clk_lower: u8, addr: u16, value: u8 },
@@ -125,8 +126,8 @@ pub enum TraceEvent {
     PpuReadSecondaryOam { dot: u16, off: u8, value: u8 },
     PpuWriteSecondaryOam { dot: u16, off: u8, value: u8 },
 
-    CpuInterruptStatus { clk: u64, status: CpuInterruptStatus },
+    CpuInterruptStatus { clk_lower: u8, status: CpuInterruptStatus },
     CartridgeIrqRaised { dot: u16, off: u8 },
-    ApuIrqRaised { clk_lower: u32, line: u16, dot: u16, off: u8 },
+    ApuIrqRaised { clk_lower: u8, line: u16, dot: u16, off: u8 },
     PpuNmiRaised { dot: u16, off: u8 },
 }

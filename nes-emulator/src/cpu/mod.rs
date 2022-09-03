@@ -1,4 +1,4 @@
 
 pub mod cpu;
-mod instruction;
+pub mod instruction;
 mod flags;

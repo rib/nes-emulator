@@ -1,8 +1,10 @@
 use crate::apu::channel::length_counter::LengthCounter;
 use crate::apu::channel::volume_envelope::VolumeEnvelope;
+use crate::system::Model;
 use super::frame_sequencer::FrameSequencerStatus;
 
 // Ref: https://www.nesdev.com/apu_ref.txt
+// Note: we step through the DUTY_MAP with an _incrementing_ counter, not decrementing
 const DUTY_MAP: [[u8; 8]; 4] = [
     [0, 1, 0, 0, 0, 0, 0, 0], // 12.5%
     [0, 1, 1, 0, 0, 0, 0, 0], // 25%
@@ -12,61 +14,45 @@ const DUTY_MAP: [[u8; 8]; 4] = [
 
 #[derive(Clone, Default)]
 pub struct SquareChannel {
+    model: Model,
 
     // We don't currently encapsulate the sweep state since it interacts
     // with the channel state
-    sweep_enabled: bool,
-    sweep_negate: bool,
-    sweep_shift: u8,
+    pub sweep_enabled: bool,
+    pub sweep_negate: bool,
+    pub sweep_shift: u8,
     twos_compliment_sweep_negate: bool,
-    sweep_divider_period: u8,
-    sweep_divider_value: u8,
+    pub sweep_divider_period: u8,
+    pub sweep_divider_value: u8,
     sweep_target_period: u16,
     sweep_reload_flag: bool,
 
-    timer_period: u16,
-    timer: u16, // counts down from `timer_period`, with sweep updates
+    pub timer_period: u16,
+    pub timer: u16,
 
-    duty: u8,
-    duty_offset: u8,
+    pub duty: u8,
+    pub duty_offset: u8,
 
     volume_envelope: VolumeEnvelope,
     pub length_counter: LengthCounter,
 
-    output: u8
+    pub output: u8
 }
 
 impl SquareChannel {
-    pub fn new(twos_compliment_sweep_negate: bool) -> Self {
+    pub fn new(model: Model, twos_compliment_sweep_negate: bool) -> Self {
 
         Self {
+            model,
             twos_compliment_sweep_negate,
             volume_envelope: VolumeEnvelope::new(),
             length_counter: LengthCounter::new(),
             ..Default::default()
-            /*
-            sweep_enabled: false,
-            sweep_negate: false,
-            sweep_shift: 0,
-            sweep_divider_period: 0,
-            sweep_divider_value: 0,
-            twos_compliment_sweep_negate,
-            sweep_target_period: 0,
-            sweep_reload_flag: false,
-
-            timer_period: 0,
-            timer: 0,
-
-            duty: 0,
-            duty_offset: 0,
-
-            output: 0,
-            */
         }
     }
 
     pub fn power_cycle(&mut self) {
-        *self = Self::new(self.twos_compliment_sweep_negate);
+        *self = Self::new(self.model, self.twos_compliment_sweep_negate);
     }
 
     /// "Two conditions cause the sweep unit to mute the channel:
@@ -79,7 +65,7 @@ impl SquareChannel {
         //if self.sweep_target_period > 0x7ff {
         //    println!("muted sweep_target_period = {}", self.sweep_target_period);
         //}
-        self.timer < 8 || self.sweep_target_period > 0x7ff
+        self.timer_period < 8 || self.sweep_target_period > 0x7ff
     }
 
     // "The shifter continuously calculates a result based on the channel's period. The
@@ -88,23 +74,43 @@ impl SquareChannel {
     // second square channel, the inverted value is incremented by 1. The resulting
     // value is added with the channel's current period, yielding the final result."
     pub fn update_sweep_target_period(&mut self) {
-        let delta = self.timer >> self.sweep_shift;
+        let delta = self.timer_period >> self.sweep_shift;
 
         self.sweep_target_period = if self.sweep_negate {
             if self.twos_compliment_sweep_negate {
-                self.timer.saturating_sub(delta)
+                self.timer_period.saturating_sub(delta)
             } else {
-                self.timer.saturating_sub(delta).saturating_sub(1)
+                self.timer_period.saturating_sub(delta).saturating_sub(1)
             }
         } else {
-            self.timer.saturating_add(delta)
+            self.timer_period.saturating_add(delta)
         }
     }
 
-    fn set_period(&mut self, period: u16) {
+    pub fn frequency(&self) -> u32 {
+        self.model.cpu_clock_hz() / (16*(self.timer_period as u32 + 1))
+    }
+
+    pub fn set_frequency(&mut self, freq: u32) {
+        self.timer_period = ((self.model.cpu_clock_hz() / (16 * freq) - 1) as u16) & 0b0111_1111_1111;
+    }
+
+    pub fn period(&self) -> u16 {
+        self.timer_period
+    }
+
+    pub fn set_period(&mut self, period: u16) {
         //println!("square set period = {}", period);
-        self.timer = period;
+        self.timer_period = period;
         self.update_sweep_target_period();
+    }
+
+    pub fn timer(&self) -> u16 {
+        self.timer
+    }
+
+    pub fn set_timer(&mut self, timer: u16) {
+        self.timer = timer.min(self.timer_period);
     }
 
     fn step_sweep_half_frame(&mut self) {
@@ -118,6 +124,7 @@ impl SquareChannel {
             // "If the shift count is zero, the pulse channel's period is never updated, but
             // muting logic still applies."
             if self.sweep_shift != 0 {
+                println!("Updating period by sweep: from {}, to {}", self.timer_period, self.sweep_target_period);
                 self.set_period(self.sweep_target_period);
             }
         }// else {
@@ -160,17 +167,14 @@ impl SquareChannel {
     // Only stepped for odd CPU clock cycles
     pub fn odd_step(&mut self, sequencer_state: FrameSequencerStatus) {
 
-        match sequencer_state {
-            FrameSequencerStatus::QuarterFrame => {
-                self.volume_envelope.step_quarter_frame();
-            },
-            FrameSequencerStatus::HalfFrame => {
-                //println!("Square half frame step");
-                self.step_sweep_half_frame();
-                self.length_counter.step_half_frame();
-                //println!("square: half frame: length = {}", self.length());
-            }
-            _ => {}
+        if sequencer_state.contains(FrameSequencerStatus::QUARTER_FRAME) {
+            self.volume_envelope.step_quarter_frame();
+        }
+        if sequencer_state.contains(FrameSequencerStatus::HALF_FRAME) {
+            //println!("Square half frame step");
+            self.step_sweep_half_frame();
+            self.length_counter.step_half_frame();
+            //println!("square: half frame: length = {}", self.length());
         }
 
         if self.timer == 0 {
@@ -206,7 +210,7 @@ impl SquareChannel {
             }
             1 => { // Sweep
                 // Ref: https://www.nesdev.org/wiki/APU_Sweep
-                self.sweep_enabled = (value & 0b1000_000) != 0;
+                self.sweep_enabled = (value & 0b1000_0000) != 0;
                 //println!("square set sweep enable = {}", self.sweep_enabled);
 
                 self.sweep_divider_period = ((value & 0b0111_0000) >> 4) + 1; // (period measured in half frames)
@@ -217,14 +221,15 @@ impl SquareChannel {
                 self.sweep_reload_flag = true;
             }
             2 => {
-                self.timer_period = (self.timer_period & 0b0000_0111_0000_0000) | (value as u16);
+                self.set_period((self.timer_period & 0b0000_0111_0000_0000) | (value as u16));
             }
             3 => {
                 //println!("$4003 write: value = {value:x} / {value:08b}");
                 self.length_counter.set_length(value >> 3);
+                //println!("length counter = {}", self.length_counter.length());
 
                 let timer_high = ((value as u16) & 0b111) << 8;
-                self.timer_period = (self.timer_period & 0xff) | timer_high;
+                self.set_period((self.timer_period & 0xff) | timer_high);
 
                 // "The sequencer is immediately restarted at the first value of the current sequence"
                 // Note: "The period divider is not reset."

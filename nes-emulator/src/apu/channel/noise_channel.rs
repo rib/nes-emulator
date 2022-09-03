@@ -69,14 +69,11 @@ impl NoiseChannel {
     }
 
     pub fn odd_step(&mut self, sequencer_state: FrameSequencerStatus) {
-        match sequencer_state {
-            FrameSequencerStatus::QuarterFrame => {
-                self.volume_envelope.step_quarter_frame();
-            },
-            FrameSequencerStatus::HalfFrame => {
-                self.length_counter.step_half_frame();
-            }
-            _ => {}
+        if sequencer_state.contains(FrameSequencerStatus::QUARTER_FRAME) {
+            self.volume_envelope.step_quarter_frame();
+        }
+        if sequencer_state.contains(FrameSequencerStatus::HALF_FRAME) {
+            self.length_counter.step_half_frame();
         }
 
         if self.timer == 0 {

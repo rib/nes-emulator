@@ -128,6 +128,7 @@ impl Mapper4 {
             self.prg_banks[2] = self.prg_rom.len() - PAGE_SIZE_16K; // second-to-last 8k page
             self.prg_banks[3] = self.prg_rom.len() - PAGE_SIZE_8K; // last 8k page
         }
+        //println!("Mapper004: PRG banks = {:?}", self.prg_banks);
     }
 
     fn update_chr_banks(&mut self) {
@@ -216,7 +217,7 @@ impl Mapper4 {
         // "If the IRQ counter is zero and IRQs are enabled ($E001), an IRQ is
         // triggered. The "alternate revision" checks the IRQ counter transition
         // 1→0, whether from decrementing or reloading."
-        self.irq_raised = self.irq_counter == 0 && self.irq_enabled;
+        self.irq_raised |= self.irq_counter == 0 && self.irq_enabled;
     }
 }
 
@@ -235,7 +236,10 @@ impl Mapper for Mapper4 {
                 let off = self.prg_offset_from_address(addr);
                 arr_read!(self.prg_rom, off)
             }
-            _ => unreachable!()
+            _ => {
+                //log::warn!("Invalid mapper read @ {}", addr);
+                0
+            }
         };
 
         (value, 0) // no undefined bits
@@ -318,8 +322,10 @@ impl Mapper for Mapper4 {
             }
             0xe000..=0xffff => {
                 if addr & 1 == 0 {
+                    // "Writing any value to this register will disable MMC3 interrupts AND acknowledge any pending interrupts"
                     //println!("Mapper004: disabled IRQ");
                     self.irq_enabled = false;
+                    self.irq_raised = false;
                 } else {
                     //println!("Mapper004: enabled IRQ");
                     self.irq_enabled = true;

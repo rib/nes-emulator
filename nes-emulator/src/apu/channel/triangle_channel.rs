@@ -1,4 +1,4 @@
-use crate::apu::channel::length_counter::LengthCounter;
+use crate::{apu::channel::length_counter::LengthCounter, system::Model};
 use super::frame_sequencer::FrameSequencerStatus;
 
 const OUTPUT_SEQUENCE: [u8; 32] = [ 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ];
@@ -6,6 +6,8 @@ const OUTPUT_SEQUENCE: [u8; 32] = [ 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3,
 
 #[derive(Clone, Default)]
 pub struct TriangleChannel {
+    model: Model,
+
     pub length_counter: LengthCounter,
 
     timer_period: u16,
@@ -17,8 +19,9 @@ pub struct TriangleChannel {
 }
 
 impl TriangleChannel {
-    pub fn new() -> Self {
+    pub fn new(model: Model) -> Self {
         Self {
+            model,
             length_counter: LengthCounter::new(),
             ..Default::default()
             /*
@@ -34,7 +37,28 @@ impl TriangleChannel {
     }
 
     pub fn power_cycle(&mut self) {
-        *self = Self::new();
+        *self = Self::new(self.model);
+    }
+
+    pub fn period(&self) -> u16 {
+        self.timer_period
+    }
+
+    pub fn set_period(&mut self, period: u16) {
+        self.timer_period = period
+    }
+
+    pub fn frequency(&self) -> u32 {
+        self.model.cpu_clock_hz() / (32 * self.timer_period as u32 + 1)
+    }
+
+    pub fn set_frequency(&mut self, freq: u32) {
+        const MAX_PERIOD: u16 = 0b0111_1111_1111;
+        if freq == 0 {
+            self.timer_period = MAX_PERIOD;
+        } else {
+            self.timer_period = ((self.model.cpu_clock_hz() / (32 * freq) - 1) as u16).min(MAX_PERIOD);
+        }
     }
 
     pub fn update_output(&mut self) {
@@ -51,11 +75,8 @@ impl TriangleChannel {
 
     // "Unlike the pulse channels, this timer ticks at the rate of the CPU clock rather than the APU (CPU/2) clock"
     pub fn step(&mut self, sequencer_state: FrameSequencerStatus) {
-        match sequencer_state {
-            FrameSequencerStatus::HalfFrame => {
-                self.length_counter.step_half_frame();
-            }
-            _ => {}
+        if sequencer_state.contains(FrameSequencerStatus::HALF_FRAME) {
+            self.length_counter.step_half_frame();
         }
 
         // FIXME: double check this has a period of self.timer_period + 1

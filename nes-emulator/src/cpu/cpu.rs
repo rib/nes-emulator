@@ -2,9 +2,9 @@ use std::fmt;
 
 use bitflags::bitflags;
 
-use super::instruction::{Instruction, Opcode, AddressingMode};
+use super::instruction::{Instruction, Opcode, AddressingMode, OopsHandling};
 
-use crate::trace::CpuInterruptStatus;
+use crate::{trace::CpuInterruptStatus, constants::CPU_START_CYCLE};
 #[cfg(feature="trace-events")]
 use crate::{system::System, trace::TraceEvent};
 
@@ -30,7 +30,7 @@ pub enum Interrupt {
 #[derive(Clone, Debug)]
 pub struct TraceState {
     pub last_hook_cycle_count: u64,
-    pub cycle_count: u64,
+    pub cpu_clock: u64,
     pub saved_a: u8,
     pub saved_x: u8,
     pub saved_y: u8,
@@ -43,12 +43,14 @@ pub struct TraceState {
     pub effective_address: u16, // The effective address used for indirect addressing modes
     pub loaded_mem_value: u8, // The value loaded from the memory location referred to by the instruction
     pub stored_mem_value: u8, // The value stored at the memory location referred to by the instruction
+    pub ppu_line: u16,
+    pub ppu_dot: u16,
 }
 impl Default for TraceState {
     fn default() -> Self {
         Self {
             last_hook_cycle_count: 0,
-            cycle_count: 0,
+            cpu_clock: 0,
             saved_a: 0,
             saved_x: 0,
             saved_y: 0,
@@ -56,11 +58,13 @@ impl Default for TraceState {
             saved_p: Flags::NONE,
             instruction_pc: 0,
             instruction_op_code: 0,
-            instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0, early_intr_poll: false },
+            instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0, early_intr_poll: false, oops_handling: OopsHandling::Normal },
             instruction_operand: 0,
             effective_address: 0,
             loaded_mem_value: 0,
             stored_mem_value: 0,
+            ppu_line: 0,
+            ppu_dot: 0,
         }
     }
 }
@@ -80,14 +84,17 @@ impl fmt::Display for TraceState {
         } else {
             format!("${op:02X}")
         };
-        let disassembly = self.instruction.disassemble(self.instruction_operand, self.effective_address, self.loaded_mem_value, self.stored_mem_value);
+        let disassembly = self.instruction.disassemble(self.instruction_operand, self.effective_address);
         let a = self.saved_a;
         let x = self.saved_x;
         let y = self.saved_y;
         let sp = self.saved_sp & 0xff;
         let p = self.saved_p.to_flags_string();
-        let cpu_cycles = self.cycle_count;
-        write!(f, "{pc:0X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}")
+        let cpu_cycles = self.cpu_clock;
+        let scanline = self.ppu_line;
+        let dot = self.ppu_dot;
+        //write!(f, "{pc:04X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}")
+        write!(f, "{pc:04X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CYC:{dot:<3} SL:{scanline:<3} CPU Cycle:{cpu_cycles}")
     }
 }
 
@@ -144,10 +151,15 @@ pub enum BreakpointCallbackAction {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BreakpointHandle(u32);
 
-pub(super) struct Breakpoint {
+pub struct Breakpoint {
     pub(super) handle: BreakpointHandle,
     pub(super) addr: u16,
     pub(super) callback: Box<FnBreakpointCallback>
+}
+impl Breakpoint {
+    pub fn address(&self) -> u16 {
+        self.addr
+    }
 }
 
 /// Debugger state attached to a CPU instance that won't be
@@ -191,6 +203,9 @@ pub struct Cpu {
 
     /// OAM DMA request to be picked up by the DMA unit when halted
     oam_dma_pending: Option<u16>,
+
+    /// DMC DMA request to be picked up by the DMA unit when halted
+    dmc_dma_pending: Option<u16>,
 
     // INTERRUPTS:
     //
@@ -256,7 +271,7 @@ pub struct Cpu {
 impl Default for Cpu {
     fn default() -> Self {
         Self {
-            clock: 6, // hacky constant just to make CPU traces comparable with Mesen trace logs
+            clock: CPU_START_CYCLE,
 
             last_nmi_level: false,
             pending_nmi_detected: false,
@@ -273,12 +288,13 @@ impl Default for Cpu {
 
             input_ready: true,
             oam_dma_pending: None,
+            dmc_dma_pending: None,
 
             a: 0,
             x: 0,
             y: 0,
             pc: 0,
-            sp: 0xfd,
+            sp: 0, // reset interrupt will decrement by three (with wrapping) to 0xfd
             p: unsafe { Flags::from_bits_unchecked(0x34) },
 
             #[cfg(feature="debugger")]
@@ -360,7 +376,6 @@ impl Cpu {
     }
 
     pub(crate) fn reset(&mut self, system: &mut System) {
-        self.sp = self.sp.wrapping_sub(3);
         self.handle_interrupt(system, Interrupt::RESET);
     }
 
@@ -414,16 +429,19 @@ impl Cpu {
         let mut oam_dma_value = 0u8;
         let mut oam_dma_offset = 0;
 
-        let mut dmc_dma_state = DmcDmaState::None;
-        let mut dmc_dma_addr = 0u16;
+        let (mut dmc_dma_state, mut dmc_dma_addr) = match std::mem::take(&mut self.dmc_dma_pending) {
+            Some(addr) => (DmcDmaState::Stall, addr),
+            None => (DmcDmaState::None, 0)
+        };
 
         // Iterate one clock cycle at a time until pending DMA[s] completed
         while oam_dma_state != OamDmaState::None || dmc_dma_state != DmcDmaState::None {
             self.start_clock_cycle_phi1(system);
             // DMC DMA requests can arrive in the middle of an OAM DMA and DMC reads have higher priority
-            if let Some(request) = std::mem::take(&mut system.dmc_dma_request) {
+            if let Some(addr) = std::mem::take(&mut self.dmc_dma_pending) {
+                debug_assert_eq!(dmc_dma_state, DmcDmaState::None);
                 dmc_dma_state = DmcDmaState::Stall;
-                dmc_dma_addr = request.address;
+                dmc_dma_addr = addr;
             }
 
             // Every case must:
@@ -739,8 +757,6 @@ impl Cpu {
         // from the interrupt handler will execute before another interrupt is serviced."
         self.interrupt_polling_disabled = true;
 
-        self.interrupt_handler_pending = None;
-
         let vector = match interrupt {
             Interrupt::NMI => {
                 //println!("Handling NMI");
@@ -760,6 +776,8 @@ impl Cpu {
             Interrupt::RESET => {
                 log::debug!("CPU: reset interrupt");
 
+                // RST forces /RW high during the stack pushes, so the stack pointer decrements but nothing is written
+                self.sp = self.sp.wrapping_sub(3);
                 self.set_interrupt_flag(true);
 
                 Interrupt::RESET
@@ -817,6 +835,16 @@ impl Cpu {
         //println!("BRK6: pending NMI = {}, raised NMI = {}, handler pending = {:?}", self.pending_nmi_detected, self.nmi_raised, self.interrupt_handler_pending);
         let upper = self.read_system_bus(system, upper_addr);
         self.pc = (lower as u16) | ((upper as u16) << 8);
+
+        // Didn't find much to clarify exactly when these flags for raising an interrupt are cleared
+        // but e.g. this sentence on nesdev suggests it's done as a last step here:
+        //
+        // "When the CPU checks for interrupts and find that the flip-flop is set, it pushes the processor status
+        // register and return address on the stack, reads the NMI handler's address from $FFFA-$FFFB, clears the
+        // flip-flop, and jumps to this address"
+        self.interrupt_handler_pending = None;
+        self.nmi_raised = false;
+        //self.irq_raised = false;
 
         //println!("BRK interrupt handler set PC = ${:04x}", self.pc);
 
@@ -880,9 +908,12 @@ impl Cpu {
                     Some(Interrupt::IRQ) => {
                         status.set(CpuInterruptStatus::IRQ_POLLED, true);
                     }
+                    Some(Interrupt::BRK) => {
+                        status.set(CpuInterruptStatus::BRK_POLLED, true);
+                    }
                     _ => unreachable!()
                 }
-                system.trace(TraceEvent::CpuInterruptStatus { clk: self.clock, status });
+                system.trace(TraceEvent::CpuInterruptStatus { clk_lower: (self.clock & 0xff) as u8, status });
             }
         }
     }
@@ -911,13 +942,19 @@ impl Cpu {
         self.irq_raised = self.pending_irq_detected;
         //println!("phase 1 irq_raised = {}", self.irq_raised);
 
+        if let Some(dma_req) = std::mem::take(&mut system.dmc_dma_request) {
+            debug_assert!(self.dmc_dma_pending.is_none());
+            self.dmc_dma_pending = Some(dma_req.address);
+            self.input_ready = false;
+        }
+
         #[cfg(feature="trace-events")]
         {
             if self.nmi_raised || self.irq_raised {
                 let mut status = CpuInterruptStatus::default();
                 status.set(CpuInterruptStatus::NMI_DETECTED_PHI1, self.nmi_raised);
                 status.set(CpuInterruptStatus::IRQ_DETECTED_PHI1, self.irq_raised);
-                system.trace(TraceEvent::CpuInterruptStatus { clk: self.clock, status });
+                system.trace(TraceEvent::CpuInterruptStatus { clk_lower: (self.clock & 0xff) as u8, status });
             }
         }
     }
@@ -946,7 +983,7 @@ impl Cpu {
                 let mut status = CpuInterruptStatus::default();
                 status.set(CpuInterruptStatus::NMI_DETECTED_PHI2, self.pending_nmi_detected);
                 status.set(CpuInterruptStatus::IRQ_DETECTED_PHI2, self.pending_irq_detected);
-                system.trace(TraceEvent::CpuInterruptStatus { clk: self.clock, status });
+                system.trace(TraceEvent::CpuInterruptStatus { clk_lower: (self.clock & 0xff) as u8, status });
             }
         }
     }
@@ -976,6 +1013,11 @@ impl Cpu {
         if let Some(i) = self.debug.breakpoints.iter().position(|b| b.handle == handle) {
             self.debug.breakpoints.swap_remove(i);
         }
+    }
+
+    #[cfg(feature="debugger")]
+    pub fn breakpoints(&mut self) -> std::slice::Iter<Breakpoint> {
+        self.debug.breakpoints.iter()
     }
 
     /// Returns a stack iterator that can walk stack frame pointers

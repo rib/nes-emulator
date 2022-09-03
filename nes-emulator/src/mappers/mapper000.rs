@@ -54,7 +54,7 @@ impl Mapper for Mapper0 {
                     let offset = (addr - 0x6000) as usize % self.prg_ram.len();
                     (arr_read!(self.prg_ram, offset), 0)
                 } else {
-                    log::warn!("Invalid mapper read @ {}", addr);
+                    //log::warn!("Invalid mapper read @ {}", addr);
                     (0, 0xff)
                 }
             }
@@ -67,7 +67,7 @@ impl Mapper for Mapper0 {
                 (arr_read!(self.prg_rom, addr), 0)
             }
             _ => {
-                log::warn!("Invalid mapper read @ {}", addr);
+                //log::warn!("Invalid mapper read @ {}", addr);
                 (0, 0xff)
             }
         }

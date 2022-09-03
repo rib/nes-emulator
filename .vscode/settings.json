@@ -6,5 +6,9 @@
         "ostream": "cpp",
         "memory": "cpp"
     },
+    "rust-analyzer.cargo.features": [
+        "ppu-sim"
+
+    ],
 
 }

@@ -28,17 +28,17 @@ pub struct DmcChannel {
 
     periods_table: PeriodsTable,
 
-    interrupt_enable: bool,
+    pub interrupt_enable: bool,
     pub interrupt_flagged: bool,
 
     dma_in_progress: bool,
 
-    loop_flag: bool,
+    pub loop_flag: bool,
 
-    pending_sample_address: u16,
+    pub pending_sample_address: u16,
     sample_address: u16,
 
-    pending_sample_bytes_remaining: u16,
+    pub pending_sample_bytes_remaining: u16,
     sample_bytes_remaining: u16,
     sample_buffer: Option<u8>,
 
@@ -46,10 +46,10 @@ pub struct DmcChannel {
     output_bits_remaining: u8,
     output_silence_flag: bool,
 
-    timer_period: u16,
-    timer: u16, // counts down from `timer_period`
+    pub timer_period: u16,
+    pub timer: u16, // counts down from `timer_period`
 
-    output: u8,
+    pub output: u8,
 }
 
 impl DmcChannel {
@@ -161,6 +161,7 @@ impl DmcChannel {
             // get a .completed_dma() callback
             // NB: "When the DMA reader accesses a byte of memory, the CPU is suspended for 4 clock cycles"
             //println!("DCM: request DMA address = {dma_addr:x}");
+            self.dma_in_progress = true;
             Some(DmcDmaRequest { address: dma_addr })
         } else {
             None

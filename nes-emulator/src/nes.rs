@@ -6,6 +6,8 @@ use anyhow::Result;
 use crate::apu::apu::Apu;
 //use crate::binary;
 use crate::binary::NesBinaryConfig;
+use crate::cpu::instruction::FetchedOperand;
+use crate::cpu::instruction::Instruction;
 //use crate::cartridge;
 use crate::framebuffer::*;
 use crate::cartridge::*;
@@ -268,8 +270,10 @@ impl Nes {
     /// Where appropriate this will preserve debug state (such as breakpoints and PPU hooks)
     pub fn power_cycle(&mut self, start_timestamp: Instant) {
         self.system.power_cycle();
-
         self.cpu.power_cycle();
+
+        debug_assert_eq!(self.cpu.clock, self.system.apu.clock);
+
         self.reference_cpu_clock = 0;
         self.reference_timestamp = start_timestamp;
 
@@ -356,10 +360,10 @@ impl Nes {
     #[cfg(feature="trace")]
     fn call_cpu_instruction_trace_hooks(&mut self) {
         let trace = &mut self.cpu.trace;
-        if trace.last_hook_cycle_count == trace.cycle_count {
+        if trace.last_hook_cycle_count == trace.cpu_clock {
             return;
         }
-        trace.last_hook_cycle_count = trace.cycle_count;
+        trace.last_hook_cycle_count = trace.cpu_clock;
 
         let trace = self.cpu.trace.clone();
         if self.trace_hooks.hooks.len() != 0 {
@@ -612,6 +616,11 @@ impl Nes {
                 return ProgressStatus::FrameReady;
             }
 
+            #[cfg(feature="trace")]
+            {
+                self.cpu.trace.ppu_line = self.ppu_mut().line;
+                self.cpu.trace.ppu_dot = self.ppu_mut().dot;
+            }
             self.cpu.step_instruction(&mut self.system);
             debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
 
@@ -636,8 +645,13 @@ impl Nes {
         self.reference_timestamp = timestamp;
     }
 
-    /// Simply steps the CPU (and system) forward by a single instruction
+    /// Steps the CPU (and system) forward by a single instruction
     pub fn step_instruction_in(&mut self) {
+        #[cfg(feature="trace")]
+        {
+            self.cpu.trace.ppu_line = self.ppu_mut().line;
+            self.cpu.trace.ppu_dot = self.ppu_mut().dot;
+        }
         self.cpu.step_instruction(&mut self.system);
         debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
 
@@ -705,4 +719,14 @@ impl Nes {
         self.system.ppu.peek_vram_four_screens(x, y, &mut self.system.cartridge)
     }
 
+    pub fn peek_instruction(&mut self, addr: u16) -> (Instruction, FetchedOperand) {
+        let opcode = self.system.peek(addr);
+        let instruction = Instruction::from(opcode);
+        let operand = self.cpu.peek_operand(&mut self.system, addr.wrapping_add(1), instruction.mode, instruction.oops_handling);
+        (instruction, operand)
+    }
+
+    pub fn backtrace(&mut self) -> Backtrace {
+        self.cpu.backtrace(&mut self.system)
+    }
 }

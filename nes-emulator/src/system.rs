@@ -62,6 +62,11 @@ pub struct IoStatsRecord {
 // State we don't want to capture in a snapshot/clone of the system
 #[derive(Default)]
 pub struct NoCloneDebugState {
+    #[cfg(feature="ppu-sim")]
+    pub ppu_sim: PpuSim,
+    #[cfg(feature="ppu-sim")]
+    pub ppu_sim_cartridge: Cartridge,
+
     #[cfg(feature="debugger")]
     pub watch_points: Vec<WatchPoint>,
     #[cfg(feature="debugger")]
@@ -80,9 +85,6 @@ impl Clone for NoCloneDebugState {
 pub struct System {
     pub ppu: Ppu,
 
-    #[cfg(feature="ppu-sim")]
-    pub ppu_sim: PpuSim,
-
     pub apu: Apu,
 
     /// Any time we step the APU we might get a DMA request from the DMC channel
@@ -97,8 +99,6 @@ pub struct System {
     pub wram: [u8; WRAM_SIZE],
 
     pub cartridge: Cartridge,
-    #[cfg(feature="ppu-sim")]
-    pub ppu_sim_cartridge: Cartridge,
 
     pub port1: Port,
     pub port2: Port,
@@ -113,35 +113,32 @@ impl System {
 
         #[cfg(feature="ppu-sim")]
         let ppu_sim = PpuSim::new(model);
+        #[cfg(feature="ppu-sim")]
+        let ppu_sim_cartridge = cartridge.clone();
 
         let apu = Apu::new(model, audio_sample_rate);
 
         Self {
             ppu,
-
-            #[cfg(feature="ppu-sim")]
-            ppu_sim,
-
             apu,
             dmc_dma_request: None,
-
-            #[cfg(feature="ppu-sim")]
-            ppu_sim_cartridge: cartridge.clone(),
             cartridge,
-
             wram: [0; WRAM_SIZE],
-
             port1: Default::default(),
             port2: Default::default(),
-
             open_bus_value: 0,
 
             debug: NoCloneDebugState {
+                #[cfg(feature="ppu-sim")]
+                ppu_sim,
+                #[cfg(feature="ppu-sim")]
+                ppu_sim_cartridge,
+
                 watch_points: vec![],
                 watch_hit: false,
 
                 #[cfg(feature="io-stats")]
-                io_stats: vec![IoStatsRecord::default(); u16::MAX as usize],
+                io_stats: vec![IoStatsRecord::default(); (u16::MAX as usize) + 1],
             }
         }
     }
@@ -153,12 +150,14 @@ impl System {
         self.ppu.power_cycle();
 
         #[cfg(feature="ppu-sim")]
-        self.ppu_sim.power_cycle();
+        {
+            self.debug.ppu_sim = PpuSim::new(self.debug.ppu_sim.nes_model);
+        }
 
         self.apu.power_cycle();
 
         #[cfg(feature="ppu-sim")]
-        self.ppu_sim_cartridge.power_cycle();
+        self.debug.ppu_sim_cartridge.power_cycle();
         self.cartridge.power_cycle();
 
         self.port1.power_cycle();
@@ -166,11 +165,11 @@ impl System {
 
         let ppu = std::mem::take(&mut self.ppu);
         #[cfg(feature="ppu-sim")]
-        let ppu_sim = std::mem::take(&mut self.ppu_sim);
+        let ppu_sim = std::mem::take(&mut self.debug.ppu_sim);
         let apu = std::mem::take(&mut self.apu);
         let cartridge = std::mem::take(&mut self.cartridge);
         #[cfg(feature="ppu-sim")]
-        let ppu_sim_cartridge = std::mem::take(&mut self.ppu_sim_cartridge);
+        let ppu_sim_cartridge = std::mem::take(&mut self.debug.ppu_sim_cartridge);
         let pad1 = std::mem::take(&mut self.port1);
         let pad2 = std::mem::take(&mut self.port2);
 
@@ -179,32 +178,27 @@ impl System {
 
         *self = Self {
             ppu,
-
-            #[cfg(feature="ppu-sim")]
-            ppu_sim,
-
             apu,
             dmc_dma_request: None,
-
-            #[cfg(feature="ppu-sim")]
-            ppu_sim_cartridge,
             cartridge,
-
             wram: [0; WRAM_SIZE],
-
             port1: pad1,
             port2: pad2,
-
             open_bus_value: 0,
 
             debug: NoCloneDebugState {
+                #[cfg(feature="ppu-sim")]
+                ppu_sim,
+                #[cfg(feature="ppu-sim")]
+                ppu_sim_cartridge,
+
                 #[cfg(feature="debugger")]
                 watch_points,
                 #[cfg(feature="debugger")]
                 watch_hit: false,
 
                 #[cfg(feature="io-stats")]
-                io_stats: vec![IoStatsRecord::default(); u16::MAX as usize],
+                io_stats: vec![IoStatsRecord::default(); (u16::MAX as usize) + 1],
             }
         };
     }
@@ -260,7 +254,7 @@ impl System {
     /// their clocks synchronized (we know this won't push their clock
     /// into the future)
     fn read(&mut self, addr: u16) -> u8 {
-        let (value, undefined_bits) = match addr {
+        let (mut value, undefined_bits) = match addr {
             0x0000..=0x1fff => { // RAM
                 //println!("system read {addr:x}");
                 // mirror support
@@ -271,7 +265,7 @@ impl System {
                 // Send any reads to the simulator for their side effects
                 #[cfg(feature="ppu-sim")]
                 {
-                    self.ppu_sim.system_bus_read_start(addr);
+                    self.debug.ppu_sim.system_bus_read_start(addr);
                     // TODO: we also need to step the ppu_sim forward so we can
                     // read back a value
                     // XXX: to make that practical we need to give the sim ownership
@@ -312,7 +306,7 @@ impl System {
         #[cfg(feature="ppu-sim")]
         {
             if let 0x2000..=0x3fff = addr {
-                value = self.ppu_sim.data_bus;
+                value = self.debug.ppu_sim.data_bus;
             }
         }
 
@@ -337,7 +331,9 @@ impl System {
             self.debug.io_stats[addr as usize].reads += 1;
         }
 
-        self.read(addr)
+        let val = self.read(addr);
+        //println!("CPU read @ 0x{:04x} = 0x{:02x}", addr, val);
+        val
     }
 
     /// Handle various superfluous reads that the CPU does
@@ -355,6 +351,7 @@ impl System {
             self.debug.io_stats[addr as usize].reads += 1;
         }
 
+        //println!("Dummy read @ 0x{:04x}", addr);
         self.read(addr);
     }
 
@@ -419,7 +416,7 @@ impl System {
             0x2000..=0x3fff => { // PPU
                 self.ppu.system_bus_write(&mut self.cartridge, addr, data);
                 #[cfg(feature="ppu-sim")]
-                self.ppu_sim.system_bus_write_start(addr, data);
+                self.debug.ppu_sim.system_bus_write_start(addr, data);
             }
             0x4000..=0x401f => {  // APU + I/O
                 let index = usize::from(addr - 0x4000);
@@ -445,7 +442,7 @@ impl System {
             _ => { // Cartridge
                 self.cartridge.system_bus_write(addr, data);
                 #[cfg(feature="ppu-sim")]
-                self.ppu_sim_cartridge.system_bus_write(addr, data);
+                self.debug.ppu_sim_cartridge.system_bus_write(addr, data);
             }
         }
 
@@ -481,16 +478,11 @@ impl System {
     }
 
     #[cfg(feature="ppu-sim")]
-    pub fn ppu_sim_step(&mut self, fb: *mut u8) -> PpuStatus {
-        let sim_clks = self.ppu_sim.clk_per_pclk() * 2;
-        let mut status = PpuStatus::None;
+    pub fn ppu_sim_step(&mut self) {
+        let sim_clks = self.debug.ppu_sim.clk_per_pclk() * 2;
         for _ in 0..sim_clks {
-            let new_status = self.ppu_sim.step_half(&mut self.cartridge, fb);
-            if status == PpuStatus::None {
-                status = new_status;
-            }
+            self.debug.ppu_sim.step_half(&mut self.cartridge);
         }
-        status
     }
 
     //pub fn ppu_step(&mut self) {
