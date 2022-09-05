@@ -315,7 +315,7 @@ impl EmulatorUi {
         let (mut nes, loaded_rom) = load_nes(rom_path.as_ref(), &rom_dirs, audio_sample_rate, Instant::now(), &mut notices);
 
         let back_framebuffer = nes.allocate_framebuffer();
-        let front_framebuffer = nes.ppu_mut().swap_framebuffer(back_framebuffer).unwrap();
+        let front_framebuffer = nes.swap_framebuffer(back_framebuffer).unwrap();
         //let framebuffer1 = nes.allocate_framebuffer();
         let fb_width = front_framebuffer.width();
         let fb_height = front_framebuffer.height();
@@ -632,7 +632,7 @@ impl EmulatorUi {
                         //self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
 
                         //println!("Frame Ready: swapping in new PPU back buffer");
-                        self.front_framebuffer = self.nes.ppu_mut().swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
+                        self.front_framebuffer = self.nes.swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
 
                         self.queue_framebuffer_upload = true;
                         if self.nametables_view.visible {

@@ -28,7 +28,8 @@ use crate::trace::TraceEvent;
 //pub const FRAME_WIDTH: usize = 256;
 //pub const FRAME_HEIGHT: usize = 240;
 //pub const RENDER_SCREEN_WIDTH: u16 = FRAME_WIDTH as u16;
-pub const RENDER_N_LINES: u16 = 262;
+pub const N_LINES: u16 = 262;
+pub const DOTS_PER_LINE: u16 = 341;
 pub const NAMETABLE_PIXELS_PER_TILE: u16 = 8; // 1tile=8*8
 pub const NAMETABLE_X_TILES_COUNT: u16 = (FRAME_WIDTH as u16) / NAMETABLE_PIXELS_PER_TILE; // 256/8=32
 //pub const NAMETABLE_Y_TILES_COUNT: u16 = (FRAME_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
@@ -95,6 +96,9 @@ pub(super) struct DotBreakpoint {
 /// a power cycle
 #[derive(Default)]
 pub struct NoCloneDebugState {
+    #[cfg(feature="ppu-sim")]
+    pub last_cartridge_read: Option<(u16, u8)>,
+
     #[cfg(feature="debugger")]
     pub(super) next_breakpoint_handle: u32,
     #[cfg(feature="debugger")]
@@ -617,15 +621,28 @@ impl Ppu {
             //println!("data write: addr={addr:x}, data={data:x}");
             cartridge.vram_write(addr, data);
         }
+        println!("ppu bus wrote 0x{addr:04x} = 0x{data:02x}, h={}, v={}", self.dot, self.line);
     }
 
     /// Perform an unbuffered ppu bus read
     fn unbuffered_ppu_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
-        if let 0x3f00..=0x3fff = addr {
+        let value = if let 0x3f00..=0x3fff = addr {
             self.palette_read(addr)
         } else {
-            cartridge.vram_read(addr)
-        }
+            let value= cartridge.vram_read(addr);
+
+            // So we can do a running comparison of what the emulated PPU reads vs
+            // what the simulated PPU reads we trace each read operation
+            #[cfg(feature="ppu-sim")]
+            {
+                self.debug.last_cartridge_read = Some((addr, value));
+            }
+
+            value
+        };
+
+        println!("ppu bus read 0x{addr:04x} = 0x{value:02x}, h={}, v={}", self.dot, self.line);
+        value
     }
 
     /// Peek what an unbuffered ppu bus read would fetch without any side effects
@@ -737,6 +754,7 @@ impl Ppu {
                 self.shared_w_toggle = false;
                 //self.ppu_is_second_write = false;
                 self.status.set(StatusFlags::IN_VBLANK, false);
+                //println!("Clear IN_VBLANK flag (status read)");
                 (data, StatusFlags::UNDEFINED_BITS.bits())
             }
             0x2003 => { // OAMADDR (Write-only)
@@ -762,7 +780,9 @@ impl Ppu {
 
     pub fn system_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
         let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
-        self.finish_read_with_latch(value, undefined_bits)
+        let value = self.finish_read_with_latch(value, undefined_bits);
+        //println!("ppu read 0x{addr:04x} = 0x{value:02x}");
+        value
     }
 
     pub fn system_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
@@ -786,6 +806,7 @@ impl Ppu {
     }
 
     pub fn system_bus_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
+        println!("CPU->PPU write 0x{:04x} = 0x{:02x}", addr, data);
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         self.io_latch_value = data;
@@ -1997,9 +2018,9 @@ impl Ppu {
                     // We skip from 339 to 340 so we don't need special case logic
                     // to progress the line counter (this is still after the
                     // nametable read)
-                    //if self.frame & 1 != 0 && self.line == 261 && self.dot == 339 {
-                    //    self.dot = 340;
-                    //}
+                    if self.frame & 1 != 0 && self.line == 261 && self.dot == 339 {
+                        self.dot = 340;
+                    }
                 }
             }
         }
@@ -2056,6 +2077,7 @@ impl Ppu {
                 if self.line == 241 && self.dot == 1 {
                     //println!("IN VBLANK {}", self.clock);
                     self.status.set(StatusFlags::IN_VBLANK, true);
+                    //println!("Set IN_VBLANK flag");
                     self.update_nmi();
                 }
             }
@@ -2074,6 +2096,7 @@ impl Ppu {
                 } else if self.dot == 1 {
                     //println!("OUT OF VBLANK {}", self.clock);
                     self.status.set(StatusFlags::IN_VBLANK, false);
+                    //println!("Clear IN_VBLANK flag");
                     self.update_nmi();
 
                     self.status.set(StatusFlags::SPRITE0_HIT, false);
@@ -2180,7 +2203,7 @@ impl Ppu {
         self.dot = (self.dot + 1) % 341;
 
         if self.dot == 0 {
-            self.line = (self.line + 1) % RENDER_N_LINES;
+            self.line = (self.line + 1) % N_LINES;
             self.line_status = LineStatus::from(self.line);
             //println!("Next line = {}: {:?}", self.line, self.line_status);
 

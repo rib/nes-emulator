@@ -253,7 +253,7 @@ impl Cartridge {
     /// debugging / tracing that will want to easily differentiate VRAM
     /// I/O
     pub fn vram_write(&mut self, addr: u16, data: u8) {
-        //println!("VRAM: writing {data} to {addr:04x}");
+        println!("VRAM: writing {data} to {addr:04x}, {:?}", self.config);
         //if addr < 0x2400 {
         //    println!("writing {data} to {addr}");
         //}

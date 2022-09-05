@@ -112,11 +112,13 @@ impl Mapper for Mapper0 {
             0x0000..=0x1fff => {
                 if self.has_chr_ram {
                     let off = addr as usize;
+                    println!("cartridge CHR RAM write 0x{:04x} ({}) = 0x{:02x}", addr, off, data);
                     arr_write!(self.chr_data, off, data);
                 }
             },
             0x2000..=0x3fff => { // VRAM
                 let off = mirror_vram_address(addr, self.vram_mirror);
+                println!("cartridge vram write 0x{:04x} ({}) = 0x{:02x}", addr, off, data);
                 arr_write!(self.vram, off, data);
             }
             _ => {

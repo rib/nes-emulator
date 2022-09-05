@@ -108,6 +108,9 @@ pub struct Nes {
 
     system: System,
 
+    #[cfg(feature="ppu-sim")]
+    ppu_sim_visible: bool,
+
     #[cfg(feature="nsf-player")]
     nsf_player: NsfPlayer,
 
@@ -143,6 +146,9 @@ impl Nes {
 
             cpu,
             system,
+
+            #[cfg(feature="ppu-sim")]
+            ppu_sim_visible: false,
 
             #[cfg(feature="nsf-player")]
             nsf_player: NsfPlayer {
@@ -198,7 +204,7 @@ impl Nes {
                 #[cfg(feature="nsf-player")]
                 {
                     self.nsf_player.nsf_config = Some(nsf_config.clone());
-                    self.system.cartridge = cartridge;
+                    self.system.insert_cartridge(cartridge);
                 }
                 #[cfg(not(feature="nsf-player"))]
                 {
@@ -206,10 +212,10 @@ impl Nes {
                     Err(anyhow::anyhow!("NSF cartridges not supported (missing \"nsf-player\" feature"))?
                 }
             } else {
-                self.system.cartridge = cartridge;
+                self.system.insert_cartridge(cartridge);
             }
         } else {
-            self.system.cartridge = Cartridge::none();
+            self.system.insert_cartridge(Cartridge::none());
         }
         Ok(())
     }
@@ -336,7 +342,31 @@ impl Nes {
     ///
     /// To configure the PPU to start rendering to this framebuffer then call [`Ppu:swap_framebuffer`]
     pub fn allocate_framebuffer(&self) -> Framebuffer {
-        self.system.ppu.alloc_framebuffer()
+        #[cfg(feature="ppu-sim")]
+        {
+            self.system.debug.ppu_sim.alloc_framebuffer()
+        }
+
+        #[cfg(not(feature="ppu-sim"))]
+        {
+            self.system.ppu.alloc_framebuffer()
+        }
+    }
+
+    pub fn swap_framebuffer(&mut self, framebuffer: Framebuffer) -> Result<Framebuffer> {
+        #[cfg(feature="ppu-sim")]
+        {
+            if self.ppu_sim_visible {
+                self.system.debug.ppu_sim.swap_framebuffer(framebuffer)
+            } else {
+                self.system.ppu.swap_framebuffer(framebuffer)
+            }
+        }
+
+        #[cfg(not(feature="ppu-sim"))]
+        {
+            self.system.ppu.swap_framebuffer(framebuffer)
+        }
     }
 
     /// Add a hook function to trace all CPU instructions executed
@@ -609,8 +639,7 @@ impl Nes {
                 return ProgressStatus::Breakpoint;
             }
 
-            if self.system.ppu.frame_ready {
-                self.system.ppu.frame_ready = false;
+            if self.system.take_frame_ready() {
                 self.system.port1.update_button_press_latches();
                 self.system.port2.update_button_press_latches();
                 return ProgressStatus::FrameReady;
@@ -717,6 +746,15 @@ impl Nes {
 
     pub fn debug_sample_nametable(&mut self, x: usize, y: usize) -> [u8; 3] {
         self.system.ppu.peek_vram_four_screens(x, y, &mut self.system.cartridge)
+    }
+
+    #[cfg(feature="ppu-sim")]
+    pub fn set_ppu_sim_visible(&mut self, sim_visible: bool) {
+        self.ppu_sim_visible = sim_visible;
+    }
+    #[cfg(feature="ppu-sim")]
+    pub fn ppu_sim_visible(&mut self) -> bool {
+        self.ppu_sim_visible
     }
 
     pub fn peek_instruction(&mut self, addr: u16) -> (Instruction, FetchedOperand) {
