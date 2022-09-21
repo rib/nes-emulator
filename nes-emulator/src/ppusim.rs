@@ -192,7 +192,7 @@ pub struct PpuSim {
 
     //address: [TriState; 14],
 
-    pub expected_reads: VecDeque<(u16, u8)>,
+    pub expected_reads: VecDeque<(u16, u8, u16, u16)>,
 
     ppu: PpuFfi,
 
@@ -431,20 +431,22 @@ impl PpuSim {
                     _ => panic!("out-of-bounds PPU address {address:04x}")
                 };
                 match self.expected_reads.pop_front() {
-                    Some((addr, val)) => {
-                        if addr == address && val == data {
-                            //println!("Matching PPU SIM: read 0x{address:04x} = 0x{data:02x}, h={}, v={}", self.h_counter(), self.v_counter());
+                    Some((ppu_addr, ppu_val, ppu_dot, ppu_line)) => {
+                        if ppu_addr == address && ppu_val == data {
+                            println!("Matching PPU SIM: read 0x{address:04x} = 0x{data:02x}, ppu/sim dot {}/{}, line {}/{}", ppu_dot, self.h_counter(), ppu_line, self.v_counter());
                         } else {
-                            if addr == address && val != data {
-                                log::error!("PPU SIM: Inconsistent cartridge read value 0x{address:04x} = 0x{data:02x} (expected 0x{val:02x}), dot={}, line={}", self.h_counter(), self.v_counter());
-                                println!("PPU SIM: Inconsistent cartridge read value 0x{address:04x} = 0x{data:02x} (expected 0x{val:02x}), dot={}, line={}", self.h_counter(), self.v_counter());
+                            if ppu_addr == address && ppu_val != data {
+                                log::error!("PPU SIM: Inconsistent cartridge read value 0x{address:04x} = 0x{data:02x} (expected 0x{ppu_val:02x}), dot={}, line={}", self.h_counter(), self.v_counter());
+                                println!("PPU SIM: Inconsistent cartridge read value 0x{address:04x} = 0x{data:02x} (expected 0x{ppu_val:02x}), dot={}, line={}", self.h_counter(), self.v_counter());
                             } else {
-                                println!("PPU SIM: Inconsistent read address 0x{address:04x} = 0x{data:02x}, (expected 0x{addr:04x} = 0x{val:02x}), dot={}, line={}", self.h_counter(), self.v_counter());
+                                log::error!("PPU SIM: Inconsistent read address 0x{address:04x} = 0x{data:02x}, (expected 0x{ppu_addr:04x} = 0x{ppu_val:02x}), ppu/sim dot {}/{}, line {}/{}", ppu_dot, self.h_counter(), ppu_line, self.v_counter());
+                                println!("PPU SIM: Inconsistent read address 0x{address:04x} = 0x{data:02x}, (expected 0x{ppu_addr:04x} = 0x{ppu_val:02x}), ppu/sim dot {}/{}, line {}/{}", ppu_dot, self.h_counter(), ppu_line, self.v_counter());
                             }
                         }
                     }
                     None => {
-                        println!("Unexpected PPU SIM: read 0x{address:04x} = 0x{data:02x}, h={}, v={}", self.h_counter(), self.v_counter());
+                        log::error!("Unexpected PPU SIM: read 0x{address:04x} = 0x{data:02x}, dot={}, line={}", self.h_counter(), self.v_counter());
+                        println!("Unexpected PPU SIM: read 0x{address:04x} = 0x{data:02x}, dot={}, line={}", self.h_counter(), self.v_counter());
                     }
                 }
                 self.address_bus_lo = data;
@@ -532,6 +534,9 @@ impl PpuSim {
 
         let pclk = self.pclk();
         self.wires = self.debug_read_wires();
+
+        let registers = self.debug_read_registers();
+        println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
         // To save pins, the PPU multiplexes the lower eight VRAM address pins,
         // also using them as the VRAM data pins. This leads to each VRAM access
         // taking two PPU cycles:
@@ -548,14 +553,14 @@ impl PpuSim {
         if address_latch_enable == TriState::One {
             self.address_bus_lo_latch = self.address_bus_lo;
             self.address_bus_lo_latch_pclk = TriState::from(self.wires.PCLK);
-            println!("SIM: latched bus address lo = 0x{:02x}, h={}, v={}, clk={:?}", self.address_bus_lo, self.h_counter(), self.v_counter(), self.clk);
-        } else if TriState::from(self.wires.PCLK) != self.address_bus_lo_latch_pclk {
+            //println!("SIM: latched bus address lo = 0x{:02x}, h={}, v={}, clk={:?}", self.address_bus_lo, self.h_counter(), self.v_counter(), self.clk);
+        } else /*if TriState::from(self.wires.PCLK) != self.address_bus_lo_latch_pclk*/ {
             let address = self.address_bus_lo_latch as u16 | (((self.address_bus_hi as u16) & 0b11_1111) << 8);
             if address_latch_enable != TriState::One {
-                let registers = self.debug_read_registers();
+                //let registers = self.debug_read_registers();
                 //if address == 0x2400 && write_neg == TriState::Zero {
                     //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, lo=0x{:02x}, pclk={}, clk={:?}, DBE={}, wires={:?}", self.address_bus_lo, pclk, self.clk, self.data_bus_enable_duration > 0, wires);
-                    println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
+                    //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
                 //}
                 self.sim_ppu_bus_io(address, read_neg, write_neg, cartridge);
             }
@@ -575,6 +580,7 @@ impl PpuSim {
             println!("PPU SIM: Finished frame: regs: {:?}", self.debug_read_registers());
             log::debug!("PPU SIM: Finished frame");
             self.frame_ready = true;
+            self.expected_reads.clear();
         }
 
     }

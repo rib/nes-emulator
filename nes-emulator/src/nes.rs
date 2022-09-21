@@ -148,7 +148,7 @@ impl Nes {
             system,
 
             #[cfg(feature="ppu-sim")]
-            ppu_sim_visible: false,
+            ppu_sim_visible: true,
 
             #[cfg(feature="nsf-player")]
             nsf_player: NsfPlayer {

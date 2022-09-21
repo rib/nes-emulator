@@ -97,7 +97,7 @@ pub(super) struct DotBreakpoint {
 #[derive(Default)]
 pub struct NoCloneDebugState {
     #[cfg(feature="ppu-sim")]
-    pub last_cartridge_read: Option<(u16, u8)>,
+    pub last_cartridge_read: Option<(u16, u8, u16, u16)>,
 
     #[cfg(feature="debugger")]
     pub(super) next_breakpoint_handle: u32,
@@ -621,7 +621,7 @@ impl Ppu {
             //println!("data write: addr={addr:x}, data={data:x}");
             cartridge.vram_write(addr, data);
         }
-        println!("ppu bus wrote 0x{addr:04x} = 0x{data:02x}, h={}, v={}", self.dot, self.line);
+        println!("ppu bus wrote 0x{addr:04x} = 0x{data:02x}, h={}, v={}, RB=0x{:02x}", self.dot, self.line, self.read_buffer);
     }
 
     /// Perform an unbuffered ppu bus read
@@ -635,13 +635,16 @@ impl Ppu {
             // what the simulated PPU reads we trace each read operation
             #[cfg(feature="ppu-sim")]
             {
-                self.debug.last_cartridge_read = Some((addr, value));
+                self.debug.last_cartridge_read = Some((addr, value, self.dot, self.line));
             }
 
             value
         };
 
         println!("ppu bus read 0x{addr:04x} = 0x{value:02x}, h={}, v={}", self.dot, self.line);
+        if self.dot == 259 {
+            panic!("unexpected PPU read");
+        }
         value
     }
 
@@ -680,11 +683,11 @@ impl Ppu {
     }
 
     // TODO: decay the latch value over time
-    pub fn finish_read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
-        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
-        self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
-        read
-    }
+    //pub fn finish_read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
+    //    let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
+    //    self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
+    //    read
+    //}
 
     pub fn finish_peek_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
         let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
@@ -778,14 +781,15 @@ impl Ppu {
         }
     }
 
-    pub fn system_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
-        let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
-        let value = self.finish_read_with_latch(value, undefined_bits);
+    pub fn system_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
+        self.read_without_openbus(cartridge, addr)
+        //let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
+        //let value = self.finish_read_with_latch(value, undefined_bits);
         //println!("ppu read 0x{addr:04x} = 0x{value:02x}");
-        value
+        //value
     }
 
-    pub fn system_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
+    pub fn system_bus_peek(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         let (value, undefined_bits) = match addr {
@@ -802,14 +806,16 @@ impl Ppu {
             _ => (0, 0xff)
         };
 
-        self.finish_peek_with_latch(value, undefined_bits)
+        //self.finish_peek_with_latch(value, undefined_bits)
+
+        (value, undefined_bits)
     }
 
     pub fn system_bus_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
-        println!("CPU->PPU write 0x{:04x} = 0x{:02x}", addr, data);
+        //println!("CPU->PPU write 0x{:04x} = 0x{:02x}", addr, data);
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
-        self.io_latch_value = data;
+        //self.io_latch_value = data;
         match addr {
             0x2000 => { // Control 1
                 self.control1 = Control1Flags::from_bits_truncate(data);

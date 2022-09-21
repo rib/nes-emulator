@@ -135,7 +135,7 @@ impl System {
 
             debug: NoCloneDebugState {
                 #[cfg(feature="ppu-sim")]
-                ppu_sim_as_main: true,
+                ppu_sim_as_main: false,
                 #[cfg(feature="ppu-sim")]
                 ppu_sim,
                 #[cfg(feature="ppu-sim")]
@@ -345,9 +345,7 @@ impl System {
                     //(self.ppu_sim.data_bus, 0)
                 }
 
-                // PPU read handles open bus behaviour, so we assume there
-                // are no undefined bits at this point
-                (self.ppu.system_bus_read(&mut self.cartridge, addr), 0)
+                self.ppu.system_bus_read(&mut self.cartridge, addr)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
@@ -377,23 +375,25 @@ impl System {
         {
             if let 0x2000..=0x3fff = addr {
                 let addr = ((addr - 0x2000) % 8) + 0x2000;
-                let valid_bits = match addr {
-                    0x2002 => !crate::ppu_registers::StatusFlags::UNDEFINED_BITS.bits(),
-                    0x2004 => 0xff,
-                    _ => 0xff, // TODO: we also need to recognise reads from the palettes which have undefined bits
-                };
+                let valid_bits = !undefined_bits;
+                //let valid_bits = match addr {
+                //    0x2002 => !crate::ppu_registers::StatusFlags::UNDEFINED_BITS.bits(),
+                //    0x2004 => 0xff,
+                //    _ => 0xff, // TODO: we also need to recognise reads from the palettes which have undefined bits
+                //};
                 let sim_value = self.debug.ppu_sim.data_bus;
 
                 if value & valid_bits == sim_value & valid_bits {
                     println!("sys read 0x{addr:04x} = 0x{value:02x}");
                 } else {
+                    log::error!("Mis-matching sys read 0x{addr:04x} = 0x{value:02x}, sim val = 0x{sim_value:02x}, dot={}, line={}", self.ppu.dot, self.ppu.line);
                     println!("Mis-matching sys read 0x{addr:04x} = 0x{value:02x}, sim val = 0x{sim_value:02x}, dot={}, line={}", self.ppu.dot, self.ppu.line);
                 }
 
                 let sim_registers = self.debug.ppu_sim.debug_read_registers();
                 if sim_registers.ReadBuffer as u8 != self.ppu.io_latch_value {
-                    log::error!("PPU SIM: read buffer out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.io_latch_value, sim_registers.ReadBuffer);
-                    println!("PPU SIM: read buffer out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.io_latch_value, sim_registers.ReadBuffer);
+                    log::error!("PPU SIM: read buffer out of sync: ppu = 0x{:02x}, sim = 0x{:02x}, dot={}, line={}", self.ppu.read_buffer, sim_registers.ReadBuffer, self.ppu.dot, self.ppu.line);
+                    println!("PPU SIM: read buffer out of sync: ppu = 0x{:02x}, sim = 0x{:02x}, dot={}, line={}", self.ppu.read_buffer, sim_registers.ReadBuffer, self.ppu.dot, self.ppu.line);
                 }
 
                 if self.debug.ppu_sim_as_main {
@@ -471,9 +471,7 @@ impl System {
                 (arr_read!(self.wram, index), 0)
             }
             0x2000..=0x3fff => { // PPU I/O
-                // PPU read handles open bus behaviour, so we assume there
-                // are no undefined bits at this point
-                (self.ppu.system_bus_peek(&mut self.cartridge, addr), 0)
+                self.ppu.system_bus_peek(&mut self.cartridge, addr)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
@@ -716,6 +714,8 @@ impl System {
     fn warm_up_sync_ppu_sim(&mut self) {
         #[cfg(feature="ppu-sim")]
         {
+            log::debug!("PPU SIM: warm up, aligning to pixel clock and skipping first frame");
+
             // Don't assume a perfectly aligned startup for the simulator, so we warm it up by
             // first stepping forward ~one dot and then we align to the next wire.PCLK change
 
@@ -728,8 +728,8 @@ impl System {
             for _ in 0..sim_dot_clks {
                 sim.step_half(&mut self.debug.ppu_sim_cartridge);
                 let wires = sim.debug_read_wires();
-                println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
-                         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
+                //println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
+                //         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
 
                 //let wires = self.debug_read_wires();
                 //println!("clk = {}, /clk = {}, pclk = {} /pclk = {}, ale = {:?}, /rd = {:?}, /wr = {:?}, /int = {:?}, pclk = {}",
@@ -740,15 +740,23 @@ impl System {
             loop {
                 sim.step_half(&mut self.debug.ppu_sim_cartridge);
                 let wires = sim.debug_read_wires();
-                println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
-                         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
+                //println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
+                //         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
                 if wires.PCLK != start_pclk {
                     break;
                 }
             }
 
             // After aligning to the PCLK we then discard the first frame
+            loop {
+                self.ppu_sim_step();
+                if self.debug.ppu_sim.h_counter() == 0 && self.debug.ppu_sim.v_counter() == 242 {
+                    break;
+                }
+            }
 
+            // clear vblank status
+            self.debug.ppu_sim.system_bus_read_start(0x2002);
             loop {
                 self.ppu_sim_step();
                 if self.debug.ppu_sim.h_counter() == 0 && self.debug.ppu_sim.v_counter() == 0 {
