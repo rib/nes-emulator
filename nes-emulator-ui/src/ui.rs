@@ -378,14 +378,20 @@ impl EmulatorUi {
         };
 
         if let Some(trace) = &args.trace {
-            let f = File::create(trace)?;
-            let writer = Rc::new(RefCell::new(BufWriter::new(f)));
-            emulator.trace_writer = Some(writer.clone());
-            emulator.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
-                if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
-                    log::error!("Failed to write to CPU trace: {err}");
-                }
-            }));
+            if trace == "-" {
+                emulator.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                    println!("{trace_state}");
+                }));
+            } else {
+                let f = File::create(trace)?;
+                let writer = Rc::new(RefCell::new(BufWriter::new(f)));
+                emulator.trace_writer = Some(writer.clone());
+                emulator.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                    if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
+                        log::error!("Failed to write to CPU trace: {err}");
+                    }
+                }));
+            }
         }
 
         //emulator.recreate_test_builder_on_load(ctx);

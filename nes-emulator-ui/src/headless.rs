@@ -65,13 +65,19 @@ fn setup_new_nes(rom_path: impl AsRef<Path>, rom_dirs: &Vec<PathBuf>, audio_samp
     let mut nes = utils::create_nes_from_binary(rom_path, audio_sample_rate, Instant::now())?;
 
     if let Some(trace) = trace_file {
-        let f = File::create(trace)?;
-        let mut writer = BufWriter::new(f);
-        nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
-            if let Err(err) = writeln!(writer, "{trace_state}") {
-                eprintln!("Failed to write to trace file: {err:?}");
-            }
-        }));
+        if trace == "-" {
+            nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                println!("{trace_state}");
+            }));
+        } else {
+            let f = File::create(trace)?;
+            let mut writer = BufWriter::new(f);
+            nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                if let Err(err) = writeln!(writer, "{trace_state}") {
+                    eprintln!("Failed to write to trace file: {err:?}");
+                }
+            }));
+        }
     }
 
     Ok(nes)
