@@ -2,7 +2,7 @@ use egui::{TextureHandle, ColorImage, ImageData, Ui, epaint::ImageDelta, pos2};
 use nes_emulator::{constants::*, nes::Nes};
 
 pub struct NametablesView {
-    pub show: bool,
+    pub visible: bool,
     fb_width: usize,
     fb_height: usize,
     framebuffer: Vec<u8>,
@@ -32,7 +32,7 @@ impl NametablesView {
         };
 
         Self {
-            show: false,
+            visible: false,
             fb_width,
             fb_height,
             framebuffer: nametables_framebuffer,

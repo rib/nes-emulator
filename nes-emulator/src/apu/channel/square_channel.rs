@@ -124,7 +124,7 @@ impl SquareChannel {
             // "If the shift count is zero, the pulse channel's period is never updated, but
             // muting logic still applies."
             if self.sweep_shift != 0 {
-                println!("Updating period by sweep: from {}, to {}", self.timer_period, self.sweep_target_period);
+                //println!("Updating period by sweep: from {}, to {}", self.timer_period, self.sweep_target_period);
                 self.set_period(self.sweep_target_period);
             }
         }// else {

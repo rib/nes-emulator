@@ -67,12 +67,12 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
 
     let mut winit_state = egui_winit::State::new(&event_loop);
     let mut painter = egui_wgpu::winit::Painter::new(
-        wgpu::Backends::all(),
-        wgpu::PowerPreference::LowPower,
+        wgpu::Backends::VULKAN,
+        wgpu::PowerPreference::HighPerformance,
         wgpu::DeviceDescriptor {
             label: None,
             features: wgpu::Features::default(),
-            limits: wgpu::Limits::default()
+            limits: wgpu::Limits::downlevel_webgl2_defaults()
         },
         wgpu::PresentMode::Fifo,
         1);

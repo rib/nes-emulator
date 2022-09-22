@@ -6,6 +6,8 @@ use anyhow::Result;
 use crate::apu::apu::Apu;
 //use crate::binary;
 use crate::binary::NesBinaryConfig;
+use crate::cpu::instruction::FetchedOperand;
+use crate::cpu::instruction::Instruction;
 //use crate::cartridge;
 use crate::framebuffer::*;
 use crate::cartridge::*;
@@ -106,6 +108,9 @@ pub struct Nes {
 
     system: System,
 
+    #[cfg(feature="ppu-sim")]
+    ppu_sim_visible: bool,
+
     #[cfg(feature="nsf-player")]
     nsf_player: NsfPlayer,
 
@@ -141,6 +146,9 @@ impl Nes {
 
             cpu,
             system,
+
+            #[cfg(feature="ppu-sim")]
+            ppu_sim_visible: true,
 
             #[cfg(feature="nsf-player")]
             nsf_player: NsfPlayer {
@@ -196,7 +204,7 @@ impl Nes {
                 #[cfg(feature="nsf-player")]
                 {
                     self.nsf_player.nsf_config = Some(nsf_config.clone());
-                    self.system.cartridge = cartridge;
+                    self.system.insert_cartridge(cartridge);
                 }
                 #[cfg(not(feature="nsf-player"))]
                 {
@@ -204,10 +212,10 @@ impl Nes {
                     Err(anyhow::anyhow!("NSF cartridges not supported (missing \"nsf-player\" feature"))?
                 }
             } else {
-                self.system.cartridge = cartridge;
+                self.system.insert_cartridge(cartridge);
             }
         } else {
-            self.system.cartridge = Cartridge::none();
+            self.system.insert_cartridge(Cartridge::none());
         }
         Ok(())
     }
@@ -268,8 +276,10 @@ impl Nes {
     /// Where appropriate this will preserve debug state (such as breakpoints and PPU hooks)
     pub fn power_cycle(&mut self, start_timestamp: Instant) {
         self.system.power_cycle();
-
         self.cpu.power_cycle();
+
+        debug_assert_eq!(self.cpu.clock, self.system.apu.clock);
+
         self.reference_cpu_clock = 0;
         self.reference_timestamp = start_timestamp;
 
@@ -332,7 +342,31 @@ impl Nes {
     ///
     /// To configure the PPU to start rendering to this framebuffer then call [`Ppu:swap_framebuffer`]
     pub fn allocate_framebuffer(&self) -> Framebuffer {
-        self.system.ppu.alloc_framebuffer()
+        #[cfg(feature="ppu-sim")]
+        {
+            self.system.debug.ppu_sim.alloc_framebuffer()
+        }
+
+        #[cfg(not(feature="ppu-sim"))]
+        {
+            self.system.ppu.alloc_framebuffer()
+        }
+    }
+
+    pub fn swap_framebuffer(&mut self, framebuffer: Framebuffer) -> Result<Framebuffer> {
+        #[cfg(feature="ppu-sim")]
+        {
+            if self.ppu_sim_visible {
+                self.system.debug.ppu_sim.swap_framebuffer(framebuffer)
+            } else {
+                self.system.ppu.swap_framebuffer(framebuffer)
+            }
+        }
+
+        #[cfg(not(feature="ppu-sim"))]
+        {
+            self.system.ppu.swap_framebuffer(framebuffer)
+        }
     }
 
     /// Add a hook function to trace all CPU instructions executed
@@ -356,10 +390,10 @@ impl Nes {
     #[cfg(feature="trace")]
     fn call_cpu_instruction_trace_hooks(&mut self) {
         let trace = &mut self.cpu.trace;
-        if trace.last_hook_cycle_count == trace.cycle_count {
+        if trace.last_hook_cycle_count == trace.cpu_clock {
             return;
         }
-        trace.last_hook_cycle_count = trace.cycle_count;
+        trace.last_hook_cycle_count = trace.cpu_clock;
 
         let trace = self.cpu.trace.clone();
         if self.trace_hooks.hooks.len() != 0 {
@@ -392,33 +426,135 @@ impl Nes {
         self.reference_cpu_clock + delta_clocks
     }
 
+    /// Returns the PPU clock, derived from the current CPU clock
+    ///
+    /// This is the mapping that's used by the emulator to ensure the PPU is
+    /// always caught up with the CPU clock which is treated like the main
+    /// clock.
+    ///
+    /// Note: When the cpu clock = N then N cycles have really elapsed, since we
+    /// always post-increment clocks for all units of the emulator. So at
+    /// clock 0, zero cycles have actually elapsed.
+    ///
+    /// This function effectively returns the number of PPU clocks
+    /// that should have elapsed for a given (post-incremented) CPU clock.
+    /// E.g. after a single step of the CPU with a clock of 1, then the function
+    /// would return 3. This is our target clock for the PPU, which is also post
+    /// incremented.
+    ///
+    /// Note: this function effectively returns a floor() of the number of PPU clocks
+    /// that should have elapsed for PAL (which runs a 3.2x the CPU clock) so
+    /// that the PPU will never progress into the future based on this function.
+    pub fn cpu_to_ppu_clock(&self, cpu_clock: u64) -> u64 {
+        match self.model {
+            Model::Ntsc => cpu_clock * 3,
+
+            // Calculate clock * 3.2 in fixed point where decimals are divided
+            // into 1000 units.  Do the calculation in integer arithmetic to be
+            // sure of consistency across architectures (e.g. considering ARM
+            // systems that don't natively support double precision, and also
+            // just general consistency, considering the varying internal precision
+            // for float calculations across systems)
+            //
+            // NB: we want the floor() value here to ensure the PPU isn't progressed
+            // into the future, past the CPU clock. This is the opposite of the
+            // ppu_to_cpu_clock function that will return the ceil()
+            //
+            // Note: we don't use a power-of-two fixed point representation
+            // here, like 48.16 because 3.2 factors perfectly into 10s not 2s.
+            //
+            // A trade off with this is that the ppu_to_cpu_clock function (only
+            // really used for debug visualization) needs to use use modulus
+            // with non-power-of-two values instead of simply shifting but the
+            // main concern here is consistency not performance.
+            Model::Pal => cpu_clock * 3200 / 1000,
+        }
+    }
+
+    /// Returns a function that can map a CPU clock to PPU clock
+    ///
+    /// This is like [`Self::cpu_to_ppu_clock`] but with the benefit of not
+    /// needing to borrow `Nes` and it avoids repeatedly checking the [`Nes::model`]
+    ///
+    /// See: [`Self::cpu_to_ppu_clock`] for more details.
+    pub fn cpu_to_ppu_clock_mapper(&self) -> impl Fn(u64) -> u64{
+        match self.model {
+            Model::Ntsc => |clk: u64 | clk * 3,
+            Model::Pal => |clk: u64| clk * 3200 / 1000,
+        }
+    }
+
+    /// Calculate the ceil() of a fixed-point number where the decimal is divided into
+    /// units of 1/1000.
+    #[inline(always)]
+    fn fixed_1000x_ceil(fixed_val: u64) -> u64 {
+        if fixed_val % 1000 == 0 {
+            fixed_val / 1000
+        } else {
+            (fixed_val + 1000) / 1000
+        }
+    }
+
+    /// Returns the CPU clock, derived from the current PPU clock
+    ///
+    /// This is consistent with the [`Self::cpu_to_ppu_clock`] function.
+    ///
+    /// Note: that while the [`Self::cpu_to_ppu_clock`] function effectively
+    /// returns a `floor()` of the true value for PAL systems (where the PPU
+    /// runs at 3.2x the CPU clock) to ensure the PPU isn't stepped into the
+    /// future; this function returns the `ceil()` of the reverse mapping.
+    ///
+    /// This function will consistently represent where CPU cycles map to 4 PPU cycles
+    /// instead of 3 for PAL timing where the PPU runs at 3.2x the CPU clock.
+    ///
+    /// This can be used to visualize the relationship between CPU and PPU cycles in
+    /// debugging tools.
+    pub fn ppu_to_cpu_clock(&self, ppu_clock: u64) -> u64 {
+        match self.model {
+            Model::Ntsc => ppu_clock / 3,
+
+            // Calculate clock / 3.2 in fixed point where decimals are divided into 1000 units.
+            //
+            // Note: we want the ceil() value here, considering we get the floor() when mapping cpu
+            // clocks to ppu clocks.
+            Model::Pal => Self::fixed_1000x_ceil(ppu_clock * 1000 * 1000 / 3200),
+        }
+    }
+
+    /// Returns a function that can map a CPU clock to PPU clock
+    ///
+    /// This is like [`Self::ppu_to_cpu_clock`] but with the benefit of not
+    /// needing to borrow `Nes` and it avoids repeatedly checking the [`Nes::model`]
+    ///
+    /// See: [`Self::ppu_to_cpu_clock`] for more details.
+    pub fn ppu_to_cpu_clock_mapper(&self) -> impl Fn(u64) -> u64{
+        match self.model {
+            Model::Ntsc => |clk: u64 | clk / 3,
+            Model::Pal => |clk: u64| Self::fixed_1000x_ceil(clk * 1000 * 1000 / 3200),
+        }
+    }
+
     /// Account of any PPU clock drift, either due to having a a non-integer CPU:PPU clock ratio
-    /// with PAL or due to PPU dot breakpoints that may have stalled the PPU for part of an CPU
+    /// with PAL or due to PPU dot breakpoints that may have stalled the PPU for part of a CPU
     /// instruction
     ///
-    /// Returns false if a PPU dot breakpoint is hit or if a frame becomes ready to draw
-    /// (it won't clear the status flags for breakpoints or ready frames)
+    /// Returns false if the catch up was aborted (e.g. if a a PPU dot breakpoint is hit)
     fn catch_up_ppu_drift(&mut self) -> bool {
-        let expected_ppu_clock = self.cpu.clock * 3;
-
-        //println!("cpu clock = {}, expected PPU clock = {}, actual ppu clock = {}", self.cpu.clock, expected_ppu_clock, self.system.ppu_clock());
-        let ppu_delta = expected_ppu_clock - self.system.ppu_clock();
-
-        for _ in 0..ppu_delta {
-            if !self.system.ppu.step(&mut self.system.cartridge) {
-                // Will return false if we hit a PPU dot breakpoint
-                return false;
-            }
-
-            #[cfg(feature="sim")]
-            let _status = self.system.ppu_sim_step();
-
-            if self.system.ppu.frame_ready {
-                return false;
-            }
-        }
-
-        true
+        // When the cpu clock = N then N cycles have really elapsed, since we
+        // always post-increment clocks for all units of the emulator. So at
+        // clock 0, zero cycles have actually elapsed.
+        //
+        // The cpu_to_ppu_clock() function effectively returns the number of PPU clocks
+        // that should have elapsed for a given (post-incremented) CPU clock.
+        // E.g. after a single step of the CPU with a clock of 1, then the function
+        // would return 3. This is our target clock for the PPU, which is also post
+        // incremented.
+        //
+        // Note: cpu_to_ppu_clock() effectively returns a floor() of the number of PPU clocks
+        // that should have elapsed for PAL (which runs a 3.2x the CPU clock) so
+        // that the PPU will never progress into the future based on this function.
+        let expected_ppu_clock = self.cpu_to_ppu_clock(self.cpu.clock);
+        self.system.catch_up_ppu_drift(expected_ppu_clock)
     }
 
     #[cfg(feature="nsf-player")]
@@ -460,14 +596,14 @@ impl Nes {
 
     #[cfg(feature="debugger")]
     fn clear_breakpoint_flags(&mut self) {
-        self.cpu.debugger.breakpoint_hit = false;
-        self.system.watch_hit = false;
-        self.system.ppu.debugger.breakpoint_hit = false;
+        self.cpu.debug.breakpoint_hit = false;
+        self.system.debug.watch_hit = false;
+        self.system.ppu.debug.breakpoint_hit = false;
     }
 
     #[cfg(feature="debugger")]
     fn check_for_breakpoint(&mut self) -> bool {
-        if self.cpu.debugger.breakpoint_hit | self.system.watch_hit | self.system.ppu.debugger.breakpoint_hit {
+        if self.cpu.debug.breakpoint_hit | self.system.debug.watch_hit | self.system.ppu.debug.breakpoint_hit {
             self.clear_breakpoint_flags();
             true
         } else {
@@ -493,8 +629,9 @@ impl Nes {
 
         loop {
             // Let the PPU catch up with the CPU clock before progressing the CPU
-            // in case we need to quit to allow a redraw (so we will resume
-            // catching afterwards)
+            //
+            // Note: if we abort the catch up due to hitting a PPU break point then
+            // we will simply resume caching up when `progress()` is re-called later.
             self.catch_up_ppu_drift();
 
             #[cfg(feature="debugger")]
@@ -502,13 +639,17 @@ impl Nes {
                 return ProgressStatus::Breakpoint;
             }
 
-            if self.system.ppu.frame_ready {
-                self.system.ppu.frame_ready = false;
+            if self.system.take_frame_ready() {
                 self.system.port1.update_button_press_latches();
                 self.system.port2.update_button_press_latches();
                 return ProgressStatus::FrameReady;
             }
 
+            #[cfg(feature="trace")]
+            {
+                self.cpu.trace.ppu_line = self.ppu_mut().line;
+                self.cpu.trace.ppu_dot = self.ppu_mut().dot;
+            }
             self.cpu.step_instruction(&mut self.system);
             debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
 
@@ -533,8 +674,13 @@ impl Nes {
         self.reference_timestamp = timestamp;
     }
 
-    /// Simply steps the CPU (and system) forward by a single instruction
+    /// Steps the CPU (and system) forward by a single instruction
     pub fn step_instruction_in(&mut self) {
+        #[cfg(feature="trace")]
+        {
+            self.cpu.trace.ppu_line = self.ppu_mut().line;
+            self.cpu.trace.ppu_dot = self.ppu_mut().dot;
+        }
         self.cpu.step_instruction(&mut self.system);
         debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
 
@@ -602,4 +748,23 @@ impl Nes {
         self.system.ppu.peek_vram_four_screens(x, y, &mut self.system.cartridge)
     }
 
+    #[cfg(feature="ppu-sim")]
+    pub fn set_ppu_sim_visible(&mut self, sim_visible: bool) {
+        self.ppu_sim_visible = sim_visible;
+    }
+    #[cfg(feature="ppu-sim")]
+    pub fn ppu_sim_visible(&mut self) -> bool {
+        self.ppu_sim_visible
+    }
+
+    pub fn peek_instruction(&mut self, addr: u16) -> (Instruction, FetchedOperand) {
+        let opcode = self.system.peek(addr);
+        let instruction = Instruction::from(opcode);
+        let operand = self.cpu.peek_operand(&mut self.system, addr.wrapping_add(1), instruction.mode, instruction.oops_handling);
+        (instruction, operand)
+    }
+
+    pub fn backtrace(&mut self) -> Backtrace {
+        self.cpu.backtrace(&mut self.system)
+    }
 }

@@ -18,7 +18,7 @@ use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
 use nes_emulator::{nes::*, system::Model, port::ControllerButton, hook::HookHandle, cpu::cpu::BreakpointHandle};
 use nes_emulator::framebuffer::*;
 
-use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView}};
+use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView, debugger::DebuggerView, apu::ApuView}};
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
@@ -43,6 +43,10 @@ pub enum ViewRequest {
     ShowUserNotice(log::Level, String),
     RunMacro(Macro),
     LoadRom(String),
+
+    InstructionStepOver,
+    InstructionStepIn,
+    InstructionStepOut,
 }
 
 #[derive(Clone)]
@@ -252,11 +256,19 @@ pub struct EmulatorUi {
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
 
+    #[cfg(feature="cpu-debugger")]
+    debugger_view: DebuggerView,
+
     #[cfg(feature="macro-builder")]
     macro_builder_view: MacroBuilderView,
 
     nametables_view: NametablesView,
+
+    apu_view: ApuView,
+
+    #[cfg(feature="sprite-view")]
     sprites_view: SpritesView,
+
     mem_view: MemView,
     trace_events_view: TraceEventsView,
 
@@ -303,7 +315,7 @@ impl EmulatorUi {
         let (mut nes, loaded_rom) = load_nes(rom_path.as_ref(), &rom_dirs, audio_sample_rate, Instant::now(), &mut notices);
 
         let back_framebuffer = nes.allocate_framebuffer();
-        let front_framebuffer = nes.ppu_mut().swap_framebuffer(back_framebuffer).unwrap();
+        let front_framebuffer = nes.swap_framebuffer(back_framebuffer).unwrap();
         //let framebuffer1 = nes.allocate_framebuffer();
         let fb_width = front_framebuffer.width();
         let fb_height = front_framebuffer.height();
@@ -329,6 +341,8 @@ impl EmulatorUi {
             proxy: event_loop_proxy
         };
 
+        let paused = false;
+
         let mut emulator = Self {
             real_time: !args.relative_time,
             modifiers: Default::default(),
@@ -347,7 +361,7 @@ impl EmulatorUi {
 
             trace_writer: None,
 
-            paused: false,
+            paused,
             temp_debug_breakpoint: None,
 
             fb_width,
@@ -360,16 +374,24 @@ impl EmulatorUi {
             queue_framebuffer_upload: false,
             last_frame_time: now,
 
+            #[cfg(feature="cpu-debugger")]
+            debugger_view: DebuggerView::new(view_request_sender.clone(), paused),
+
             #[cfg(feature="macro-builder")]
-            macro_builder_view: MacroBuilderView::new(ctx, args, rom_dirs.clone(), loaded_rom.clone(), view_request_sender.clone(), false),
+            macro_builder_view: MacroBuilderView::new(ctx, args, rom_dirs.clone(), loaded_rom.clone(), view_request_sender.clone(), paused),
             nametables_view: NametablesView::new(ctx),
+
+            apu_view: ApuView::new(),
+
+            #[cfg(feature="sprite-view")]
             sprites_view: SpritesView::new(ctx),
+
+            trace_events_view: TraceEventsView::new(ctx),
+
             mem_view: MemView::new(),
 
             view_request_sender,
             view_requests_rx: rx,
-
-            trace_events_view: TraceEventsView::new(ctx),
 
             rom_dirs,
             loaded_rom,
@@ -556,6 +578,15 @@ impl EmulatorUi {
                             self.macro_builder_view.load_rom_request_finished(false);
                         }
                     }
+                    ViewRequest::InstructionStepIn => {
+                        self.step_instruction_in()
+                    }
+                    ViewRequest::InstructionStepOut => {
+                        self.step_instruction_out()
+                    }
+                    ViewRequest::InstructionStepOver => {
+                        self.step_instruction_over()
+                    }
                 }
             },
             Err(_) => {}
@@ -601,14 +632,18 @@ impl EmulatorUi {
                         //self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
 
                         //println!("Frame Ready: swapping in new PPU back buffer");
-                        self.front_framebuffer = self.nes.ppu_mut().swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
+                        self.front_framebuffer = self.nes.swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
 
                         self.queue_framebuffer_upload = true;
-                        if self.nametables_view.show {
+                        if self.nametables_view.visible {
                             self.nametables_view.update(&mut self.nes);
                         }
-                        if self.sprites_view.show {
+                        #[cfg(feature="sprite-view")]
+                        if self.sprites_view.visible {
                             self.sprites_view.update(&mut self.nes);
+                        }
+                        if self.trace_events_view.visible {
+                            self.trace_events_view.update(&mut self.nes);
                         }
                     },
                     ProgressStatus::ReachedTarget => {
@@ -748,55 +783,49 @@ impl EmulatorUi {
 
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
 
-            if self.paused() {
-                #[cfg(feature="cpu-debugger")]
-                {
-                    if ui.button("Step In").clicked() {
-                        self.step_instruction_in();
-                    }
-                    if ui.button("Step Over").clicked() {
-                        self.step_instruction_over();
-                    }
-                    if ui.button("Step Out").clicked() {
-                        self.step_instruction_out();
-                    }
-                }
-            }
-
             ui.spacing();
             ui.label("Tools");
             ui.group(|ui| {
-                ui.checkbox(&mut self.mem_view.show, "Show Memory");
-                ui.checkbox(&mut self.nametables_view.show, "Show Nametables");
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                    ui.toggle_value(&mut self.debugger_view.visible, "Debugger");
+                    ui.toggle_value(&mut self.mem_view.visible, "Memory");
+                    ui.toggle_value(&mut self.nametables_view.visible, "Nametables");
 
-                ui.add_enabled_ui(cfg!(feature="sprite-view"), |ui| {
-                    let resp = ui.checkbox(&mut self.sprites_view.show, "Show Sprites")
-                        .on_disabled_hover_text("\"sprite-view\" feature not enabled");
-                    #[cfg(feature="sprite-view")]
-                    {
-                        if resp.changed {
-                            self.sprites_view.set_visible(&mut self.nes, self.sprites_view.show);
+                    ui.toggle_value(&mut self.apu_view.visible, "APU");
+
+                    ui.add_enabled_ui(cfg!(feature="sprite-view"), |ui| {
+                        let resp = ui.toggle_value(&mut self.sprites_view.visible, "Show Sprites")
+                            .on_disabled_hover_text("\"sprite-view\" feature not enabled");
+                        #[cfg(feature="sprite-view")]
+                        {
+                            if resp.changed {
+                                self.sprites_view.set_visible(&mut self.nes, self.sprites_view.visible);
+                            }
                         }
-                    }
-                });
+                    });
 
-                ui.add_enabled_ui(cfg!(feature="macro-builder"), |ui| {
-                    let mut visible = {
+                    ui.add_enabled_ui(cfg!(feature="macro-builder"), |ui| {
+                        let mut visible = {
+                            #[cfg(feature="macro-builder")]
+                            {self.macro_builder_view.visible}
+                            #[cfg(not(feature="macro-builder"))]
+                            {false}
+                        };
+                        let resp = ui.toggle_value(&mut visible, "Record Macros")
+                            .on_disabled_hover_text("\"macro-builder\" feature not enabled");
                         #[cfg(feature="macro-builder")]
-                        {self.macro_builder_view.visible}
-                        #[cfg(not(feature="macro-builder"))]
-                        {false}
-                    };
-                    let resp = ui.checkbox(&mut visible, "Record Macros")
-                        .on_disabled_hover_text("\"macro-builder\" feature not enabled");
-                    #[cfg(feature="macro-builder")]
-                    {
-                        if resp.changed() {
-                            self.macro_builder_view.set_visible(&mut self.nes, visible);
+                        {
+                            if resp.changed() {
+                                self.macro_builder_view.set_visible(&mut self.nes, visible);
+                            }
                         }
+                    });
+                    let mut visible = self.trace_events_view.visible;
+                    let resp = ui.toggle_value(&mut visible, "Show Events");
+                    if resp.changed() {
+                        self.trace_events_view.set_visible(&mut self.nes, visible);
                     }
                 });
-                ui.checkbox(&mut self.trace_events_view.show, "Show Events");
             });
         });
 
@@ -804,12 +833,23 @@ impl EmulatorUi {
             ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
         });
 
-        if self.nametables_view.show {
+        #[cfg(feature="cpu-debugger")]
+        {
+            if self.debugger_view.visible {
+                self.debugger_view.draw(&mut self.nes, ctx);
+            }
+        }
+
+        if self.nametables_view.visible {
             self.nametables_view.draw(ctx);
         }
 
+        if self.apu_view.visible {
+            self.apu_view.draw(&mut self.nes, ctx);
+        }
+
         #[cfg(feature="sprite-view")]
-        if self.sprites_view.show {
+        if self.sprites_view.visible {
             self.sprites_view.draw(&mut self.nes, ctx);
         }
 
@@ -819,10 +859,10 @@ impl EmulatorUi {
                 self.macro_builder_view.draw(&mut self.nes, ctx);
             }
         }
-        if self.trace_events_view.show {
-            self.trace_events_view.draw(ctx);
+        if self.trace_events_view.visible {
+            self.trace_events_view.draw(&mut self.nes, ctx);
         }
-        if self.mem_view.show {
+        if self.mem_view.visible {
             self.mem_view.draw(&mut self.nes, ctx);
         }
 
@@ -838,9 +878,17 @@ impl EmulatorUi {
             }
         }
 
+        #[cfg(feature="cpu-debugger")]
+        {
+            self.debugger_view.set_paused(paused, &mut self.nes);
+        }
         #[cfg(feature="macro-builder")]
         {
             self.macro_builder_view.set_paused(paused, &mut self.nes);
+        }
+        #[cfg(feature="trace-events")]
+        {
+            self.trace_events_view.set_paused(paused, &mut self.nes);
         }
 
         if paused == false {

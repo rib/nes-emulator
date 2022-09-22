@@ -17,5 +17,7 @@ pub mod system;
 //pub mod system_apu_reg;
 pub mod ppu_registers;
 //pub mod vram;
+#[cfg(feature="ppu-sim")]
 pub mod ppusim;
 pub mod hook;
+pub mod trace;

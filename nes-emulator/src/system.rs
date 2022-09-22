@@ -1,8 +1,11 @@
 use crate::apu::apu::Apu;
+use crate::ppu::DOTS_PER_LINE;
+use crate::ppu::N_LINES;
 use crate::ppu::Ppu;
 
-#[cfg(feature="sim")]
+#[cfg(feature="ppu-sim")]
 use crate::ppusim::PpuSim;
+use crate::trace::TraceEvent;
 
 use super::constants::*;
 use super::cartridge::*;
@@ -51,12 +54,41 @@ pub struct DmcDmaRequest {
     pub address: u16
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct IoStatsRecord {
+    reads: u64,
+    writes: u64,
+    execute: u64,
+}
+
+// State we don't want to capture in a snapshot/clone of the system
+#[derive(Default)]
+pub struct NoCloneDebugState {
+    #[cfg(feature="ppu-sim")]
+    pub ppu_sim_as_main: bool,
+
+    #[cfg(feature="ppu-sim")]
+    pub ppu_sim: PpuSim,
+    #[cfg(feature="ppu-sim")]
+    pub ppu_sim_cartridge: Cartridge,
+
+    #[cfg(feature="debugger")]
+    pub watch_points: Vec<WatchPoint>,
+    #[cfg(feature="debugger")]
+    pub watch_hit: bool,
+
+    #[cfg(feature="io-stats")]
+    pub io_stats: Vec<IoStatsRecord>
+}
+impl Clone for NoCloneDebugState {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
 #[derive(Clone)]
 pub struct System {
     pub ppu: Ppu,
-
-    #[cfg(feature="sim")]
-    pub ppu_sim: PpuSim,
 
     pub apu: Apu,
 
@@ -72,14 +104,11 @@ pub struct System {
     pub wram: [u8; WRAM_SIZE],
 
     pub cartridge: Cartridge,
-    #[cfg(feature="sim")]
-    pub ppu_sim_cartridge: Cartridge,
 
     pub port1: Port,
     pub port2: Port,
 
-    pub watch_points: Vec<WatchPoint>,
-    pub watch_hit: bool,
+    pub debug: NoCloneDebugState,
 }
 
 impl System {
@@ -87,33 +116,51 @@ impl System {
     pub fn new(model: Model, audio_sample_rate: u32, cartridge: Cartridge) -> Self {
         let ppu = Ppu::new(model);
 
-        #[cfg(feature="sim")]
+        #[cfg(feature="ppu-sim")]
         let ppu_sim = PpuSim::new(model);
+        #[cfg(feature="ppu-sim")]
+        let ppu_sim_cartridge = cartridge.clone();
 
         let apu = Apu::new(model, audio_sample_rate);
 
-        Self {
+        let mut system = Self {
             ppu,
-
-            #[cfg(feature="sim")]
-            ppu_sim,
-
             apu,
             dmc_dma_request: None,
-
-            #[cfg(feature="sim")]
-            ppu_sim_cartridge: cartridge.clone(),
             cartridge,
-
             wram: [0; WRAM_SIZE],
-
             port1: Default::default(),
             port2: Default::default(),
-
             open_bus_value: 0,
 
-            watch_points: vec![],
-            watch_hit: false,
+            debug: NoCloneDebugState {
+                #[cfg(feature="ppu-sim")]
+                ppu_sim_as_main: false,
+                #[cfg(feature="ppu-sim")]
+                ppu_sim,
+                #[cfg(feature="ppu-sim")]
+                ppu_sim_cartridge,
+
+                watch_points: vec![],
+                watch_hit: false,
+
+                #[cfg(feature="io-stats")]
+                io_stats: vec![IoStatsRecord::default(); (u16::MAX as usize) + 1],
+            }
+        };
+
+        #[cfg(feature="ppu-sim")]
+        system.warm_up_sync_ppu_sim();
+
+        system
+    }
+
+    pub(crate) fn insert_cartridge(&mut self, cartridge: Cartridge) {
+        self.cartridge = cartridge;
+
+        #[cfg(feature="ppu-sim")]
+        {
+            self.debug.ppu_sim_cartridge = self.cartridge.clone();
         }
     }
 
@@ -123,57 +170,78 @@ impl System {
 
         self.ppu.power_cycle();
 
-        #[cfg(feature="sim")]
-        self.ppu_sim.power_cycle();
+        #[cfg(feature="ppu-sim")]
+        {
+            self.debug.ppu_sim = PpuSim::new(self.debug.ppu_sim.nes_model);
+        }
 
         self.apu.power_cycle();
 
-        #[cfg(feature="sim")]
-        self.ppu_sim_cartridge.power_cycle();
+        #[cfg(feature="ppu-sim")]
+        self.debug.ppu_sim_cartridge.power_cycle();
         self.cartridge.power_cycle();
 
         self.port1.power_cycle();
         self.port2.power_cycle();
 
         let ppu = std::mem::take(&mut self.ppu);
-        #[cfg(feature="sim")]
-        let ppu_sim = std::mem::take(&mut self.ppu_sim);
+        #[cfg(feature="ppu-sim")]
+        let ppu_sim_as_main = self.debug.ppu_sim_as_main;
+        #[cfg(feature="ppu-sim")]
+        let ppu_sim = std::mem::take(&mut self.debug.ppu_sim);
         let apu = std::mem::take(&mut self.apu);
         let cartridge = std::mem::take(&mut self.cartridge);
-        #[cfg(feature="sim")]
-        let ppu_sim_cartridge = std::mem::take(&mut self.ppu_sim_cartridge);
+        #[cfg(feature="ppu-sim")]
+        let ppu_sim_cartridge = std::mem::take(&mut self.debug.ppu_sim_cartridge);
         let pad1 = std::mem::take(&mut self.port1);
         let pad2 = std::mem::take(&mut self.port2);
 
-        let watch_points = std::mem::take(&mut self.watch_points);
+        #[cfg(feature="debugger")]
+        let watch_points = std::mem::take(&mut self.debug.watch_points);
 
         *self = Self {
             ppu,
-
-            #[cfg(feature="sim")]
-            ppu_sim,
-
             apu,
             dmc_dma_request: None,
-
-            #[cfg(feature="sim")]
-            ppu_sim_cartridge,
             cartridge,
-
             wram: [0; WRAM_SIZE],
-
             port1: pad1,
             port2: pad2,
-
             open_bus_value: 0,
 
-            watch_points,
-            watch_hit: false,
+            debug: NoCloneDebugState {
+                #[cfg(feature="ppu-sim")]
+                ppu_sim_as_main,
+                #[cfg(feature="ppu-sim")]
+                ppu_sim,
+                #[cfg(feature="ppu-sim")]
+                ppu_sim_cartridge,
+
+                #[cfg(feature="debugger")]
+                watch_points,
+                #[cfg(feature="debugger")]
+                watch_hit: false,
+
+                #[cfg(feature="io-stats")]
+                io_stats: vec![IoStatsRecord::default(); (u16::MAX as usize) + 1],
+            }
         };
+
+        #[cfg(feature="ppu-sim")]
+        self.warm_up_sync_ppu_sim();
+
     }
 
     pub(crate) fn reset(&mut self) {
-        //self.ppu.reset();
+        self.ppu.reset();
+        #[cfg(feature="ppu-sim")]
+        {
+            // XXX: only some revisions need a reset and it breaks the
+            // NTSC PPU SIM to do a reset!
+            //self.debug.ppu_sim.reset();
+            self.debug.ppu_sim_cartridge.reset();
+        }
+
         self.apu.reset();
         //self.pad1.reset();
         //self.pad2.reset();
@@ -181,7 +249,40 @@ impl System {
     }
 
     pub fn nmi_line(&self) -> bool {
-        self.ppu.nmi_interrupt_raised
+        #[cfg(feature="ppu-sim")]
+        {
+            if self.debug.ppu_sim_as_main {
+                self.debug.ppu_sim.nmi_interrupt_raised
+            } else {
+                self.ppu.nmi_interrupt_raised
+            }
+        }
+
+        #[cfg(not(feature="ppu-sim"))]
+        {
+            self.ppu.nmi_interrupt_raised
+        }
+    }
+
+    pub fn take_frame_ready(&mut self) -> bool {
+        #[cfg(feature="ppu-sim")]
+        {
+            let ready = if self.debug.ppu_sim_as_main {
+                self.debug.ppu_sim.frame_ready
+            } else {
+                self.ppu.frame_ready
+            };
+            self.debug.ppu_sim.frame_ready = false;
+            self.ppu.frame_ready = false;
+            ready
+        }
+
+        #[cfg(not(feature="ppu-sim"))]
+        {
+            let ready = self.ppu.frame_ready;
+            self.ppu.frame_ready = false;
+            ready
+        }
     }
 
     pub fn irq_line(&self) -> bool {
@@ -203,6 +304,19 @@ impl System {
         value
     }
 
+    #[inline(always)]
+    fn check_watch_points(&mut self, addr: u16, ops: WatchOps) {
+        #[cfg(feature="debugger")]
+        if self.debug.watch_points.len() > 0 {
+            for w in &self.debug.watch_points {
+                if w.address == addr && w.ops.contains(ops) {
+                    self.debug.watch_hit = true;
+                    break;
+                }
+            }
+        }
+    }
+
     /// Perform a system bus read from the CPU
     ///
     /// Considering that all CPU IO takes one CPU clock cycle this will
@@ -210,7 +324,7 @@ impl System {
     /// their clocks synchronized (we know this won't push their clock
     /// into the future)
     fn read(&mut self, addr: u16) -> u8 {
-        let (value, undefined_bits) = match addr {
+        let (mut value, undefined_bits) = match addr {
             0x0000..=0x1fff => { // RAM
                 //println!("system read {addr:x}");
                 // mirror support
@@ -219,9 +333,9 @@ impl System {
             }
             0x2000..=0x3fff => { // PPU I/O
                 // Send any reads to the simulator for their side effects
-                #[cfg(feature="sim")]
+                #[cfg(feature="ppu-sim")]
                 {
-                    self.ppu_sim.system_bus_read_start(addr);
+                    self.debug.ppu_sim.system_bus_read_start(addr);
                     // TODO: we also need to step the ppu_sim forward so we can
                     // read back a value
                     // XXX: to make that practical we need to give the sim ownership
@@ -231,9 +345,7 @@ impl System {
                     //(self.ppu_sim.data_bus, 0)
                 }
 
-                // PPU read handles open bus behaviour, so we assume there
-                // are no undefined bits at this point
-                (self.ppu.system_bus_read(&mut self.cartridge, addr), 0)
+                self.ppu.system_bus_read(&mut self.cartridge, addr)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
@@ -259,10 +371,34 @@ impl System {
 
         // If this is a PPU simulator read then we have to wait until after
         // stepping the PPU before we can access the value
-        #[cfg(feature="sim")]
+        #[cfg(feature="ppu-sim")]
         {
             if let 0x2000..=0x3fff = addr {
-                value = self.ppu_sim.data_bus;
+                let addr = ((addr - 0x2000) % 8) + 0x2000;
+                let valid_bits = !undefined_bits;
+                //let valid_bits = match addr {
+                //    0x2002 => !crate::ppu_registers::StatusFlags::UNDEFINED_BITS.bits(),
+                //    0x2004 => 0xff,
+                //    _ => 0xff, // TODO: we also need to recognise reads from the palettes which have undefined bits
+                //};
+                let sim_value = self.debug.ppu_sim.data_bus;
+
+                if value & valid_bits == sim_value & valid_bits {
+                    println!("sys read 0x{addr:04x} = 0x{value:02x}");
+                } else {
+                    log::error!("Mis-matching sys read 0x{addr:04x} = 0x{value:02x}, sim val = 0x{sim_value:02x}, dot={}, line={}", self.ppu.dot, self.ppu.line);
+                    println!("Mis-matching sys read 0x{addr:04x} = 0x{value:02x}, sim val = 0x{sim_value:02x}, dot={}, line={}", self.ppu.dot, self.ppu.line);
+                }
+
+                let sim_registers = self.debug.ppu_sim.debug_read_registers();
+                if sim_registers.ReadBuffer as u8 != self.ppu.io_latch_value {
+                    log::error!("PPU SIM: read buffer out of sync: ppu = 0x{:02x}, sim = 0x{:02x}, dot={}, line={}", self.ppu.read_buffer, sim_registers.ReadBuffer, self.ppu.dot, self.ppu.line);
+                    println!("PPU SIM: read buffer out of sync: ppu = 0x{:02x}, sim = 0x{:02x}, dot={}, line={}", self.ppu.read_buffer, sim_registers.ReadBuffer, self.ppu.dot, self.ppu.line);
+                }
+
+                if self.debug.ppu_sim_as_main {
+                    value = sim_value;
+                }
             }
         }
 
@@ -273,24 +409,23 @@ impl System {
         value
     }
 
-    /// Perform a system bus read from the CPU
+    /// Perform a system bus read from the CPU, reading non-instruction data
     ///
     /// Considering that all CPU IO takes one CPU clock cycle this will
     /// also step the APU and PPU attached to the system bus to help keep
     /// their clocks synchronized (we know this won't push their clock
     /// into the future)
     pub fn cpu_read(&mut self, addr: u16) -> u8 {
-        #[cfg(feature="debugger")]
-        if self.watch_points.len() > 0 {
-            for w in &self.watch_points {
-                if w.address == addr && w.ops.contains(WatchOps::READ) {
-                    self.watch_hit = true;
-                    break;
-                }
-            }
+        self.check_watch_points(addr, WatchOps::READ);
+
+        #[cfg(feature="io-stats")]
+        {
+            self.debug.io_stats[addr as usize].reads += 1;
         }
 
-        self.read(addr)
+        let val = self.read(addr);
+        //println!("CPU read @ 0x{:04x} = 0x{:02x}", addr, val);
+        val
     }
 
     /// Handle various superfluous reads that the CPU does
@@ -301,17 +436,27 @@ impl System {
     /// and we may be able to optimize out some of these reads later if we know
     /// they can't have side effects.
     pub fn dummy_cpu_read(&mut self, addr: u16) {
-        #[cfg(feature="debugger")]
-        if self.watch_points.len() > 0 {
-            for w in &self.watch_points {
-                if w.address == addr && w.ops.contains(WatchOps::DUMMY) && w.ops.contains(WatchOps::READ) {
-                    self.watch_hit = true;
-                    break;
-                }
-            }
+        self.check_watch_points(addr, WatchOps::DUMMY | WatchOps::READ);
+
+        #[cfg(feature="io-stats")]
+        {
+            self.debug.io_stats[addr as usize].reads += 1;
         }
 
+        //println!("Dummy read @ 0x{:04x}", addr);
         self.read(addr);
+    }
+
+    /// Perform a system bus read from the CPU, to fetch part of an instruction
+    pub fn cpu_fetch(&mut self, addr: u16) -> u8 {
+        self.check_watch_points(addr, WatchOps::EXECUTE);
+
+        #[cfg(feature="io-stats")]
+        {
+            self.debug.io_stats[addr as usize].execute += 1;
+        }
+
+        self.read(addr)
     }
 
     /// Read the system bus without side-effects
@@ -326,9 +471,7 @@ impl System {
                 (arr_read!(self.wram, index), 0)
             }
             0x2000..=0x3fff => { // PPU I/O
-                // PPU read handles open bus behaviour, so we assume there
-                // are no undefined bits at this point
-                (self.ppu.system_bus_peek(&mut self.cartridge, addr), 0)
+                self.ppu.system_bus_peek(&mut self.cartridge, addr)
             }
             0x4000..=0x401f => {  // APU I/O
                 let index = usize::from(addr - 0x4000);
@@ -361,9 +504,21 @@ impl System {
                 arr_write!(self.wram, index, data);
             }
             0x2000..=0x3fff => { // PPU
+                #[cfg(feature="ppu-sim")]
+                {
+                    let sim_registers = self.debug.ppu_sim.debug_read_registers();
+                    // Since there is a latency of about 3.5 pixel clocks before OAMADDR is incremented after
+                    // an OAMDATA write we check for consistency before doing a register write
+                    if sim_registers.MainOAMCounter as u8 != self.ppu.oam_offset {
+                        log::error!("PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.oam_offset, sim_registers.MainOAMCounter);
+                        println!("PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.oam_offset, sim_registers.MainOAMCounter);
+                    }
+                }
+
                 self.ppu.system_bus_write(&mut self.cartridge, addr, data);
-                #[cfg(feature="sim")]
-                self.ppu_sim.system_bus_write_start(addr, data);
+
+                #[cfg(feature="ppu-sim")]
+                self.debug.ppu_sim.system_bus_write_start(addr, data);
             }
             0x4000..=0x401f => {  // APU + I/O
                 let index = usize::from(addr - 0x4000);
@@ -388,26 +543,38 @@ impl System {
             }
             _ => { // Cartridge
                 self.cartridge.system_bus_write(addr, data);
-                #[cfg(feature="sim")]
-                self.ppu_sim_cartridge.system_bus_write(addr, data);
+                #[cfg(feature="ppu-sim")]
+                self.debug.ppu_sim_cartridge.system_bus_write(addr, data);
             }
         }
 
         //println!("Stepping system during CPU write");
         self.step_for_cpu_cycle();
+
+        #[cfg(feature="ppu-sim")]
+        {
+            let sim_registers = self.debug.ppu_sim.debug_read_registers();
+            if sim_registers.CTRL0 as u8 != self.ppu.control1.bits() {
+                log::error!("PPU SIM: Control0 register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control1.bits(), sim_registers.CTRL0);
+                println!("PPU SIM: Control0 register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control1.bits(), sim_registers.CTRL0);
+            }
+            if sim_registers.CTRL1 as u8 != self.ppu.control2.bits() {
+                log::error!("PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control2.bits(), sim_registers.CTRL1);
+                println!("PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control2.bits(), sim_registers.CTRL1);
+            }
+
+        }
     }
 
     /// Perform a system bus write from the CPU
     pub fn cpu_write(&mut self, addr: u16, data: u8) {
-        #[cfg(feature="debugger")]
-        if self.watch_points.len() > 0 {
-            for w in &self.watch_points {
-                if w.address == addr && w.ops.contains(WatchOps::WRITE) {
-                    self.watch_hit = true;
-                    break;
-                }
-            }
+        self.check_watch_points(addr, WatchOps::WRITE);
+
+        #[cfg(feature="io-stats")]
+        {
+            self.debug.io_stats[addr as usize].writes += 1;
         }
+
         self.write(addr, data);
     }
 
@@ -416,29 +583,22 @@ impl System {
     /// Ideally we could discard these but they can have side effects so for now we only
     /// differentiate them from normal writes for debugging purposes.
     pub fn dummy_cpu_write(&mut self, addr: u16, data: u8) {
-        #[cfg(feature="debugger")]
-        if self.watch_points.len() > 0 {
-            for w in &self.watch_points {
-                if w.address == addr && w.ops.contains(WatchOps::DUMMY) && w.ops.contains(WatchOps::WRITE) {
-                    self.watch_hit = true;
-                    break;
-                }
-            }
+        self.check_watch_points(addr, WatchOps::DUMMY | WatchOps::WRITE);
+
+        #[cfg(feature="io-stats")]
+        {
+            self.debug.io_stats[addr as usize].writes += 1;
         }
+
         self.write(addr, data);
     }
 
-    #[cfg(feature="sim")]
-    pub fn ppu_sim_step(&mut self, fb: *mut u8) -> PpuStatus {
-        let sim_clks = self.ppu_sim.clk_per_pclk() * 2;
-        let mut status = PpuStatus::None;
+    #[cfg(feature="ppu-sim")]
+    pub fn ppu_sim_step(&mut self) {
+        let sim_clks = self.debug.ppu_sim.clk_per_pclk() * 2;
         for _ in 0..sim_clks {
-            let new_status = self.ppu_sim.step_half(&mut self.cartridge, fb);
-            if status == PpuStatus::None {
-                status = new_status;
-            }
+            self.debug.ppu_sim.step_half(&mut self.debug.ppu_sim_cartridge);
         }
-        status
     }
 
     //pub fn ppu_step(&mut self) {
@@ -457,6 +617,52 @@ impl System {
     //}
     pub fn apu_clock(&self) -> u64 {
         self.apu.clock
+    }
+
+    // Single steps the PPU, and any side-car PPU simulator
+    //
+    // Returns false if the stepping was aborted due to hitting a PPU breakpoint
+    #[inline(always)]
+    fn step_ppu(&mut self) -> bool {
+        if !self.ppu.step(&mut self.cartridge) {
+            // PPU breakpoint hit
+            return false;
+        }
+
+        // Record the cpu and ppu clock at the start of each line (before the first
+        // PPU cycle for the line executes)
+        //
+        // NB: clocks are post-incremented so if we see dot == 0 then that cycle has
+        // not yet actually elapsed.
+        #[cfg(feature="trace-events")]
+        if self.ppu.dot == 0 {
+            let new_frame = self.ppu.line == 0;
+            let cpu_clk = self.apu.clock; // NB: apu clock == cpu Clock
+            self.ppu.trace_start_of_line(cpu_clk, new_frame);
+            self.apu.trace_cpu_clock_line_sync(cpu_clk, new_frame);
+            //self.cartridge.trace_cpu_clock_line_sync(cpu_clk);
+        }
+
+        #[cfg(feature="ppu-sim")]
+        {
+            if let Some(read) = std::mem::take(&mut self.ppu.debug.last_cartridge_read) {
+                self.debug.ppu_sim.expected_reads.push_back(read);
+            }
+            self.ppu_sim_step();
+
+            if self.ppu.dot == 0 && self.ppu.line == 1 {
+                let sim_dot  = self.debug.ppu_sim.h_counter();
+                let sim_line = self.debug.ppu_sim.v_counter();
+                debug_assert_eq!(self.ppu.dot, sim_dot as u16);
+                debug_assert_eq!(self.ppu.line, sim_line as u16);
+                if self.ppu.dot != sim_dot as u16 || self.ppu.line != sim_line as u16 {
+                    log::error!("PPU<->SIM dot clock de-sync: PPU dot={}, line={}, SIM: dot={}, line={}", self.ppu.dot, self.ppu.line, sim_dot, sim_line);
+                }
+                //println!("step_ppu: h={}, v={}, SIM: h={}, v={}", self.ppu.dot, self.ppu.line, sim_dot, sim_line);
+            }
+        }
+
+        true
     }
 
     /// Step everything connected to the system bus for a single CPU clock cycle
@@ -478,29 +684,108 @@ impl System {
         // There are always at least 3 pixel clocks per CPU cycle
         //
         // For PAL (3.2 pixel clocks) we will fall behind slightly within a single instruction
-        // but that will be caught up in `Nes::progress()`
+        // but that will be caught up in `Nes::progress()`. See `Self::catch_up_ppu_drift` below.
         //
         for _ in 0..3 {
-            if !self.ppu.step(&mut self.cartridge) {
+            if !self.step_ppu() {
                 // If we hit a PPU break point then we stop stepping the PPU
                 // and we will catch up the PPU cycles before starting the next
                 // CPU instruction
                 break;
             }
-
-            #[cfg(feature="sim")]
-            self.ppu_sim_step();
         }
     }
 
-    pub fn add_watch(&mut self, addr: u16, ops: WatchOps) {
-        if let Some(i) = self.watch_points.iter().position(|w| w.address == addr) {
-            self.watch_points.swap_remove(i);
+    pub fn catch_up_ppu_drift(&mut self, expected_ppu_clock: u64) -> bool {
+        //println!("cpu clock = {}, expected PPU clock = {}, actual ppu clock = {}", self.cpu.clock, expected_ppu_clock, self.system.ppu_clock());
+        let ppu_delta = expected_ppu_clock - self.ppu.clock;
+
+        for _ in 0..ppu_delta {
+            if !self.step_ppu() {
+                // Abort catch up if we hit a PPU dot breakpoint
+                return false;
+            }
         }
-        self.watch_points.push(WatchPoint {
+
+        true
+    }
+
+    /// The PPU simulator starts with a spurious line counter
+    fn warm_up_sync_ppu_sim(&mut self) {
+        #[cfg(feature="ppu-sim")]
+        {
+            log::debug!("PPU SIM: warm up, aligning to pixel clock and skipping first frame");
+
+            // Don't assume a perfectly aligned startup for the simulator, so we warm it up by
+            // first stepping forward ~one dot and then we align to the next wire.PCLK change
+
+            // Also: initialize MainOAMCounter to zero. This is expected to be zero on power up
+            // but the simulator seems to have a initial value of 0xff.
+            self.debug.ppu_sim.system_bus_write_start(0x2003, 0x00);
+
+            let sim_dot_clks = self.debug.ppu_sim.clk_per_pclk() * 2;
+            let sim = &mut self.debug.ppu_sim;
+            for _ in 0..sim_dot_clks {
+                sim.step_half(&mut self.debug.ppu_sim_cartridge);
+                let wires = sim.debug_read_wires();
+                //println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
+                //         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
+
+                //let wires = self.debug_read_wires();
+                //println!("clk = {}, /clk = {}, pclk = {} /pclk = {}, ale = {:?}, /rd = {:?}, /wr = {:?}, /int = {:?}, pclk = {}",
+                //         wires.CLK, wires.n_CLK, wires.PCLK, wires.n_PCLK, address_latch_enable, read_neg, write_neg, interrupt_neg, self.pclk());
+            }
+            let wires = sim.debug_read_wires();
+            let start_pclk = wires.PCLK;
+            loop {
+                sim.step_half(&mut self.debug.ppu_sim_cartridge);
+                let wires = sim.debug_read_wires();
+                //println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
+                //         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
+                if wires.PCLK != start_pclk {
+                    break;
+                }
+            }
+
+            // After aligning to the PCLK we then discard the first frame
+            loop {
+                self.ppu_sim_step();
+                if self.debug.ppu_sim.h_counter() == 0 && self.debug.ppu_sim.v_counter() == 242 {
+                    break;
+                }
+            }
+
+            // clear vblank status
+            self.debug.ppu_sim.system_bus_read_start(0x2002);
+            loop {
+                self.ppu_sim_step();
+                if self.debug.ppu_sim.h_counter() == 0 && self.debug.ppu_sim.v_counter() == 0 {
+                    break;
+                }
+            }
+        }
+
+        //let dots_per_frame = N_LINES as usize * DOTS_PER_LINE as usize;
+        //for i in 0..dots_per_frame {
+        //    self.ppu_sim_step();
+        //}
+
+    }
+
+    pub fn add_watch(&mut self, addr: u16, ops: WatchOps) {
+        if let Some(i) = self.debug.watch_points.iter().position(|w| w.address == addr) {
+            self.debug.watch_points.swap_remove(i);
+        }
+        self.debug.watch_points.push(WatchPoint {
             address: addr,
             ops
         })
+    }
+
+    #[cfg(feature="trace-events")]
+    #[inline(always)]
+    pub fn trace(&mut self, event: TraceEvent) {
+        self.ppu.trace(event)
     }
 
 }

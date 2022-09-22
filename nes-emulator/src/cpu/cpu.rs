@@ -2,10 +2,11 @@ use std::fmt;
 
 use bitflags::bitflags;
 
-use crate::system::System;
+use super::instruction::{Instruction, Opcode, AddressingMode, OopsHandling};
 
-use super::instruction::{Instruction, Opcode, AddressingMode};
-
+use crate::{trace::CpuInterruptStatus, constants::CPU_START_CYCLE};
+#[cfg(feature="trace-events")]
+use crate::{system::System, trace::TraceEvent};
 
 
 pub const CPU_FREQ: u32 = 1790000;
@@ -29,7 +30,7 @@ pub enum Interrupt {
 #[derive(Clone, Debug)]
 pub struct TraceState {
     pub last_hook_cycle_count: u64,
-    pub cycle_count: u64,
+    pub cpu_clock: u64,
     pub saved_a: u8,
     pub saved_x: u8,
     pub saved_y: u8,
@@ -42,12 +43,14 @@ pub struct TraceState {
     pub effective_address: u16, // The effective address used for indirect addressing modes
     pub loaded_mem_value: u8, // The value loaded from the memory location referred to by the instruction
     pub stored_mem_value: u8, // The value stored at the memory location referred to by the instruction
+    pub ppu_line: u16,
+    pub ppu_dot: u16,
 }
 impl Default for TraceState {
     fn default() -> Self {
         Self {
             last_hook_cycle_count: 0,
-            cycle_count: 0,
+            cpu_clock: 0,
             saved_a: 0,
             saved_x: 0,
             saved_y: 0,
@@ -55,11 +58,13 @@ impl Default for TraceState {
             saved_p: Flags::NONE,
             instruction_pc: 0,
             instruction_op_code: 0,
-            instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0, early_intr_poll: false },
+            instruction: Instruction { op: Opcode::ASR, mode: AddressingMode::Immediate, cyc: 0, early_intr_poll: false, oops_handling: OopsHandling::Normal },
             instruction_operand: 0,
             effective_address: 0,
             loaded_mem_value: 0,
             stored_mem_value: 0,
+            ppu_line: 0,
+            ppu_dot: 0,
         }
     }
 }
@@ -79,14 +84,17 @@ impl fmt::Display for TraceState {
         } else {
             format!("${op:02X}")
         };
-        let disassembly = self.instruction.disassemble(self.instruction_operand, self.effective_address, self.loaded_mem_value, self.stored_mem_value);
+        let disassembly = self.instruction.disassemble(self.instruction_operand, self.effective_address);
         let a = self.saved_a;
         let x = self.saved_x;
         let y = self.saved_y;
         let sp = self.saved_sp & 0xff;
         let p = self.saved_p.to_flags_string();
-        let cpu_cycles = self.cycle_count;
-        write!(f, "{pc:0X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}")
+        let cpu_cycles = self.cpu_clock;
+        let scanline = self.ppu_line;
+        let dot = self.ppu_dot;
+        //write!(f, "{pc:04X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CPU Cycle:{cpu_cycles}")
+        write!(f, "{pc:04X} {bytecode_str:11} {disassembly:23} A:{a:02X} X:{x:02X} Y:{y:02X} P:{p} SP:{sp:X} CYC:{dot:<3} SL:{scanline:<3} CPU Cycle:{cpu_cycles}")
     }
 }
 
@@ -143,22 +151,27 @@ pub enum BreakpointCallbackAction {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BreakpointHandle(u32);
 
-pub(super) struct Breakpoint {
+pub struct Breakpoint {
     pub(super) handle: BreakpointHandle,
     pub(super) addr: u16,
     pub(super) callback: Box<FnBreakpointCallback>
+}
+impl Breakpoint {
+    pub fn address(&self) -> u16 {
+        self.addr
+    }
 }
 
 /// Debugger state attached to a CPU instance that won't be
 /// cloned if the CPU is cloned but will be preserved though
 /// a power cycle
 #[derive(Default)]
-pub struct NoCloneDebuggerState {
+pub struct NoCloneDebugState {
     pub(super) next_breakpoint_handle: u32,
     pub(super) breakpoints: Vec<Breakpoint>,
     pub breakpoint_hit: bool,
 }
-impl Clone for NoCloneDebuggerState {
+impl Clone for NoCloneDebugState {
     fn clone(&self) -> Self {
         Self::default()
     }
@@ -190,6 +203,9 @@ pub struct Cpu {
 
     /// OAM DMA request to be picked up by the DMA unit when halted
     oam_dma_pending: Option<u16>,
+
+    /// DMC DMA request to be picked up by the DMA unit when halted
+    dmc_dma_pending: Option<u16>,
 
     // INTERRUPTS:
     //
@@ -246,7 +262,7 @@ pub struct Cpu {
     #[cfg(feature="debugger")]
     stack_tags: [StackByteTags; 256],
     #[cfg(feature="debugger")]
-    pub debugger: NoCloneDebuggerState,
+    pub debug: NoCloneDebugState,
 
     #[cfg(feature="trace")]
     pub trace: TraceState,
@@ -255,7 +271,7 @@ pub struct Cpu {
 impl Default for Cpu {
     fn default() -> Self {
         Self {
-            clock: 6, // hacky constant just to make CPU traces comparable with Mesen trace logs
+            clock: CPU_START_CYCLE,
 
             last_nmi_level: false,
             pending_nmi_detected: false,
@@ -272,18 +288,19 @@ impl Default for Cpu {
 
             input_ready: true,
             oam_dma_pending: None,
+            dmc_dma_pending: None,
 
             a: 0,
             x: 0,
             y: 0,
             pc: 0,
-            sp: 0xfd,
+            sp: 0, // reset interrupt will decrement by three (with wrapping) to 0xfd
             p: unsafe { Flags::from_bits_unchecked(0x34) },
 
             #[cfg(feature="debugger")]
             stack_tags: [StackByteTags::default(); 256],
             #[cfg(feature="debugger")]
-            debugger: NoCloneDebuggerState::default(),
+            debug: NoCloneDebugState::default(),
 
             #[cfg(feature="trace")]
             trace: TraceState::default(),
@@ -351,16 +368,37 @@ impl Cpu {
 
     /// Reset the state of the CPU to a power-on state, but preserving debug state such as breakpoints
     pub(crate) fn power_cycle(&mut self) {
-        let debugger = std::mem::take(&mut self.debugger);
+        let debugger = std::mem::take(&mut self.debug);
         *self = Self {
-            debugger,
+            debug: debugger,
             ..Default::default()
         };
     }
 
     pub(crate) fn reset(&mut self, system: &mut System) {
-        self.sp = self.sp.wrapping_sub(3);
         self.handle_interrupt(system, Interrupt::RESET);
+    }
+
+    #[inline(always)]
+    fn dma_read(&mut self, system: &mut System, addr: u16) -> u8 {
+        let value = system.cpu_read(addr);
+
+        #[cfg(feature="trace-events")]
+        {
+            system.trace(TraceEvent::CpuDmaRead { clk_lower: (self.clock & 0xff) as u8, addr, value });
+        }
+
+        value
+    }
+
+    #[inline(always)]
+    fn dma_write(&mut self, system: &mut System, addr: u16, value: u8) {
+        system.cpu_write(addr, value);
+
+        #[cfg(feature="trace-events")]
+        {
+            system.trace(TraceEvent::CpuDmaWrite { clk_lower: (self.clock & 0xff) as u8, addr, value });
+        }
     }
 
     /// Handles OAM and DMC DMA requests with pedantic handling of cycle stealing
@@ -391,16 +429,19 @@ impl Cpu {
         let mut oam_dma_value = 0u8;
         let mut oam_dma_offset = 0;
 
-        let mut dmc_dma_state = DmcDmaState::None;
-        let mut dmc_dma_addr = 0u16;
+        let (mut dmc_dma_state, mut dmc_dma_addr) = match std::mem::take(&mut self.dmc_dma_pending) {
+            Some(addr) => (DmcDmaState::Stall, addr),
+            None => (DmcDmaState::None, 0)
+        };
 
         // Iterate one clock cycle at a time until pending DMA[s] completed
         while oam_dma_state != OamDmaState::None || dmc_dma_state != DmcDmaState::None {
             self.start_clock_cycle_phi1(system);
             // DMC DMA requests can arrive in the middle of an OAM DMA and DMC reads have higher priority
-            if let Some(request) = std::mem::take(&mut system.dmc_dma_request) {
+            if let Some(addr) = std::mem::take(&mut self.dmc_dma_pending) {
+                debug_assert_eq!(dmc_dma_state, DmcDmaState::None);
                 dmc_dma_state = DmcDmaState::Stall;
-                dmc_dma_addr = request.address;
+                dmc_dma_addr = addr;
             }
 
             // Every case must:
@@ -421,7 +462,7 @@ impl Cpu {
                 (OamDmaState::None, DmcDmaState::Stall) => {
                     if dummy_read_coalesce == false || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
-                        let _discard = system.cpu_read(dummy_addr); // will call .step_for_cpu_cycle()
+                        let _discard = self.dma_read(system, dummy_addr); // will call .step_for_cpu_cycle()
                         last_read_addr = dummy_addr;
                     } else {
                         //println!("Stepping system for coalesced dummy read during DMA, clock = {}", self.clock);
@@ -434,14 +475,14 @@ impl Cpu {
                     if self.clock % 2 == 1 { // DMC and OAM DMA only read on even cycles
                         if dummy_read_coalesce == false || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
-                            let _discard = system.cpu_read(dummy_addr); // will call .step_for_cpu_cycle()
+                            let _discard = self.dma_read(system, dummy_addr); // will call .step_for_cpu_cycle()
                             last_read_addr = dummy_addr;
                         } else {
                             //println!("Stepping system for coalesced dummy read during DMA, clock = {}", self.clock);
                             system.step_for_cpu_cycle(); // Coalesced dummy read
                         }
                     } else {
-                        let sample = system.cpu_read(dmc_dma_addr); // will call .step_for_cpu_cycle()
+                        let sample = self.dma_read(system, dmc_dma_addr); // will call .step_for_cpu_cycle()
                         last_read_addr = dmc_dma_addr;
                         system.apu.dmc_channel.completed_dma(dmc_dma_addr, sample);
                         dmc_dma_state = DmcDmaState::None;
@@ -452,7 +493,7 @@ impl Cpu {
                     if self.clock % 2 == 1 { // OAM DMA only reads on even cycles
                         if dummy_read_coalesce == false || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
-                            let _discard = system.cpu_read(dummy_addr); // will call .step_for_cpu_cycle()
+                            let _discard = self.dma_read(system, dummy_addr); // will call .step_for_cpu_cycle()
                             last_read_addr = dummy_addr;
                         } else {
                             //println!("Stepping system for coalesced dummy read during DMA, clock = {}", self.clock);
@@ -460,7 +501,7 @@ impl Cpu {
                         }
                     } else {
                         let dma_addr = oam_dma_addr.wrapping_add(oam_dma_offset);
-                        oam_dma_value = system.cpu_read(dma_addr);
+                        oam_dma_value = self.dma_read(system, dma_addr);
                         //println!("OAM DMA: reading {dma_addr:04x} = {oam_dma_value:02x},  offset = {}, clock = {}", oam_dma_offset, self.clock);
                         last_read_addr = dma_addr;
                         oam_dma_state = OamDmaState::Write;
@@ -473,7 +514,7 @@ impl Cpu {
                     debug_assert_eq!(self.clock % 2, 1);
 
                     //println!("OAM DMA: writing {oam_dma_value:02x} to $2004, offset = {}, clock = {}", oam_dma_offset, self.clock);
-                    system.cpu_write(0x2004 /* OAMDATA */, oam_dma_value);
+                    self.dma_write(system, 0x2004 /* OAMDATA */, oam_dma_value);
                     last_read_addr = 0;
 
                     oam_dma_offset += 1;
@@ -535,6 +576,30 @@ impl Cpu {
         data
     }
 
+    #[inline(always)]
+    fn step_read_cycle<F: Fn(&mut System, u16) -> u8>(&mut self, system: &mut System, addr: u16, func: F) -> u8 {
+        // The reads/writes by the CPU effectively correspond to clock cycles
+        // so this is a convenient place to run the interrupt detection that
+        // happens during phase 1/2 of each clock cycle
+
+        self.start_clock_cycle_phi1(system);
+        let data = func(system, addr);
+        self.end_clock_cycle_phi2(system);
+
+        #[cfg(feature="trace-events")]
+        {
+            system.trace(TraceEvent::CpuRead { clk_lower: (self.clock & 0xff) as u8, addr, value: data });
+        }
+
+        self.clock += 1;
+
+        if !self.input_ready {
+            let _data = self.handle_RDY_halt(system, addr);
+        }
+
+        data
+    }
+
     /// Handles various superfluous reads that the CPU does (such as reading the
     /// non-existent op code for implied/accumulator addressing mode
     /// instructions) or when an address crosses a page boundary.
@@ -545,6 +610,11 @@ impl Cpu {
     /// If the CPU is halted by the RDY line the address is given for performing
     /// any required dummy reads while the DMA unit is running
     pub(in super) fn dummy_read_system_bus(&mut self, system: &mut System, addr: u16) {
+        self.step_read_cycle(system, addr, |system, addr| {
+            system.dummy_cpu_read(addr);
+            0
+        });
+        /*
         self.start_clock_cycle_phi1(system);
         system.dummy_cpu_read(addr);
         self.end_clock_cycle_phi2(system);
@@ -554,9 +624,15 @@ impl Cpu {
         if !self.input_ready {
             let _data = self.handle_RDY_halt(system, addr);
         }
+        */
     }
 
     pub(in super) fn read_system_bus(&mut self, system: &mut System, addr: u16) -> u8 {
+        self.step_read_cycle(system, addr, |system, addr| {
+            system.cpu_read(addr)
+        })
+
+        /*
         // The reads/writes by the CPU effectively correspond to clock cycles
         // so this is a convenient place to run the interrupt detection that
         // happens during phase 1/2 of each clock cycle
@@ -572,6 +648,33 @@ impl Cpu {
         }
 
         data
+        */
+    }
+
+    /// Like `read_system_bus` but signifies that the read is to fetch part of an instruction
+    /// so we can track additional statistics about memory that is executed
+    pub(in super) fn fetch_system_bus(&mut self, system: &mut System, addr: u16) -> u8 {
+        self.step_read_cycle(system, addr, |system, addr| {
+            system.cpu_fetch(addr)
+        })
+
+        /*
+        // The reads/writes by the CPU effectively correspond to clock cycles
+        // so this is a convenient place to run the interrupt detection that
+        // happens during phase 1/2 of each clock cycle
+
+        self.start_clock_cycle_phi1(system);
+        let mut data = system.cpu_fetch(addr);
+        self.end_clock_cycle_phi2(system);
+
+        self.clock += 1;
+
+        if !self.input_ready {
+            data = self.handle_RDY_halt(system, addr);
+        }
+
+        data
+        */
     }
 
     /// Handles various superfluous writes that the CPU does
@@ -617,6 +720,12 @@ impl Cpu {
         }
 
         self.end_clock_cycle_phi2(system);
+
+        #[cfg(feature="trace-events")]
+        {
+            system.trace(TraceEvent::CpuWrite { clk_lower: (self.clock & 0xff) as u8, addr, value: data });
+        }
+
         self.clock += 1;
     }
 
@@ -648,8 +757,6 @@ impl Cpu {
         // from the interrupt handler will execute before another interrupt is serviced."
         self.interrupt_polling_disabled = true;
 
-        self.interrupt_handler_pending = None;
-
         let vector = match interrupt {
             Interrupt::NMI => {
                 //println!("Handling NMI");
@@ -669,6 +776,8 @@ impl Cpu {
             Interrupt::RESET => {
                 log::debug!("CPU: reset interrupt");
 
+                // RST forces /RW high during the stack pushes, so the stack pointer decrements but nothing is written
+                self.sp = self.sp.wrapping_sub(3);
                 self.set_interrupt_flag(true);
 
                 Interrupt::RESET
@@ -727,13 +836,23 @@ impl Cpu {
         let upper = self.read_system_bus(system, upper_addr);
         self.pc = (lower as u16) | ((upper as u16) << 8);
 
+        // Didn't find much to clarify exactly when these flags for raising an interrupt are cleared
+        // but e.g. this sentence on nesdev suggests it's done as a last step here:
+        //
+        // "When the CPU checks for interrupts and find that the flip-flop is set, it pushes the processor status
+        // register and return address on the stack, reads the NMI handler's address from $FFFA-$FFFB, clears the
+        // flip-flop, and jumps to this address"
+        self.interrupt_handler_pending = None;
+        self.nmi_raised = false;
+        //self.irq_raised = false;
+
         //println!("BRK interrupt handler set PC = ${:04x}", self.pc);
 
         self.interrupt_polling_disabled = false;
     }
 
     /// Poll the status of interrupt detection that happened during phase 1 of this cycle
-    pub(in super) fn instruction_poll_interrupts(&mut self) {
+    pub(in super) fn instruction_poll_interrupts(&mut self, system: &mut System) {
         #[cfg(debug_assertions)]
         {
             self.instruction_polled_interrupts = true;
@@ -761,21 +880,40 @@ impl Cpu {
                 }
             }
             Some(Interrupt::IRQ) => {
-                if self.p & Flags::INTERRUPT == Flags::INTERRUPT {
-                    //println!("interrupt poll: Ignoring IRQ due to interrupt flag");
-                    return;
-                } else {
+                if !self.p.contains(Flags::INTERRUPT) {
                     if self.interrupt_handler_pending.is_none() {
                         //println!("interrupt poll: queue IRQ handler");
                         self.interrupt_handler_pending = Some(Interrupt::IRQ);
                     } else {
                         //println!("interrupt poll: leaving BRK handler queued");
                     }
+                } else {
+                    //println!("interrupt poll: Ignoring IRQ due to interrupt flag");
                 }
             }
             Some(_) => unreachable!(),
             None => {
                 //println!("interrupt poll: nothing found");
+            }
+        }
+
+        #[cfg(feature="trace-events")]
+        {
+            if self.interrupt_handler_pending.is_some() {
+                let mut status = CpuInterruptStatus::default();
+                match self.interrupt_handler_pending {
+                    Some(Interrupt::NMI) => {
+                        status.set(CpuInterruptStatus::NMI_POLLED, true);
+                    }
+                    Some(Interrupt::IRQ) => {
+                        status.set(CpuInterruptStatus::IRQ_POLLED, true);
+                    }
+                    Some(Interrupt::BRK) => {
+                        status.set(CpuInterruptStatus::BRK_POLLED, true);
+                    }
+                    _ => unreachable!()
+                }
+                system.trace(TraceEvent::CpuInterruptStatus { clk_lower: (self.clock & 0xff) as u8, status });
             }
         }
     }
@@ -794,7 +932,7 @@ impl Cpu {
     /// Checks the status of the edge/level detector during φ1/phi1 (first half) of a cycle to determine if an
     /// interrupt has been detected.
     /// Note: this phase 1 state still needs to be polled before an interrupt will actually be handled
-    fn step_interrupt_detector_phi1(&mut self) {
+    fn step_interrupt_detector_phi1(&mut self, system: &mut System) {
         if self.pending_nmi_detected {
             // Note this will then stay set until "the NMI has been handled"
             self.nmi_raised = true;
@@ -803,15 +941,31 @@ impl Cpu {
         //println!("Phase 1 raised NMI interrupt = {}", self.nmi_raised);
         self.irq_raised = self.pending_irq_detected;
         //println!("phase 1 irq_raised = {}", self.irq_raised);
+
+        if let Some(dma_req) = std::mem::take(&mut system.dmc_dma_request) {
+            debug_assert!(self.dmc_dma_pending.is_none());
+            self.dmc_dma_pending = Some(dma_req.address);
+            self.input_ready = false;
+        }
+
+        #[cfg(feature="trace-events")]
+        {
+            if self.nmi_raised || self.irq_raised {
+                let mut status = CpuInterruptStatus::default();
+                status.set(CpuInterruptStatus::NMI_DETECTED_PHI1, self.nmi_raised);
+                status.set(CpuInterruptStatus::IRQ_DETECTED_PHI1, self.irq_raised);
+                system.trace(TraceEvent::CpuInterruptStatus { clk_lower: (self.clock & 0xff) as u8, status });
+            }
+        }
     }
 
     /// Handle anything specific to the first half of the clock cycle, aka φ1/phi1
-    pub(in super) fn start_clock_cycle_phi1(&mut self, _system: &System) {
-        self.step_interrupt_detector_phi1();
+    pub(in super) fn start_clock_cycle_phi1(&mut self, system: &mut System) {
+        self.step_interrupt_detector_phi1(system);
     }
 
     /// Checks interrupt lines during φ2/phi2 (second half) of a cycle to detect NMI edges or level IRQ inputs
-    fn step_interrupt_detector_phi2(&mut self, system: &System) {
+    fn step_interrupt_detector_phi2(&mut self, system: &mut System) {
         let nmi_level = system.nmi_line();
         if nmi_level == true && self.last_nmi_level == false {
             // Note this will then stay set until "the NMI has been handled"
@@ -822,6 +976,16 @@ impl Cpu {
         self.last_nmi_level = nmi_level;
         self.pending_irq_detected = system.irq_line();
         //println!("phase 2 pending_irq_detected = {}", self.pending_irq_detected);
+
+        #[cfg(feature="trace-events")]
+        {
+            if self.pending_nmi_detected || self.pending_irq_detected {
+                let mut status = CpuInterruptStatus::default();
+                status.set(CpuInterruptStatus::NMI_DETECTED_PHI2, self.pending_nmi_detected);
+                status.set(CpuInterruptStatus::IRQ_DETECTED_PHI2, self.pending_irq_detected);
+                system.trace(TraceEvent::CpuInterruptStatus { clk_lower: (self.clock & 0xff) as u8, status });
+            }
+        }
     }
 
     /// Handle anything specific to the second half of the clock cycle, aka φ2/phi2
@@ -832,10 +996,10 @@ impl Cpu {
 
     #[cfg(feature="debugger")]
     pub fn add_break(&mut self, addr: u16, callback: Box<FnBreakpointCallback>) -> BreakpointHandle {
-        let handle = BreakpointHandle(self.debugger.next_breakpoint_handle);
-        self.debugger.next_breakpoint_handle += 1;
+        let handle = BreakpointHandle(self.debug.next_breakpoint_handle);
+        self.debug.next_breakpoint_handle += 1;
 
-        self.debugger.breakpoints.push(Breakpoint {
+        self.debug.breakpoints.push(Breakpoint {
             handle,
             addr,
             callback
@@ -846,9 +1010,14 @@ impl Cpu {
 
     #[cfg(feature="debugger")]
     pub fn remove_breakpoint(&mut self, handle: BreakpointHandle) {
-        if let Some(i) = self.debugger.breakpoints.iter().position(|b| b.handle == handle) {
-            self.debugger.breakpoints.swap_remove(i);
+        if let Some(i) = self.debug.breakpoints.iter().position(|b| b.handle == handle) {
+            self.debug.breakpoints.swap_remove(i);
         }
+    }
+
+    #[cfg(feature="debugger")]
+    pub fn breakpoints(&mut self) -> std::slice::Iter<Breakpoint> {
+        self.debug.breakpoints.iter()
     }
 
     /// Returns a stack iterator that can walk stack frame pointers

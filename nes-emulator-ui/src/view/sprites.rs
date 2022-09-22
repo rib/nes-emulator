@@ -7,20 +7,13 @@ use nes_emulator::{constants::*, nes::Nes, hook::HookHandle, framebuffer::{Frame
 use crate::ui::{blank_texture_for_framebuffer, full_framebuffer_image_delta};
 
 struct SpritesHookState {
-
     screen_framebuffer_front: FramebufferDataRental,
 }
+
 pub struct SpritesView {
-    pub show: bool,
-    //screen_framebuffer: Framebuffer,
+    pub visible: bool,
     screen_texture: TextureHandle,
     queue_screen_fb_upload: bool,
-
-    //sprites8_framebuffer: Vec<u8>,
-    //sprites8_texture: TextureHandle,
-    //sprites16_framebuffer: Vec<u8>,
-    //sprites16_texture: TextureHandle,
-    //queue_sprite_fb_upload: bool,
 
     mux_hook_handle: Option<HookHandle>,
     dot_hook_handle: Option<HookHandle>,
@@ -31,53 +24,15 @@ pub struct SpritesView {
 
 impl SpritesView {
     pub fn new(ctx: &egui::Context) -> Self {
-        //let screen_framebuffer = Framebuffer::empty();
         let screen_framebuffer_front = Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
         let screen_framebuffer_front = screen_framebuffer_front.rent_data().unwrap();
         let screen_texture = blank_texture_for_framebuffer(ctx, &screen_framebuffer_front, "sprites_screen_framebuffer");
 
-        /*
-        let sprite_rows = 8;
-        let sprite_cols = 8;
-        let sprites8_fb_stride = sprite_cols * 8 * fb_bpp;
-        let sprites8_framebuffer = vec![0u8; sprites8_fb_stride * sprite_rows * 8];
-        let sprites8_texture = {
-            //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
-            let blank = ColorImage {
-                size: [(sprite_cols * 8) as _, (sprite_rows * 8) as _],
-                pixels: vec![Color32::default(); (sprite_cols * 8) * (sprite_rows * 8)],
-            };
-            let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture("sprites_screen_framebuffer", blank, egui::TextureFilter::Nearest);
-            tex
-        };
-        let sprites16_fb_stride = sprite_cols * 8 * fb_bpp;
-        let sprites16_framebuffer = vec![0u8; sprites8_fb_stride * sprite_rows * 16];
-        let sprites16_texture = {
-            //let blank = vec![egui::epaint::Color32::default(); fb_width * fb_height];
-            let blank = ColorImage {
-                size: [(sprite_cols * 8) as _, (sprite_rows * 16) as _],
-                pixels: vec![Color32::default(); (sprite_cols * 8) * (sprite_rows * 16)],
-            };
-            let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture("sprites_screen_framebuffer", blank, egui::TextureFilter::Nearest);
-            tex
-        };
-        */
         Self  {
-            show: false,
+            visible: false,
 
-            //screen_framebuffer_front,
             screen_texture,
             queue_screen_fb_upload: false,
-
-            /*
-            sprites8_framebuffer,
-            sprites8_texture,
-            sprites16_framebuffer,
-            sprites16_texture,
-            queue_sprite_fb_upload: false,
-            */
 
             mux_hook_handle: None,
             dot_hook_handle: None,
@@ -90,7 +45,7 @@ impl SpritesView {
     }
 
     pub fn set_visible(&mut self, nes: &mut Nes, visible: bool) {
-        #[cfg(feature="sprite-view")]
+        self.visible = visible;
         if visible {
             let shared = self.hook_state.clone();
 
