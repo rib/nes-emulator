@@ -217,7 +217,7 @@ impl Mapper4 {
         // "If the IRQ counter is zero and IRQs are enabled ($E001), an IRQ is
         // triggered. The "alternate revision" checks the IRQ counter transition
         // 1→0, whether from decrementing or reloading."
-        self.irq_raised = self.irq_counter == 0 && self.irq_enabled;
+        self.irq_raised |= self.irq_counter == 0 && self.irq_enabled;
     }
 }
 
@@ -322,8 +322,10 @@ impl Mapper for Mapper4 {
             }
             0xe000..=0xffff => {
                 if addr & 1 == 0 {
+                    // "Writing any value to this register will disable MMC3 interrupts AND acknowledge any pending interrupts"
                     //println!("Mapper004: disabled IRQ");
                     self.irq_enabled = false;
+                    self.irq_raised = false;
                 } else {
                     //println!("Mapper004: enabled IRQ");
                     self.irq_enabled = true;
