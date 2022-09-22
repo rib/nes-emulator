@@ -1,3 +1,5 @@
+/// hacky constant just to make CPU traces comparable with Mesen trace logs
+pub(crate) const CPU_START_CYCLE: u64 = 6;
 
 pub const NTSC_CPU_CLOCK_HZ: u32 = 1_789_166;
 pub const PAL_CPU_CLOCK_HZ: u32 = 1_662_607;
