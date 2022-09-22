@@ -30,9 +30,10 @@ bitflags! {
     pub struct WatchOps: u8 {
         const READ =  0b1;
         const WRITE = 0b10;
+        const EXECUTE = 0b100;
 
         /// Also watches the superfluous, dummy reads/writes the CPU does
-        const DUMMY = 0b100;
+        const DUMMY = 0b1000;
     }
 }
 
