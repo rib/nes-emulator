@@ -161,6 +161,7 @@ impl DmcChannel {
             // get a .completed_dma() callback
             // NB: "When the DMA reader accesses a byte of memory, the CPU is suspended for 4 clock cycles"
             //println!("DCM: request DMA address = {dma_addr:x}");
+            self.dma_in_progress = true;
             Some(DmcDmaRequest { address: dma_addr })
         } else {
             None
