@@ -378,19 +378,18 @@
     "rom": "instr_timing\\rom_singles\\1-instr_timing.nes",
     "notes": "",
     "tags": [
-      "test_failure",
       "cpu"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 78,
-          "line": 136,
-          "dot": 335
+          "frame": 1029,
+          "line": 40,
+          "dot": 327
         }
       },
       {
-        "CheckFrameCRC32": 77177683
+        "CheckFrameCRC32": 1720945627
       }
     ]
   },
@@ -399,19 +398,18 @@
     "rom": "instr_timing\\rom_singles\\2-branch_timing.nes",
     "notes": "",
     "tags": [
-      "cpu",
-      "test_failure"
+      "cpu"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 302,
-          "line": 211,
-          "dot": 304
+          "frame": 154,
+          "line": 145,
+          "dot": 118
         }
       },
       {
-        "CheckFrameCRC32": 4231442207
+        "CheckFrameCRC32": 293860330
       }
     ]
   },
@@ -425,13 +423,13 @@
     "commands": [
       {
         "WaitForDot": {
-          "frame": 72,
-          "line": 122,
-          "dot": 207
+          "frame": 88,
+          "line": 106,
+          "dot": 10
         }
       },
       {
-        "CheckFrameCRC32": 2058593341
+        "CheckFrameCRC32": 833209907
       }
     ]
   },
@@ -440,8 +438,8 @@
     "rom": "cpu_dummy_writes\\cpu_dummy_writes_oam.nes",
     "notes": "",
     "tags": [
-      "ppu",
-      "cpu"
+      "cpu",
+      "ppu"
     ],
     "commands": [
       {
@@ -497,27 +495,6 @@
     ]
   },
   {
-    "name": "cpu_interrupts_v2:cpu_interrupts",
-    "rom": "cpu_interrupts_v2\\cpu_interrupts.nes",
-    "notes": "",
-    "tags": [
-      "test_failure",
-      "cpu"
-    ],
-    "commands": [
-      {
-        "WaitForDot": {
-          "frame": 88,
-          "line": 136,
-          "dot": 204
-        }
-      },
-      {
-        "CheckFrameCRC32": 2262188261
-      }
-    ]
-  },
-  {
     "name": "ppu_open_bus",
     "rom": "ppu_open_bus\\ppu_open_bus.nes",
     "notes": "",
@@ -542,19 +519,19 @@
     "rom": "ppu_read_buffer\\test_ppu_read_buffer.nes",
     "notes": "",
     "tags": [
-      "ppu",
-      "test_failure"
+      "test_failure",
+      "ppu"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 1348,
-          "line": 35,
-          "dot": 268
+          "frame": 1322,
+          "line": 7,
+          "dot": 134
         }
       },
       {
-        "CheckFrameCRC32": 1574691384
+        "CheckFrameCRC32": 293036666
       }
     ]
   },
@@ -563,8 +540,8 @@
     "rom": "ppu_vbl_nmi\\ppu_vbl_nmi.nes",
     "notes": "",
     "tags": [
-      "ppu",
-      "test_failure"
+      "test_failure",
+      "ppu"
     ],
     "commands": [
       {
@@ -583,17 +560,20 @@
     "name": "read_joy3:count_errors",
     "rom": "read_joy3\\count_errors.nes",
     "notes": "",
-    "tags": [],
+    "tags": [
+      "cpu",
+      "dma"
+    ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 106,
-          "line": 165,
-          "dot": 311
+          "frame": 95,
+          "line": 119,
+          "dot": 289
         }
       },
       {
-        "CheckFrameCRC32": 3853179549
+        "CheckFrameCRC32": 3508032913
       }
     ]
   },
@@ -601,17 +581,20 @@
     "name": "read_joy3:count_errors_fast",
     "rom": "read_joy3\\count_errors_fast.nes",
     "notes": "",
-    "tags": [],
+    "tags": [
+      "cpu",
+      "dma"
+    ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 78,
-          "line": 139,
-          "dot": 212
+          "frame": 71,
+          "line": 123,
+          "dot": 137
         }
       },
       {
-        "CheckFrameCRC32": 746422616
+        "CheckFrameCRC32": 1975493757
       }
     ]
   },
@@ -897,9 +880,9 @@
     "commands": [
       {
         "WaitForDot": {
-          "frame": 110,
-          "line": 155,
-          "dot": 143
+          "frame": 843,
+          "line": 180,
+          "dot": 138
         }
       },
       {
@@ -912,8 +895,8 @@
     "rom": "scrolltest\\scroll.nes",
     "notes": "",
     "tags": [
-      "ppu",
-      "test_failure"
+      "test_failure",
+      "ppu"
     ],
     "commands": [
       {
@@ -1315,19 +1298,19 @@
     "rom": "sprdma_and_dmc_dma\\sprdma_and_dmc_dma.nes",
     "notes": "",
     "tags": [
-      "ppu",
-      "test_failure"
+      "test_failure",
+      "ppu"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 195,
-          "line": 171,
-          "dot": 199
+          "frame": 194,
+          "line": 258,
+          "dot": 53
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 4048147194
       }
     ]
   },
@@ -1336,19 +1319,19 @@
     "rom": "sprdma_and_dmc_dma\\sprdma_and_dmc_dma_512.nes",
     "notes": "",
     "tags": [
-      "ppu",
-      "test_failure"
+      "test_failure",
+      "ppu"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 206,
-          "line": 194,
-          "dot": 284
+          "frame": 179,
+          "line": 154,
+          "dot": 30
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 3244138426
       }
     ]
   },
@@ -1413,32 +1396,11 @@
     ]
   },
   {
-    "name": "instr_misc",
-    "rom": "instr_misc\\instr_misc.nes",
-    "notes": "",
-    "tags": [
-      "test_failure",
-      "apu",
-      "cpu"
-    ],
-    "commands": [
-      {
-        "WaitForDot": {
-          "frame": 168,
-          "line": 181,
-          "dot": 116
-        }
-      },
-      {
-        "CheckFrameCRC32": 2415209512
-      }
-    ]
-  },
-  {
     "name": "oam_read",
     "rom": "oam_read\\oam_read.nes",
     "notes": "",
     "tags": [
+      "input",
       "ppu"
     ],
     "commands": [
@@ -1479,19 +1441,18 @@
     "rom": "mmc3_test_2\\rom_singles\\1-clocking.nes",
     "notes": "",
     "tags": [
-      "mapper",
-      "test_failure"
+      "mapper"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 310,
-          "line": 233,
-          "dot": 274
+          "frame": 58,
+          "line": 96,
+          "dot": 45
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 3290729816
       }
     ]
   },
@@ -1500,19 +1461,18 @@
     "rom": "mmc3_test_2\\rom_singles\\2-details.nes",
     "notes": "",
     "tags": [
-      "test_failure",
       "mapper"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 312,
-          "line": 82,
-          "dot": 173
+          "frame": 71,
+          "line": 185,
+          "dot": 312
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 1071796170
       }
     ]
   },
@@ -1521,19 +1481,18 @@
     "rom": "mmc3_test_2\\rom_singles\\3-A12_clocking.nes",
     "notes": "",
     "tags": [
-      "mapper",
-      "test_failure"
+      "mapper"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 350,
-          "line": 235,
-          "dot": 178
+          "frame": 66,
+          "line": 99,
+          "dot": 320
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 4134105297
       }
     ]
   },
@@ -1542,19 +1501,19 @@
     "rom": "mmc3_test_2\\rom_singles\\4-scanline_timing.nes",
     "notes": "",
     "tags": [
-      "mapper",
-      "test_failure"
+      "test_failure",
+      "mapper"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 120,
-          "line": 162,
-          "dot": 37
+          "frame": 124,
+          "line": 122,
+          "dot": 338
         }
       },
       {
-        "CheckFrameCRC32": 2386489751
+        "CheckFrameCRC32": 3566095356
       }
     ]
   },
@@ -1563,19 +1522,18 @@
     "rom": "mmc3_test_2\\rom_singles\\5-MMC3.nes",
     "notes": "",
     "tags": [
-      "test_failure",
       "mapper"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 230,
-          "line": 195,
-          "dot": 249
+          "frame": 64,
+          "line": 110,
+          "dot": 77
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 624243428
       }
     ]
   },
@@ -1590,13 +1548,13 @@
     "commands": [
       {
         "WaitForDot": {
-          "frame": 248,
-          "line": 197,
-          "dot": 158
+          "frame": 74,
+          "line": 62,
+          "dot": 162
         }
       },
       {
-        "CheckFrameCRC32": 3568011289
+        "CheckFrameCRC32": 964272419
       }
     ]
   },
@@ -1817,6 +1775,272 @@
       },
       {
         "CheckFrameCRC32": 2587602260
+      }
+    ]
+  },
+  {
+    "name": "cpu_interrupts_v2:1-cli_latency",
+    "rom": "cpu_interrupts_v2\\rom_singles\\1-cli_latency.nes",
+    "notes": "",
+    "tags": [
+      "cpu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 56,
+          "line": 86,
+          "dot": 183
+        }
+      },
+      {
+        "CheckFrameCRC32": 4272788344
+      }
+    ]
+  },
+  {
+    "name": "cpu_interrupts_v2:2-nmi_and_brk",
+    "rom": "cpu_interrupts_v2\\rom_singles\\2-nmi_and_brk.nes",
+    "notes": "",
+    "tags": [
+      "cpu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 164,
+          "line": 120,
+          "dot": 118
+        }
+      },
+      {
+        "CheckFrameCRC32": 3246359375
+      }
+    ]
+  },
+  {
+    "name": "cpu_interrupts_v2:3-nmi_and_irq",
+    "rom": "cpu_interrupts_v2\\rom_singles\\3-nmi_and_irq.nes",
+    "notes": "",
+    "tags": [
+      "cpu",
+      "test_failure"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 183,
+          "line": 165,
+          "dot": 285
+        }
+      },
+      {
+        "CheckFrameCRC32": 384542174
+      }
+    ]
+  },
+  {
+    "name": "cpu_interrupts_v2:4-irq_and_dma",
+    "rom": "cpu_interrupts_v2\\rom_singles\\4-irq_and_dma.nes",
+    "notes": "",
+    "tags": [
+      "test_failure",
+      "cpu",
+      "dma"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 115,
+          "line": 140,
+          "dot": 75
+        }
+      },
+      {
+        "CheckFrameCRC32": 1788013672
+      }
+    ]
+  },
+  {
+    "name": "cpu_interrupts_v2:5-branch_delays_irq",
+    "rom": "cpu_interrupts_v2\\rom_singles\\5-branch_delays_irq.nes",
+    "notes": "",
+    "tags": [
+      "cpu",
+      "test_failure"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 177,
+          "line": 161,
+          "dot": 71
+        }
+      },
+      {
+        "CheckFrameCRC32": 721729676
+      }
+    ]
+  },
+  {
+    "name": "instr_misc:01-abs_x_wrap",
+    "rom": "instr_misc\\rom_singles\\01-abs_x_wrap.nes",
+    "notes": "",
+    "tags": [
+      "cpu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 65,
+          "line": 52,
+          "dot": 53
+        }
+      },
+      {
+        "CheckFrameCRC32": 335784083
+      }
+    ]
+  },
+  {
+    "name": "instr_misc:02-branch_wrap",
+    "rom": "instr_misc\\rom_singles\\02-branch_wrap.nes",
+    "notes": "",
+    "tags": [
+      "cpu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 56,
+          "line": 76,
+          "dot": 32
+        }
+      },
+      {
+        "CheckFrameCRC32": 99230925
+      }
+    ]
+  },
+  {
+    "name": "instr_misc:03-dummy_reads",
+    "rom": "instr_misc\\rom_singles\\03-dummy_reads.nes",
+    "notes": "",
+    "tags": [
+      "cpu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 104,
+          "line": 90,
+          "dot": 121
+        }
+      },
+      {
+        "CheckFrameCRC32": 1780464280
+      }
+    ]
+  },
+  {
+    "name": "instr_misc:04-dummy_reads_apu",
+    "rom": "instr_misc\\rom_singles\\04-dummy_reads_apu.nes",
+    "notes": "",
+    "tags": [
+      "apu",
+      "cpu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 178,
+          "line": 139,
+          "dot": 205
+        }
+      },
+      {
+        "CheckFrameCRC32": 1898691297
+      }
+    ]
+  },
+  {
+    "name": "blargg_ppu_tests_2005.09.15b:palette_ram",
+    "rom": "blargg_ppu_tests_2005.09.15b\\palette_ram.nes",
+    "notes": "",
+    "tags": [
+      "ppu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 54,
+          "line": 29,
+          "dot": 22
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_ppu_tests_2005.09.15b:sprite_ram",
+    "rom": "blargg_ppu_tests_2005.09.15b\\sprite_ram.nes",
+    "notes": "",
+    "tags": [
+      "ppu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 60,
+          "line": 93,
+          "dot": 329
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_ppu_tests_2005.09.15b:vbl_clear_time",
+    "rom": "blargg_ppu_tests_2005.09.15b\\vbl_clear_time.nes",
+    "notes": "",
+    "tags": [
+      "test_failure",
+      "ppu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 64,
+          "line": 99,
+          "dot": 291
+        }
+      },
+      {
+        "CheckFrameCRC32": 3835578070
+      }
+    ]
+  },
+  {
+    "name": "blargg_ppu_tests_2005.09.15b:vram_access",
+    "rom": "blargg_ppu_tests_2005.09.15b\\vram_access.nes",
+    "notes": "",
+    "tags": [
+      "ppu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 62,
+          "line": 68,
+          "dot": 96
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
       }
     ]
   }
