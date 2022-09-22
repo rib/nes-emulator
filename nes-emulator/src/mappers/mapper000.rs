@@ -54,7 +54,7 @@ impl Mapper for Mapper0 {
                     let offset = (addr - 0x6000) as usize % self.prg_ram.len();
                     (arr_read!(self.prg_ram, offset), 0)
                 } else {
-                    log::warn!("Invalid mapper read @ {}", addr);
+                    //log::warn!("Invalid mapper read @ {}", addr);
                     (0, 0xff)
                 }
             }
@@ -67,7 +67,7 @@ impl Mapper for Mapper0 {
                 (arr_read!(self.prg_rom, addr), 0)
             }
             _ => {
-                log::warn!("Invalid mapper read @ {}", addr);
+                //log::warn!("Invalid mapper read @ {}", addr);
                 (0, 0xff)
             }
         }
@@ -112,11 +112,13 @@ impl Mapper for Mapper0 {
             0x0000..=0x1fff => {
                 if self.has_chr_ram {
                     let off = addr as usize;
+                    //println!("cartridge CHR RAM write 0x{:04x} ({}) = 0x{:02x}", addr, off, data);
                     arr_write!(self.chr_data, off, data);
                 }
             },
             0x2000..=0x3fff => { // VRAM
                 let off = mirror_vram_address(addr, self.vram_mirror);
+                //println!("cartridge vram write 0x{:04x} ({}) = 0x{:02x}", addr, off, data);
                 arr_write!(self.vram, off, data);
             }
             _ => {

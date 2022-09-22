@@ -128,6 +128,7 @@ impl Mapper4 {
             self.prg_banks[2] = self.prg_rom.len() - PAGE_SIZE_16K; // second-to-last 8k page
             self.prg_banks[3] = self.prg_rom.len() - PAGE_SIZE_8K; // last 8k page
         }
+        //println!("Mapper004: PRG banks = {:?}", self.prg_banks);
     }
 
     fn update_chr_banks(&mut self) {
@@ -235,7 +236,10 @@ impl Mapper for Mapper4 {
                 let off = self.prg_offset_from_address(addr);
                 arr_read!(self.prg_rom, off)
             }
-            _ => unreachable!()
+            _ => {
+                //log::warn!("Invalid mapper read @ {}", addr);
+                0
+            }
         };
 
         (value, 0) // no undefined bits
