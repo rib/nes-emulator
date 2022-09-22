@@ -784,6 +784,130 @@ impl Cpu {
         operand
     }
 
+    fn system_peek_u16(system: &mut System, addr: u16) -> u16 {
+        let lower = system.peek(addr);
+        let upper = system.peek(addr.wrapping_add(1));
+        let data = u16::from(lower) | (u16::from(upper) << 8);
+        data
+    }
+
+    pub fn peek_operand(&mut self, system: &mut System, addr: u16, mode: AddressingMode, oops_handling: OopsHandling) -> FetchedOperand {
+        let operand = match mode {
+            AddressingMode::Implied => FetchedOperand { raw_operand: 0, operand: 0, oops_cyc: 0 },
+            AddressingMode::Accumulator => FetchedOperand { raw_operand: 0, operand: 0, oops_cyc: 0 },
+            AddressingMode::Immediate => {
+                let in_operand = system.peek(addr) as u16;
+                FetchedOperand { raw_operand: in_operand, operand: in_operand, oops_cyc: 0 }
+            },
+            AddressingMode::Absolute => {
+                let in_operand = Self::system_peek_u16(system, addr);
+                FetchedOperand { raw_operand: in_operand, operand: in_operand, oops_cyc: 0 }
+            },
+            AddressingMode::ZeroPage => {
+                let in_operand = system.peek(addr) as u16;
+                FetchedOperand { raw_operand: in_operand, operand: in_operand, oops_cyc: 0 }
+            },
+            AddressingMode::ZeroPageX => {
+                let in_operand = system.peek(addr);
+                FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.x)), oops_cyc: 0 }
+            }
+            AddressingMode::ZeroPageY => {
+                let in_operand = system.peek(addr);
+                FetchedOperand { raw_operand: in_operand as u16, operand: u16::from(in_operand.wrapping_add(self.y)), oops_cyc: 0 }
+            }
+            AddressingMode::AbsoluteX => {
+                let in_operand = Self::system_peek_u16(system, addr);
+                let data = in_operand.wrapping_add(u16::from(self.x));
+                let oops_cyc =
+                    if (in_operand & 0xff00u16) != (data & 0xff00u16) || oops_handling == OopsHandling::Always {
+                        1
+                    } else {
+                        0
+                    };
+                FetchedOperand { raw_operand: in_operand as u16, operand: data, oops_cyc }
+            }
+            AddressingMode::AbsoluteY => {
+                let in_operand = Self::system_peek_u16(system, addr);
+                let data = in_operand.wrapping_add(u16::from(self.y));
+                let oops_cyc =
+                    if (in_operand & 0xff00u16) != (data & 0xff00u16) || oops_handling == OopsHandling::Always {
+                        1
+                    } else {
+                        0
+                    };
+                FetchedOperand { raw_operand: in_operand as u16, operand: data, oops_cyc }
+            }
+            AddressingMode::Relative => {
+                let in_operand = system.peek(addr);
+                let offset = in_operand as i8;
+
+                // XXX: haven't seen any clarification on how the hardware handles overflow/underflow
+                // with the signed arithmetic here...
+
+                let data = self.pc.wrapping_add(offset as u16);
+                //let signed_addr = (self.pc as i32) + (offset as i32); // Sign extension and calculation
+                //debug_assert!(signed_addr >= 0);
+                //debug_assert!(signed_addr < 0x10000);
+
+                //let data = signed_addr as u16;
+                let oops_cyc = if (data & 0xff00u16) != (self.pc & 0xff00u16) || oops_handling == OopsHandling::Always {
+                    1
+                } else {
+                    0
+                };
+
+                FetchedOperand { raw_operand: in_operand as u16, operand: data, oops_cyc }
+            }
+            AddressingMode::AbsoluteIndirect => {
+                let src_addr_lower = system.peek(addr);
+                let src_addr_upper = system.peek(addr.wrapping_add(1));
+
+                let dst_addr_lower = u16::from(src_addr_lower) | (u16::from(src_addr_upper) << 8); // operand as it is
+
+                // NB: The original 6502 can't (correctly) read addresses that cross page boundaries as
+                // it only wraps the lower indirect address byte at page boundaries
+                let dst_addr_upper =
+                    u16::from(src_addr_lower.wrapping_add(1)) | (u16::from(src_addr_upper) << 8); // +1 to the lower of the operand
+
+                let dst_data_lower = u16::from(system.peek(dst_addr_lower));
+                let dst_data_upper = u16::from(system.peek(dst_addr_upper));
+
+                let indirect = dst_data_lower | (dst_data_upper << 8);
+                FetchedOperand { raw_operand: dst_addr_lower, operand: indirect, oops_cyc: 0 }
+            }
+            AddressingMode::IndirectX => {
+                let src_addr = system.peek(addr);
+                let dst_addr = src_addr.wrapping_add(self.x);
+
+                let data_lower = u16::from(system.peek(u16::from(dst_addr)));
+                let data_upper =
+                    u16::from(system.peek(u16::from(dst_addr.wrapping_add(1))));
+
+                let indirect = data_lower | (data_upper << 8);
+                FetchedOperand { raw_operand: src_addr as u16, operand: indirect, oops_cyc: 0 }
+            }
+            AddressingMode::IndirectY => {
+                let src_addr = system.peek(addr);
+
+                let data_lower = u16::from(system.peek(u16::from(src_addr)));
+                let data_upper =
+                    u16::from(system.peek(u16::from(src_addr.wrapping_add(1))));
+
+                let base_data = data_lower | (data_upper << 8);
+                let indirect = base_data.wrapping_add(u16::from(self.y));
+                let oops_cyc = if (base_data & 0xff00u16) != (indirect & 0xff00u16) || oops_handling == OopsHandling::Always {
+                    1
+                } else {
+                    0
+                };
+
+                FetchedOperand { raw_operand: src_addr as u16, operand: indirect, oops_cyc }
+            }
+        };
+
+        operand
+    }
+
     /// Fetch address operand and dereference that to read the value at that address
     /// If you want to pull not only the address but also the data in one shot
     /// returns (Operand { data: immediate value or address, number of clocks), data)
