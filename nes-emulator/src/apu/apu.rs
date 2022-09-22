@@ -198,9 +198,11 @@ impl Apu {
             0x4015 => { // Status
                 // "Reading this register clears the frame interrupt flag (but not the DMC interrupt flag)."
                 // TODO: "If an interrupt flag was set at the same moment of the read, it will read back as 1 but it will not be cleared"
-                self.frame_sequencer.clear_irq();
-                self.read_4015_status()
 
+                // Read status _before_ clearing the IRQ flag (which is part of the status)
+                let status = self.read_4015_status();
+                self.frame_sequencer.clear_irq();
+                status
             }
             _ => (0, 0xff )
         }
