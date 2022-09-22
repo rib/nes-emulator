@@ -1,3 +1,6 @@
 [submodule "roms/nes-test-roms"]
 	path = roms/nes-test-roms
 	url = https://github.com/christopherpow/nes-test-roms.git
+[submodule "nes-emulator/breaknes"]
+	path = nes-emulator/breaknes
+	url = https://github.com/emu-russia/breaknes
