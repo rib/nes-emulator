@@ -20,10 +20,10 @@ lto = true
 
 
 [patch.crates-io]
-egui = { git = "https://github.com/emilk/egui" }
-egui_extras = { git = "https://github.com/emilk/egui" }
-egui-wgpu = { git = "https://github.com/emilk/egui" }
-egui-winit = { git = "https://github.com/emilk/egui" }
+#egui = { git = "https://github.com/emilk/egui" }
+#egui_extras = { git = "https://github.com/emilk/egui" }
+#egui-wgpu = { git = "https://github.com/emilk/egui" }
+#egui-winit = { git = "https://github.com/emilk/egui" }
 #egui_extras = { git = "https://github.com/emilk/egui" }
 #egui = { path = "../../../egui/egui" }
 #egui-wgpu = { path = "../../../egui/egui-wgpu" }

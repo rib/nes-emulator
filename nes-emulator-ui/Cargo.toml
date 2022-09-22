@@ -24,13 +24,13 @@ macro-builder = [ "nes-emulator/ppu-hooks" ]
 [dependencies]
 log = "0.4"
 env_logger = "0.9"
-winit = "0.26"
+winit = "0.27"
 wgpu = "0.13"
 pollster = "0.2"
-egui = "0.18"
-egui_extras = "0.18"
-egui-wgpu = { version = "0.18", features = [ "winit" ] }
-egui-winit = { version = "0.18", default-features = false, features = [ "clipboard" ] }
+egui = "0.19"
+egui_extras = "0.19"
+egui-wgpu = { version = "0.19", features = [ "winit" ] }
+egui-winit = { version = "0.19", default-features = false, features = [ "clipboard" ] }
 bytemuck = "1.9"
 cpal = "0.13"
 ring-channel = "0.11"
