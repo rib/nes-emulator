@@ -206,7 +206,7 @@ impl SquareChannel {
             }
             1 => { // Sweep
                 // Ref: https://www.nesdev.org/wiki/APU_Sweep
-                self.sweep_enabled = (value & 0b1000_000) != 0;
+                self.sweep_enabled = (value & 0b1000_0000) != 0;
                 //println!("square set sweep enable = {}", self.sweep_enabled);
 
                 self.sweep_divider_period = ((value & 0b0111_0000) >> 4) + 1; // (period measured in half frames)
