@@ -600,8 +600,8 @@ impl Cpu {
     /// Fetch 1 byte from PC and after fetching, advance the PC by one
     fn pc_fetch_u8(&mut self, system: &mut System) -> u8 {
         //println!("calling system.read_u8({:x}", self.pc);
-        let data = self.read_system_bus(system, self.pc);
-        self.pc = self.pc + 1;
+        let data = self.fetch_system_bus(system, self.pc);
+        self.pc = self.pc.wrapping_add(1);
 
         data
     }
