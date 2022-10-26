@@ -30,14 +30,17 @@ pub struct Args {
     #[clap(short='q', long="headless", help="Disables any IO and all synchronization (i.e. emulates frames as quickly as possible; good for benchmarking and running tests)")]
     headless: bool,
 
-    #[clap(long="macros", help="Load the macros in the given library")]
+    #[clap(short='m', long="macros", help="Load the macros in the given library")]
     macros: Option<String>,
 
-    #[clap(short='e', long="execute", help="Execute a single macro or \"all\" to execute all loaded macros")]
-    execute: Option<String>,
+    #[clap(short='p', long="play", help="Play a single macro or \"all\" to execute all loaded macros")]
+    play_macros: Vec<String>,
 
     #[clap(short='d', long="rom-dir", help="Add a directory to find macro roms that are specified with a relative path")]
     rom_dir: Vec<String>,
+
+    #[clap(short='g', long="genie", help="Game Genie Code")]
+    genie_codes: Vec<String>
 }
 
 fn dispatch_main() -> Result<()> {
@@ -53,7 +56,7 @@ fn dispatch_main() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    env_logger::builder().filter_level(log::LevelFilter::Trace) // Default Log Level
+    env_logger::builder().filter_level(log::LevelFilter::Debug) // Default Log Level
         .filter(Some("naga"), log::LevelFilter::Warn)
         .filter(Some("wgpu"), log::LevelFilter::Warn)
         .parse_default_env()

@@ -2,7 +2,7 @@ use std::{cell::{Cell, RefCell}, time::{Instant, Duration}, rc::Rc, path::PathBu
 use std::collections::HashSet;
 
 use anyhow::Result;
-use nes_emulator::{port::ControllerButton, nes::Nes, hook::HookHandle, ppu::{DotBreakpointHandle, DotBreakpointCallbackAction}};
+use nes_emulator::{port::ControllerButton, nes::Nes, hook::HookHandle, ppu::{DotBreakpointHandle, DotBreakpointCallbackAction}, genie::GameGenieCode};
 use serde::{Serialize, Deserialize};
 use serde_json;
 
@@ -65,6 +65,9 @@ pub struct Macro {
     pub rom: String,
     pub notes: String,
 
+    #[serde(default)]
+    pub genie_codes: Vec<String>,
+
     /// `true` if this test is known/expected to fail, and so a check "failure" implies
     /// some change in behaviour that should be investigated
     //pub fails: bool,
@@ -75,13 +78,30 @@ pub struct Macro {
     pub commands: Vec<MacroCommand>
 }
 
-pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<Macro>> {
+pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(path: P, filter: &Vec<String>) -> Result<Vec<Macro>> {
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(file);
-    Ok(serde_json::from_reader(reader)?)
+    let library = serde_json::from_reader(reader)?;
+
+    if filter.iter().any(|name| name == "all") {
+        Ok(library)
+    } else {
+        let mut queue = vec![];
+        for name in filter.iter() {
+            let mut found = false;
+            for m in library.iter() {
+                if &m.name == name {
+                    found = true;
+                    queue.push(m.clone());
+                }
+                if !found {
+                    log::warn!("No macro name \"{name}\" found in library");
+                }
+            }
+        }
+        Ok(queue)
+    }
 }
-
-
 
 pub fn register_frame_crc_hasher(nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) -> HookHandle {
     let mut hasher = crc32fast::Hasher::new();
@@ -142,7 +162,20 @@ pub struct MacroPlayer {
     check_failure_callback: Option<Box<dyn FnMut(&mut Nes, &String, &HashSet<String>, String)>>,
 }
 impl MacroPlayer {
-    pub fn new(recording: Macro, _nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) -> Self {
+    pub fn new(recording: Macro, nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) -> Self {
+        let genie_codes: Vec<GameGenieCode> = recording.genie_codes.iter().filter_map(|c| {
+            let code: Result<GameGenieCode> = c.as_str().try_into();
+            match code {
+                Ok(c) => Some(c),
+                Err(err) => {
+                    log::error!("Ignoring Game Genie Code {c} - {}", err);
+                    None
+                }
+            }
+        }).collect();
+
+        nes.set_game_genie_codes(genie_codes.clone());
+
         Self {
             recording,
             all_checks_passed: true,

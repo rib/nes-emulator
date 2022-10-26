@@ -1,4 +1,5 @@
 use crate::apu::apu::Apu;
+use crate::genie::GameGenieCode;
 use crate::ppu::DOTS_PER_LINE;
 use crate::ppu::N_LINES;
 use crate::ppu::Ppu;
@@ -10,7 +11,13 @@ use crate::trace::TraceEvent;
 use super::constants::*;
 use super::cartridge::*;
 use super::port::*;
+
 use bitflags::bitflags;
+
+// TODO: replace this BitVec crate with something - it has such
+// horrible ergonomics!
+use bitvec::BitArr;
+use bitvec::bitarr;
 
 const WRAM_SIZE: usize = 0x0800;
 
@@ -108,6 +115,9 @@ pub struct System {
     pub port1: Port,
     pub port2: Port,
 
+    genie_codes: Vec<GameGenieCode>,
+    genie_codes_mask: BitArr!(for 0x10000-0x8000, in usize),
+
     pub debug: NoCloneDebugState,
 }
 
@@ -132,6 +142,9 @@ impl System {
             port1: Default::default(),
             port2: Default::default(),
             open_bus_value: 0,
+
+            genie_codes: vec![],
+            genie_codes_mask: bitarr![1; 0x10000-0x8000],
 
             debug: NoCloneDebugState {
                 #[cfg(feature="ppu-sim")]
@@ -195,6 +208,8 @@ impl System {
         let ppu_sim_cartridge = std::mem::take(&mut self.debug.ppu_sim_cartridge);
         let pad1 = std::mem::take(&mut self.port1);
         let pad2 = std::mem::take(&mut self.port2);
+        let genie_codes = std::mem::take(&mut self.genie_codes);
+        let genie_codes_mask = std::mem::take(&mut self.genie_codes_mask);
 
         #[cfg(feature="debugger")]
         let watch_points = std::mem::take(&mut self.debug.watch_points);
@@ -208,6 +223,8 @@ impl System {
             port1: pad1,
             port2: pad2,
             open_bus_value: 0,
+            genie_codes,
+            genie_codes_mask,
 
             debug: NoCloneDebugState {
                 #[cfg(feature="ppu-sim")]
@@ -362,7 +379,33 @@ impl System {
             }
             _ => { // Cartridge
                 //println!("calling cartridge read_u8 for {addr:x}");
-                self.cartridge.system_bus_read(addr)
+                let mut val = self.cartridge.system_bus_read(addr);
+
+                if self.genie_codes.len() > 0 {
+                    if let 0x8000..=0xffff = addr {
+                        let off = addr - 0x8000;
+                        let genie_hit = unsafe {
+                            *self.genie_codes_mask.get_unchecked(off as usize)
+                        };
+
+                        if genie_hit {
+                            for code in self.genie_codes.iter() {
+                                if code.address == addr {
+                                    if let Some(compare) = code.compare {
+                                        if val.0 == compare {
+                                            val = (code.value, 0);
+                                        }
+                                    } else {
+                                        val = (code.value, 0);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val
             }
         };
 
@@ -780,6 +823,29 @@ impl System {
             address: addr,
             ops
         })
+    }
+
+    pub fn game_genie_codes(&self) -> &Vec<GameGenieCode> {
+        &self.genie_codes
+    }
+
+    pub fn set_game_genie_codes(&mut self, codes: Vec<GameGenieCode>) {
+
+        let codes_str: Vec<String> = codes.iter().map(|c| c.to_string()).collect();
+        log::debug!("Set Game Genie Codes: {:?}", codes_str);
+
+        self.genie_codes = codes;
+
+        // As a simple way to reduce the cost of checking for game genie code
+        // hits when reading we create a bitmask of addresses with a code that
+        // we can check against
+        self.genie_codes_mask = bitarr![1; 0x10000-0x8000];
+        for code in self.genie_codes.iter() {
+            let off = (code.address - 0x8000u16) as usize;
+            if off < self.genie_codes_mask.len() {
+                self.genie_codes_mask.set(off, true);
+            }
+        }
     }
 
     #[cfg(feature="trace-events")]

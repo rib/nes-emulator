@@ -12,6 +12,7 @@ use crate::cpu::instruction::Instruction;
 use crate::framebuffer::*;
 use crate::cartridge::*;
 use crate::constants::*;
+use crate::genie::GameGenieCode;
 #[cfg(feature="trace")]
 use crate::hook::{HooksList, HookHandle};
 use crate::system::*;
@@ -766,5 +767,13 @@ impl Nes {
 
     pub fn backtrace(&mut self) -> Backtrace {
         self.cpu.backtrace(&mut self.system)
+    }
+
+    pub fn game_genie_codes(&self) -> &Vec<GameGenieCode> {
+        self.system.game_genie_codes()
+    }
+
+    pub fn set_game_genie_codes(&mut self, codes: Vec<GameGenieCode>) {
+        self.system.set_game_genie_codes(codes);
     }
 }

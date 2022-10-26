@@ -16,6 +16,7 @@ use cpal::{traits::{HostTrait, DeviceTrait}, OutputCallbackInfo, SampleFormat, S
 use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
 
 use nes_emulator::{nes::*, system::Model, port::ControllerButton, hook::HookHandle, cpu::cpu::BreakpointHandle};
+use nes_emulator::genie::GameGenieCode;
 use nes_emulator::framebuffer::*;
 
 use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView, debugger::DebuggerView, apu::ApuView}};
@@ -231,7 +232,8 @@ pub struct EmulatorUi {
     audio_tx: RingSender<f32>,
     audio_stream: cpal::Stream,
 
-    player: Option<MacroPlayer>,
+    macro_queue: Vec<Macro>,
+    macro_player: Option<MacroPlayer>,
     shared_crc32: Rc<RefCell<u32>>,
     crc_hook_handle: Option<HookHandle>,
 
@@ -314,6 +316,13 @@ impl EmulatorUi {
         };
         let (mut nes, loaded_rom) = load_nes(rom_path.as_ref(), &rom_dirs, audio_sample_rate, Instant::now(), &mut notices);
 
+        let genie_codes: Result<Vec<GameGenieCode>> = args.genie_codes.iter().map(|code| {
+            let res: Result<GameGenieCode> = code.as_str().try_into();
+            res
+        }).collect();
+        let genie_codes = genie_codes?;
+        nes.set_game_genie_codes(genie_codes);
+
         let back_framebuffer = nes.allocate_framebuffer();
         let front_framebuffer = nes.swap_framebuffer(back_framebuffer).unwrap();
         //let framebuffer1 = nes.allocate_framebuffer();
@@ -329,6 +338,14 @@ impl EmulatorUi {
             let blank = ImageData::Color(blank);
             let tex = ctx.load_texture("framebuffer", blank, egui::TextureFilter::Nearest);
             tex
+        };
+
+        let macro_queue = if let Some(library) = &args.macros {
+            let mut macro_queue = macros::read_macro_library_from_file(library, &args.play_macros)?;
+            macro_queue.reverse(); // We'll be playing by popping off the end
+            macro_queue
+        } else {
+            vec![]
         };
 
         let stats = BenchmarkState::new(&nes, Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64));
@@ -355,7 +372,8 @@ impl EmulatorUi {
 
             nes,
 
-            player: None,
+            macro_queue,
+            macro_player: None,
             crc_hook_handle: None,
             shared_crc32: Rc::new(RefCell::new(0)),
 
@@ -537,30 +555,8 @@ impl EmulatorUi {
                         self.notices.push_back(Notice { level, text, timestamp: Instant::now() });
                     }
                     ViewRequest::RunMacro(recording) => {
-                        if let Some(rom) = utils::find_rom(&recording.rom, &self.rom_dirs) {
-                            self.open_binary(rom);
-
-                            if self.crc_hook_handle.is_none() {
-                                self.crc_hook_handle = Some(macros::register_frame_crc_hasher(&mut self.nes, self.shared_crc32.clone()));
-                            }
-                            self.player = Some(MacroPlayer::new(recording, &mut self.nes, self.shared_crc32.clone()));
-
-                            self.set_paused(false);
-                            if let Some(player) = &mut self.player {
-
-                                // TODO: have a generic way of notifying all views
-                                #[cfg(feature="macro-builder")]
-                                self.macro_builder_view.started_playback(&mut self.nes, player);
-
-                                player.update(&mut self.nes);
-
-                                // TODO: have a generic way of notifying all views
-                                #[cfg(feature="macro-builder")]
-                                self.macro_builder_view.playback_update(&mut self.nes, &player);
-                            }
-                        } else {
-                            self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
-                        }
+                        self.macro_queue.clear();
+                        self.macro_queue.push(recording);
                     }
                     ViewRequest::LoadRom(path) => {
                         if let Some(rom) = utils::find_rom(path, &self.rom_dirs) {
@@ -569,13 +565,13 @@ impl EmulatorUi {
 
                             // TODO: have a generic way of notifying all views
                             #[cfg(feature="macro-builder")]
-                            self.macro_builder_view.load_rom_request_finished(true);
+                            self.macro_builder_view.load_rom_request_finished(&mut self.nes, true);
                         } else {
                             self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
 
                             // TODO: have a generic way of notifying all views
                             #[cfg(feature="macro-builder")]
-                            self.macro_builder_view.load_rom_request_finished(false);
+                            self.macro_builder_view.load_rom_request_finished(&mut self.nes, false);
                         }
                     }
                     ViewRequest::InstructionStepIn => {
@@ -590,6 +586,35 @@ impl EmulatorUi {
                 }
             },
             Err(_) => {}
+        }
+
+        if self.macro_player.is_none() {
+            if let Some(next_macro) = self.macro_queue.pop() {
+                if let Some(rom) = utils::find_rom(&next_macro.rom, &self.rom_dirs) {
+                    self.open_binary(rom);
+
+                    if self.crc_hook_handle.is_none() {
+                        self.crc_hook_handle = Some(macros::register_frame_crc_hasher(&mut self.nes, self.shared_crc32.clone()));
+                    }
+                    self.macro_player = Some(MacroPlayer::new(next_macro, &mut self.nes, self.shared_crc32.clone()));
+
+                    self.set_paused(false);
+                    if let Some(macro_player) = &mut self.macro_player {
+
+                        // TODO: have a generic way of notifying all views
+                        #[cfg(feature="macro-builder")]
+                        self.macro_builder_view.started_playback(&mut self.nes, macro_player);
+
+                        macro_player.update(&mut self.nes);
+
+                        // TODO: have a generic way of notifying all views
+                        #[cfg(feature="macro-builder")]
+                        self.macro_builder_view.playback_update(&mut self.nes, macro_player);
+                    }
+                } else {
+                    self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
+                }
+            }
         }
 
         if self.paused == false {
@@ -654,8 +679,8 @@ impl EmulatorUi {
 
                         // See if the macro player was expecting this breakpoint before deciding whether
                         // to pause the emulator
-                        if let Some(player) = &mut self.player {
-                            if !player.check_breakpoint(&mut self.nes) {
+                        if let Some(macro_player) = &mut self.macro_player {
+                            if !macro_player.check_breakpoint(&mut self.nes) {
                                 self.set_paused(true);
                             } else {
                                 println!("Breakpoint was handled my macro player");
@@ -688,11 +713,28 @@ impl EmulatorUi {
                 //}
             }
 
-            if let Some(player) = &mut self.player {
-                player.update(&mut self.nes);
+            if let Some(macro_player) = &mut self.macro_player {
+                macro_player.update(&mut self.nes);
 
                 #[cfg(feature="macro-builder")]
-                self.macro_builder_view.playback_update(&mut self.nes, &player);
+                self.macro_builder_view.playback_update(&mut self.nes, &macro_player);
+
+                if !macro_player.playing() {
+                    if macro_player.all_checks_passed() {
+                        if macro_player.checks_for_failure() {
+                            log::warn!("FAILED (as expected): {}", macro_player.name());
+                        } else {
+                            log::debug!("PASSED: {}", macro_player.name());
+                        }
+                    } else {
+                        if macro_player.checks_for_failure() {
+                            log::warn!("UNKNOWN (didn't hit expected failure): {}", macro_player.name());
+                        } else {
+                            log::error!("FAILED: {}", macro_player.name());
+                        }
+                    }
+                    self.macro_player = None;
+                }
             }
 
             self.stats.end_update(&self.nes);

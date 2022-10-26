@@ -2,7 +2,7 @@ use std::{path::PathBuf, cell::RefCell, rc::Rc, collections::HashMap, str::FromS
 
 use egui::{Vec2, TextEdit, Layout, Align};
 use egui_extras::{TableBuilder, Size};
-use nes_emulator::{port::ControllerButton, hook::HookHandle, nes::Nes};
+use nes_emulator::{port::ControllerButton, hook::HookHandle, nes::Nes, genie::GameGenieCode};
 
 use crate::{macros::{MacroCommand, InputEvent, Macro, MacroWait, MacroPlayer, self}, Args, utils, ui::{EmulatorUi, ViewRequest, ViewRequestSender}};
 
@@ -121,10 +121,26 @@ impl MacroBuilderView {
 
     /// Called in response to each ViewRequest::LoadRom request that's sent
     /// Note: this isn't called in case the user loads a rom via top level File->Open menu
-    pub fn load_rom_request_finished(&mut self, success: bool) {
+    pub fn load_rom_request_finished(&mut self, nes: &mut Nes, success: bool) {
         if self.recording_pending {
             self.recording_pending = false;
             if success {
+                let current_macro = &mut self.library[self.current_macro];
+
+                let genie_codes: Vec<GameGenieCode> = current_macro.genie_codes.iter().filter_map(|c| {
+                    let code: anyhow::Result<GameGenieCode> = c.as_str().try_into();
+                    match code {
+                        Ok(c) => Some(c),
+                        Err(err) => {
+                            log::error!("Ignoring Game Genie Code {c} - {}", err);
+                            None
+                        }
+                    }
+                }).collect();
+
+                log::debug!("Setting game genie codes for recording = {:?}", genie_codes);
+                nes.set_game_genie_codes(genie_codes);
+
                 self.recording = true;
             }
         }
@@ -146,7 +162,7 @@ impl MacroBuilderView {
     }
 
     fn open_macros_library(&mut self, path: PathBuf) {
-        match macros::read_macro_library_from_file(&path) {
+        match macros::read_macro_library_from_file(&path, &vec!["all".to_string()]) {
             Ok(library) => {
                 self.library = library;
                 self.library_path = Some(path);
@@ -239,7 +255,9 @@ impl MacroBuilderView {
         }
     }
 
-    fn start_recording(&mut self, nes: &mut Nes, clear_first: bool) {
+    fn start_recording(&mut self, _nes: &mut Nes, clear_first: bool) {
+        log::debug!("start_recording");
+
         debug_assert_eq!(self.recording, false);
 
         self.last_wait = MacroWait {
@@ -249,7 +267,8 @@ impl MacroBuilderView {
         };
         let current_macro = &mut self.library[self.current_macro];
 
-        nes.power_cycle(Instant::now());
+        // LoadRom request will power on a new Nes and call load_rom_request_finished()
+        //nes.power_cycle(Instant::now());
         if clear_first {
             current_macro.commands.clear();
         } else {
@@ -522,6 +541,29 @@ impl MacroBuilderView {
                                             }
                                         }
                                     }
+                                });
+                            });
+                            ui.separator();
+                            ui.label("Game Genie Codes");
+                            ui.group(|ui| {
+                                ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
+                                    let mut remove_index = None;
+                                    for (i, code) in current_macro.genie_codes.iter_mut().enumerate() {
+                                        ui.horizontal(|ui| {
+                                            ui.text_edit_singleline(code);
+                                            if ui.button("🗑").clicked() {
+                                                remove_index = Some(i);
+                                            }
+                                        });
+                                    }
+                                    if let Some(i) = remove_index {
+                                        current_macro.genie_codes.remove(i);
+                                    }
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Add").clicked() {
+                                            current_macro.genie_codes.push(String::new());
+                                        }
+                                    });
                                 });
                             });
                             ui.separator();

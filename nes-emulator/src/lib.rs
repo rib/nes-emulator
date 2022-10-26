@@ -3,6 +3,7 @@ pub mod utils;
 
 pub mod constants;
 pub mod binary;
+pub mod genie;
 pub mod framebuffer;
 pub mod color;
 pub mod nes;

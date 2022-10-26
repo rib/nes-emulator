@@ -3,6 +3,7 @@
     "name": "instr_test-v5:01-basics",
     "rom": "instr_test-v5\\rom_singles\\01-basics.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -23,6 +24,7 @@
     "name": "instr_test-v5:02-implied.nes",
     "rom": "instr_test-v5\\rom_singles\\02-implied.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -43,6 +45,7 @@
     "name": "instr_test-v5:03-immediate",
     "rom": "instr_test-v5\\rom_singles\\03-immediate.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -63,6 +66,7 @@
     "name": "instr_test-v5:04-zero_page",
     "rom": "instr_test-v5\\rom_singles\\04-zero_page.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -83,6 +87,7 @@
     "name": "instr_test-v5:05-zp_xy",
     "rom": "instr_test-v5\\rom_singles\\05-zp_xy.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -103,6 +108,7 @@
     "name": "instr_test-v5:06-absolute",
     "rom": "instr_test-v5\\rom_singles\\06-absolute.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -123,6 +129,7 @@
     "name": "instr_test-v5:07-abs_xy",
     "rom": "instr_test-v5\\rom_singles\\07-abs_xy.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -143,6 +150,7 @@
     "name": "instr_test-v5:08-ind_x",
     "rom": "instr_test-v5\\rom_singles\\08-ind_x.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -163,6 +171,7 @@
     "name": "instr_test-v5:09-ind_y",
     "rom": "instr_test-v5\\rom_singles\\09-ind_y.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -183,6 +192,7 @@
     "name": "instr_test-v5:10-branches",
     "rom": "instr_test-v5\\rom_singles\\10-branches.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -203,6 +213,7 @@
     "name": "instr_test-v5:11-stack",
     "rom": "instr_test-v5\\rom_singles\\11-stack.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -223,6 +234,7 @@
     "name": "instr_test-v5:12-jmp_jsr",
     "rom": "instr_test-v5\\rom_singles\\12-jmp_jsr.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -243,6 +255,7 @@
     "name": "instr_test-v5:13-rts",
     "rom": "instr_test-v5\\rom_singles\\13-rts.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -263,6 +276,7 @@
     "name": "instr_test-v5:14-rti",
     "rom": "instr_test-v5\\rom_singles\\14-rti.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -283,6 +297,7 @@
     "name": "instr_test-v5:15-brk",
     "rom": "instr_test-v5\\rom_singles\\15-brk.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -303,6 +318,7 @@
     "name": "instr_test-v5:16-special",
     "rom": "instr_test-v5\\rom_singles\\16-special.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -323,6 +339,7 @@
     "name": "cpu_reset:ram_after_reset.",
     "rom": "cpu_reset\\ram_after_reset.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -351,6 +368,7 @@
     "name": "cpu_reset:registers",
     "rom": "cpu_reset\\registers.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [],
     "commands": [
       {
@@ -377,6 +395,7 @@
     "name": "instr_timing:1-instr_timing",
     "rom": "instr_timing\\rom_singles\\1-instr_timing.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -397,6 +416,7 @@
     "name": "instr_timing:2-branch_timing",
     "rom": "instr_timing\\rom_singles\\2-branch_timing.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -417,6 +437,7 @@
     "name": "cpu_dummy_reads",
     "rom": "cpu_dummy_reads\\cpu_dummy_reads.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -437,9 +458,10 @@
     "name": "cpu_dummy_writes:cpu_dummy_writes_oam",
     "rom": "cpu_dummy_writes\\cpu_dummy_writes_oam.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "cpu",
-      "ppu"
+      "ppu",
+      "cpu"
     ],
     "commands": [
       {
@@ -458,6 +480,7 @@
     "name": "cpu_exec_space:test_cpu_exec_space_apu",
     "rom": "cpu_exec_space\\test_cpu_exec_space_apu.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -478,6 +501,7 @@
     "name": "cpu_exec_space:test_cpu_exec_space_ppuio",
     "rom": "cpu_exec_space\\test_cpu_exec_space_ppuio.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -498,6 +522,7 @@
     "name": "ppu_open_bus",
     "rom": "ppu_open_bus\\ppu_open_bus.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -518,6 +543,7 @@
     "name": "ppu_read_buffer:test_ppu_read_buffer",
     "rom": "ppu_read_buffer\\test_ppu_read_buffer.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "test_failure",
       "ppu"
@@ -539,9 +565,10 @@
     "name": "ppu_vbl_nmi",
     "rom": "ppu_vbl_nmi\\ppu_vbl_nmi.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "test_failure",
-      "ppu"
+      "ppu",
+      "test_failure"
     ],
     "commands": [
       {
@@ -560,9 +587,10 @@
     "name": "read_joy3:count_errors",
     "rom": "read_joy3\\count_errors.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "cpu",
-      "dma"
+      "dma",
+      "cpu"
     ],
     "commands": [
       {
@@ -581,6 +609,7 @@
     "name": "read_joy3:count_errors_fast",
     "rom": "read_joy3\\count_errors_fast.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu",
       "dma"
@@ -602,6 +631,7 @@
     "name": "read_joy3:test_buttons",
     "rom": "read_joy3\\test_buttons.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [],
     "commands": [
       {
@@ -876,6 +906,7 @@
     "name": "read_joy3:thorough_test",
     "rom": "read_joy3\\thorough_test.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [],
     "commands": [
       {
@@ -894,16 +925,16 @@
     "name": "scrolltest:scroll",
     "rom": "scrolltest\\scroll.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "test_failure",
       "ppu"
     ],
     "commands": [
       {
         "WaitForDot": {
-          "frame": 52,
-          "line": 140,
-          "dot": 193
+          "frame": 33,
+          "line": 89,
+          "dot": 28
         }
       },
       {
@@ -917,9 +948,9 @@
       },
       {
         "WaitForDot": {
-          "frame": 56,
-          "line": 141,
-          "dot": 318
+          "frame": 38,
+          "line": 88,
+          "dot": 38
         }
       },
       {
@@ -933,9 +964,9 @@
       },
       {
         "WaitForDot": {
-          "frame": 362,
-          "line": 249,
-          "dot": 33
+          "frame": 339,
+          "line": 161,
+          "dot": 199
         }
       },
       {
@@ -949,9 +980,9 @@
       },
       {
         "WaitForDot": {
-          "frame": 366,
-          "line": 249,
-          "dot": 37
+          "frame": 345,
+          "line": 162,
+          "dot": 164
         }
       },
       {
@@ -979,6 +1010,7 @@
     "name": "sprite_hit_tests_2005.10.05:01.basics",
     "rom": "sprite_hit_tests_2005.10.05\\01.basics.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -999,6 +1031,7 @@
     "name": "sprite_hit_tests_2005.10.05:02.alignment",
     "rom": "sprite_hit_tests_2005.10.05\\02.alignment.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1019,6 +1052,7 @@
     "name": "sprite_hit_tests_2005.10.05:03.corners",
     "rom": "sprite_hit_tests_2005.10.05\\03.corners.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [],
     "commands": [
       {
@@ -1037,6 +1071,7 @@
     "name": "sprite_hit_tests_2005.10.05:04.flip",
     "rom": "sprite_hit_tests_2005.10.05\\04.flip.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1057,6 +1092,7 @@
     "name": "sprite_hit_tests_2005.10.05:05.left_clip",
     "rom": "sprite_hit_tests_2005.10.05\\05.left_clip.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1077,6 +1113,7 @@
     "name": "sprite_hit_tests_2005.10.05:06.right_edge",
     "rom": "sprite_hit_tests_2005.10.05\\06.right_edge.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1097,6 +1134,7 @@
     "name": "sprite_hit_tests_2005.10.05:07.screen_bottom",
     "rom": "sprite_hit_tests_2005.10.05\\07.screen_bottom.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1117,6 +1155,7 @@
     "name": "sprite_hit_tests_2005.10.05:08.double_height",
     "rom": "sprite_hit_tests_2005.10.05\\08.double_height.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1137,6 +1176,7 @@
     "name": "sprite_hit_tests_2005.10.05:09.timing_basics",
     "rom": "sprite_hit_tests_2005.10.05\\09.timing_basics.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1157,6 +1197,7 @@
     "name": "sprite_hit_tests_2005.10.05:10.timing_order",
     "rom": "sprite_hit_tests_2005.10.05\\10.timing_order.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1177,6 +1218,7 @@
     "name": "sprite_hit_tests_2005.10.05:11.edge_timing",
     "rom": "sprite_hit_tests_2005.10.05\\11.edge_timing.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1197,6 +1239,7 @@
     "name": "sprite_overflow_tests:1.Basics",
     "rom": "sprite_overflow_tests\\1.Basics.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1217,6 +1260,7 @@
     "name": "sprite_overflow_tests:2.Details",
     "rom": "sprite_overflow_tests\\2.Details.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1237,6 +1281,7 @@
     "name": "sprite_overflow_tests:3.Timing",
     "rom": "sprite_overflow_tests\\3.Timing.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1257,6 +1302,7 @@
     "name": "sprite_overflow_tests:4.Obscure",
     "rom": "sprite_overflow_tests\\4.Obscure.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1277,6 +1323,7 @@
     "name": "sprite_overflow_tests:5.Emulator",
     "rom": "sprite_overflow_tests\\5.Emulator.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1297,6 +1344,7 @@
     "name": "sprdma_and_dmc_dma",
     "rom": "sprdma_and_dmc_dma\\sprdma_and_dmc_dma.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "test_failure",
       "ppu"
@@ -1318,9 +1366,10 @@
     "name": "sprdma_and_dmc_dma:sprdma_and_dmc_dma_512",
     "rom": "sprdma_and_dmc_dma\\sprdma_and_dmc_dma_512.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "test_failure",
-      "ppu"
+      "ppu",
+      "test_failure"
     ],
     "commands": [
       {
@@ -1339,6 +1388,7 @@
     "name": "branch_timing_tests:1.Branch_Basics",
     "rom": "branch_timing_tests\\1.Branch_Basics.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1359,6 +1409,7 @@
     "name": "branch_timing_tests:2.Backward_Branch",
     "rom": "branch_timing_tests\\2.Backward_Branch.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1379,6 +1430,7 @@
     "name": "branch_timing_tests:3.Forward_Branch",
     "rom": "branch_timing_tests\\3.Forward_Branch.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1399,6 +1451,7 @@
     "name": "oam_read",
     "rom": "oam_read\\oam_read.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "input",
       "ppu"
@@ -1420,6 +1473,7 @@
     "name": "oam_stress",
     "rom": "oam_stress\\oam_stress.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1440,6 +1494,7 @@
     "name": "mmc3_test_2:1-clocking",
     "rom": "mmc3_test_2\\rom_singles\\1-clocking.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "mapper"
     ],
@@ -1460,6 +1515,7 @@
     "name": "mmc3_test_2:2-details",
     "rom": "mmc3_test_2\\rom_singles\\2-details.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "mapper"
     ],
@@ -1480,6 +1536,7 @@
     "name": "mmc3_test_2:3-A12_clocking",
     "rom": "mmc3_test_2\\rom_singles\\3-A12_clocking.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "mapper"
     ],
@@ -1500,9 +1557,10 @@
     "name": "mmc3_test_2:4-scanline_timing",
     "rom": "mmc3_test_2\\rom_singles\\4-scanline_timing.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "test_failure",
-      "mapper"
+      "mapper",
+      "test_failure"
     ],
     "commands": [
       {
@@ -1521,6 +1579,7 @@
     "name": "mmc3_test_2:5-MMC3",
     "rom": "mmc3_test_2\\rom_singles\\5-MMC3.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "mapper"
     ],
@@ -1541,9 +1600,10 @@
     "name": "mmc3_test_2:6-MMC3_alt",
     "rom": "mmc3_test_2\\rom_singles\\6-MMC3_alt.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "test_failure",
-      "mapper"
+      "mapper",
+      "test_failure"
     ],
     "commands": [
       {
@@ -1562,6 +1622,7 @@
     "name": "nes_instr_test:01-implied",
     "rom": "nes_instr_test\\rom_singles\\01-implied.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1582,6 +1643,7 @@
     "name": "nes_instr_test:02-immediate",
     "rom": "nes_instr_test\\rom_singles\\02-immediate.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1602,6 +1664,7 @@
     "name": "nes_instr_test:03-zero_page",
     "rom": "nes_instr_test\\rom_singles\\03-zero_page.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1622,6 +1685,7 @@
     "name": "nes_instr_test:04-zp_xy",
     "rom": "nes_instr_test\\rom_singles\\04-zp_xy.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1642,6 +1706,7 @@
     "name": "nes_instr_test:05-absolute",
     "rom": "nes_instr_test\\rom_singles\\05-absolute.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1662,6 +1727,7 @@
     "name": "nes_instr_test:06-abs_xy",
     "rom": "nes_instr_test\\rom_singles\\06-abs_xy.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1682,6 +1748,7 @@
     "name": "nes_instr_test:07-ind_x",
     "rom": "nes_instr_test\\rom_singles\\07-ind_x.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1702,6 +1769,7 @@
     "name": "nes_instr_test:08-ind_y",
     "rom": "nes_instr_test\\rom_singles\\08-ind_y.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1722,6 +1790,7 @@
     "name": "nes_instr_test:09-branches",
     "rom": "nes_instr_test\\rom_singles\\09-branches.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1742,6 +1811,7 @@
     "name": "nes_instr_test:10-stack",
     "rom": "nes_instr_test\\rom_singles\\10-stack.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1762,6 +1832,7 @@
     "name": "nes_instr_test:11-special",
     "rom": "nes_instr_test\\rom_singles\\11-special.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1782,6 +1853,7 @@
     "name": "cpu_interrupts_v2:1-cli_latency",
     "rom": "cpu_interrupts_v2\\rom_singles\\1-cli_latency.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1802,6 +1874,7 @@
     "name": "cpu_interrupts_v2:2-nmi_and_brk",
     "rom": "cpu_interrupts_v2\\rom_singles\\2-nmi_and_brk.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1822,9 +1895,10 @@
     "name": "cpu_interrupts_v2:3-nmi_and_irq",
     "rom": "cpu_interrupts_v2\\rom_singles\\3-nmi_and_irq.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "cpu",
-      "test_failure"
+      "test_failure",
+      "cpu"
     ],
     "commands": [
       {
@@ -1843,10 +1917,11 @@
     "name": "cpu_interrupts_v2:4-irq_and_dma",
     "rom": "cpu_interrupts_v2\\rom_singles\\4-irq_and_dma.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "test_failure",
-      "cpu",
-      "dma"
+      "dma",
+      "cpu"
     ],
     "commands": [
       {
@@ -1865,6 +1940,7 @@
     "name": "cpu_interrupts_v2:5-branch_delays_irq",
     "rom": "cpu_interrupts_v2\\rom_singles\\5-branch_delays_irq.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu",
       "test_failure"
@@ -1886,6 +1962,7 @@
     "name": "instr_misc:01-abs_x_wrap",
     "rom": "instr_misc\\rom_singles\\01-abs_x_wrap.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1906,6 +1983,7 @@
     "name": "instr_misc:02-branch_wrap",
     "rom": "instr_misc\\rom_singles\\02-branch_wrap.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1926,6 +2004,7 @@
     "name": "instr_misc:03-dummy_reads",
     "rom": "instr_misc\\rom_singles\\03-dummy_reads.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "cpu"
     ],
@@ -1946,9 +2025,10 @@
     "name": "instr_misc:04-dummy_reads_apu",
     "rom": "instr_misc\\rom_singles\\04-dummy_reads_apu.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
-      "apu",
-      "cpu"
+      "cpu",
+      "apu"
     ],
     "commands": [
       {
@@ -1967,6 +2047,7 @@
     "name": "blargg_ppu_tests_2005.09.15b:palette_ram",
     "rom": "blargg_ppu_tests_2005.09.15b\\palette_ram.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -1987,6 +2068,7 @@
     "name": "blargg_ppu_tests_2005.09.15b:sprite_ram",
     "rom": "blargg_ppu_tests_2005.09.15b\\sprite_ram.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],
@@ -2007,6 +2089,7 @@
     "name": "blargg_ppu_tests_2005.09.15b:vbl_clear_time",
     "rom": "blargg_ppu_tests_2005.09.15b\\vbl_clear_time.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "test_failure",
       "ppu"
@@ -2028,6 +2111,7 @@
     "name": "blargg_ppu_tests_2005.09.15b:vram_access",
     "rom": "blargg_ppu_tests_2005.09.15b\\vram_access.nes",
     "notes": "",
+    "genie_codes": [],
     "tags": [
       "ppu"
     ],

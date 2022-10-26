@@ -91,9 +91,8 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
 
     let mut macro_player = None;
 
-    let mut macro_queue = macros::read_macro_library_from_file(library)?;
+    let mut macro_queue = macros::read_macro_library_from_file(library, &args.play_macros)?;
     macro_queue.reverse(); // We'll be playing by popping off the end
-
 
     loop {
         if macro_player.is_none() {
@@ -113,8 +112,6 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
                     //panic!("{}", err);
                 }));
                 macro_player = Some(player);
-
-
             } else {
                 log::debug!("Macro queue empty");
                 break;
