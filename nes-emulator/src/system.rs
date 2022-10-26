@@ -148,7 +148,7 @@ impl System {
 
             debug: NoCloneDebugState {
                 #[cfg(feature="ppu-sim")]
-                ppu_sim_as_main: false,
+                ppu_sim_as_main: true,
                 #[cfg(feature="ppu-sim")]
                 ppu_sim,
                 #[cfg(feature="ppu-sim")]
@@ -427,10 +427,17 @@ impl System {
                 let sim_value = self.debug.ppu_sim.data_bus;
 
                 if value & valid_bits == sim_value & valid_bits {
-                    println!("sys read 0x{addr:04x} = 0x{value:02x}");
+                    //println!("sys read 0x{addr:04x} = 0x{value:02x}");
                 } else {
+                    let sim_registers = self.debug.ppu_sim.debug_read_registers();
+                    let sim_wires = self.debug.ppu_sim.debug_read_wires();
+
                     log::error!("Mis-matching sys read 0x{addr:04x} = 0x{value:02x}, sim val = 0x{sim_value:02x}, dot={}, line={}", self.ppu.dot, self.ppu.line);
+                    log::error!("Sim registers = {sim_registers:?}");
+                    log::error!("Sim wires = {sim_wires:?}");
                     println!("Mis-matching sys read 0x{addr:04x} = 0x{value:02x}, sim val = 0x{sim_value:02x}, dot={}, line={}", self.ppu.dot, self.ppu.line);
+                    println!("Sim registers = {sim_registers:?}");
+                    println!("Sim wires = {sim_wires:?}");
                 }
 
                 let sim_registers = self.debug.ppu_sim.debug_read_registers();
@@ -556,6 +563,7 @@ impl System {
                         log::error!("PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.oam_offset, sim_registers.MainOAMCounter);
                         println!("PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.oam_offset, sim_registers.MainOAMCounter);
                     }
+                    println!("CPU: write ${addr:04x} = {data:02x}");
                 }
 
                 self.ppu.system_bus_write(&mut self.cartridge, addr, data);
@@ -605,7 +613,6 @@ impl System {
                 log::error!("PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control2.bits(), sim_registers.CTRL1);
                 println!("PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control2.bits(), sim_registers.CTRL1);
             }
-
         }
     }
 

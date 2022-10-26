@@ -200,7 +200,8 @@ pub struct PpuSim {
     outputs: [u8; ffi::PPUSim_OutputPad_Max as usize],
     wires: ffi::PPUSim_PPU_Interconnects,
     //registers: ffi::PPUSim_PPU_Registers,
-    pub nmi_interrupt_raised: bool
+    pub nmi_interrupt_raised: bool,
+    pub prev_nmi_interrupt_raised: bool,
 }
 
 
@@ -289,6 +290,7 @@ impl PpuSim {
             expected_reads: VecDeque::new(),
 
             nmi_interrupt_raised: false,
+            prev_nmi_interrupt_raised: false,
         };
 
         sim.set_raw_output(true);
@@ -531,12 +533,16 @@ impl PpuSim {
             interrupt_neg = TriState::One;
         }
         self.nmi_interrupt_raised = interrupt_neg == TriState::Zero;
+        if self.nmi_interrupt_raised && self.prev_nmi_interrupt_raised == false {
+            println!("SIM NMI raise at line = {}, dot = {}", self.v_counter(), self.h_counter());
+        }
+        self.prev_nmi_interrupt_raised = self.nmi_interrupt_raised;
 
         let pclk = self.pclk();
         self.wires = self.debug_read_wires();
 
         let registers = self.debug_read_registers();
-        println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
+        //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
         // To save pins, the PPU multiplexes the lower eight VRAM address pins,
         // also using them as the VRAM data pins. This leads to each VRAM access
         // taking two PPU cycles:
@@ -567,8 +573,8 @@ impl PpuSim {
         }
 
         //let registers = self.debug_read_registers();
-        //println!("clk = {}, pclk = {} ale = {:?}, /rd = {:?}, /wr = {:?}, pclk = {}, regs = {:?}",
-        //         self.wires.CLK, self.wires.PCLK, address_latch_enable, read_neg, write_neg, self.pclk(), registers);
+        //println!("clk = {}, pclk = {} ale = {:?}, /rd = {:?}, /wr = {:?}, /int = {:?}, VBL = {:?}, pclk = {}, regs = {:?}",
+        //         self.wires.CLK, self.wires.PCLK, address_latch_enable, read_neg, write_neg, interrupt_neg, self.wires.VBL, self.pclk(), registers);
 
         //let wires = self.debug_read_wires();
         //println!("clk = {}, /clk = {}, pclk = {} /pclk = {}, ale = {:?}, /rd = {:?}, /wr = {:?}, /int = {:?}, pclk = {}",
@@ -672,17 +678,27 @@ fn ppu_sim_step() {
 
     //ppu.debug_set_control_register(0);
     ppu.debug_set_mask_register(0b0001_1110); // show bg + sprites + left col
+    ppu.debug_set_control_register(0b1000_0000); // generate NMI
 
-    for i in 0..2 {
+    let mut nmi_prev = false;
+    for i in 0..4 {
         for line in 0..261 {
             //println!("line = {line}");
             for dot in 0..341 {
-                if dot == line {
-                    println!("Frame {i}, line = {line}, dot = {dot} regs = {:?}", ppu.debug_read_registers());
-                }
+                //if dot == line {
+                //    println!("Frame {i}, line = {line}, dot = {dot} regs = {:?}", ppu.debug_read_registers());
+                //}
                 for i in 0..(clk_per_pclk * 2) {
                     ppu.step_half(&mut cartridge);
                 }
+                if ppu.nmi_interrupt_raised && nmi_prev == false {
+                    println!("SIM Frame {i}, NMI raised at line = {line}, dot = {dot}");
+                }
+                nmi_prev = ppu.nmi_interrupt_raised;
+                //let wires = ppu.debug_read_wires();
+                //if wires.VBL != 0 {
+                //    panic!("SIM VBLANK");
+                //}
             }
         }
     }
