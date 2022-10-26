@@ -1,23 +1,23 @@
+use super::channel::dmc_channel::DmcChannel;
+use super::channel::noise_channel::NoiseChannel;
+use super::channel::triangle_channel::TriangleChannel;
 use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
 use crate::apu::channel::square_channel::SquareChannel;
+use crate::apu::mixer::Mixer;
 use crate::constants::CPU_START_CYCLE;
 use crate::system::{DmcDmaRequest, Model};
 use crate::trace::TraceBuffer;
-use super::channel::triangle_channel::TriangleChannel;
-use super::channel::noise_channel::NoiseChannel;
-use super::channel::dmc_channel::DmcChannel;
-use crate::apu::mixer::Mixer;
 
-#[cfg(feature="trace-events")]
+#[cfg(feature = "trace-events")]
 use crate::trace::TraceEvent;
 
 /// Debugger state attached to an APU instance that won't be cloned if the APU
 /// is cloned, and some debug state may be partially preserved through a power cycle
 #[derive(Default)]
 pub struct NoCloneDebugState {
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     pub trace_events_current: TraceBuffer,
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     pub trace_events_prev: TraceBuffer,
 }
 impl Clone for NoCloneDebugState {
@@ -55,17 +55,20 @@ impl Apu {
             output_step,
             frame_sequencer: FrameSequencer::new(clock),
             square_channel1: SquareChannel::new(nes_model, "Square 1".to_string(), false),
-            square_channel2: SquareChannel::new(nes_model, "Square 2".to_string(), true /* two's compliment sweep negate */),
+            square_channel2: SquareChannel::new(
+                nes_model,
+                "Square 2".to_string(),
+                true, /* two's compliment sweep negate */
+            ),
             triangle_channel: TriangleChannel::new(nes_model),
             noise_channel: NoiseChannel::new(),
             dmc_channel: DmcChannel::new(nes_model),
             mixer: Mixer::new(),
-            ..Default::default()
-            /*
-            clock: 0,
-            sample_buffer: vec![],
-            output_timer: 0,
-            */
+            ..Default::default() /*
+                                 clock: 0,
+                                 sample_buffer: vec![],
+                                 output_timer: 0,
+                                 */
         }
     }
 
@@ -81,7 +84,7 @@ impl Apu {
         self.mixer.power_cycle();
         self.output_timer = 0;
 
-        #[cfg(feature="trace-events")]
+        #[cfg(feature = "trace-events")]
         {
             self.debug.trace_events_current.clear();
             self.debug.trace_events_prev.clear();
@@ -90,8 +93,7 @@ impl Apu {
         // Keep output_step
     }
 
-    pub fn reset(&mut self)
-    {
+    pub fn reset(&mut self) {
         // "Power-up and reset have the effect of writing $00, silencing all channels."
         self.write(0x4015, 0);
 
@@ -104,33 +106,38 @@ impl Apu {
     /// This is a debug mechanism for being able to track mid-frame events which a
     /// debug tool can plot onto an expanded (341 x 262) framebuffer view covering
     /// the full dot clock range for a frame
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     #[inline(always)]
     pub fn trace(&mut self, event: TraceEvent) {
         self.debug.trace_events_current.push(event);
     }
 
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     #[inline(always)]
     pub fn trace_cpu_clock_line_sync(&mut self, cpu_clock: u64, new_frame: bool) {
         debug_assert_eq!(cpu_clock, self.clock);
         if new_frame {
-            std::mem::swap(&mut self.debug.trace_events_current, &mut self.debug.trace_events_prev);
+            std::mem::swap(
+                &mut self.debug.trace_events_current,
+                &mut self.debug.trace_events_prev,
+            );
             self.debug.trace_events_current.clear();
         }
-        self.trace(TraceEvent::CpuClockLineSync { cpu_clk: cpu_clock } );
+        self.trace(TraceEvent::CpuClockLineSync { cpu_clk: cpu_clock });
     }
 
     // NB: we clock the APU with the CPU clock but many aspects of the APU
     // are only clocked every other CPU cycle
-    pub fn step(&mut self)  -> Option<DmcDmaRequest> {
+    pub fn step(&mut self) -> Option<DmcDmaRequest> {
         self.output_timer += 1;
 
         //println!("APU step: {}", apu_clock);
 
         let dma_request = self.dmc_channel.step_dma_reader();
 
-        let frame_sequencer_output = self.frame_sequencer.step(self.clock, &mut self.debug.trace_events_current);
+        let frame_sequencer_output = self
+            .frame_sequencer
+            .step(self.clock, &mut self.debug.trace_events_current);
         if !frame_sequencer_output.is_empty() {
             //println!("frame sequencer output = {:?}, clock = {}", frame_sequencer_output, self.clock);
             debug_assert!(self.clock % 2 == 1);
@@ -199,7 +206,8 @@ impl Apu {
             0x4008..=0x400b => self.triangle_channel.write(address, value),
             0x400c..=0x400f => self.noise_channel.write(address, value),
             0x4010..=0x4013 => self.dmc_channel.write(address, value),
-            0x4015 => { // Status/Control
+            0x4015 => {
+                // Status/Control
 
                 // "Writing to this register clears the DMC interrupt flag."
                 // Note: the interrupt is cleared before possibly enabling DMC because
@@ -216,43 +224,84 @@ impl Apu {
                 self.dmc_channel.set_enabled(value & 0b0001_0000 != 0);
 
                 //self.dmc_channel.length_counter.set_enabled(value & 0b0001_0000 != 1);
-                self.noise_channel.length_counter.set_enabled((value & 0b0000_1000) != 0);
-                self.triangle_channel.length_counter.set_enabled((value & 0b0000_0100) != 0);
+                self.noise_channel
+                    .length_counter
+                    .set_enabled((value & 0b0000_1000) != 0);
+                self.triangle_channel
+                    .length_counter
+                    .set_enabled((value & 0b0000_0100) != 0);
 
                 //if (value & 0b0000_0010) != 0 {
                 //    println!("Square channel 2 length counter enabled");
                 //}
-                self.square_channel2.length_counter.set_enabled((value & 0b0000_0010) != 0);
+                self.square_channel2
+                    .length_counter
+                    .set_enabled((value & 0b0000_0010) != 0);
 
                 //if (value & 0b0000_0001) != 0 {
                 //    println!("Square channel 1 length counter enabled");
                 //}
-                self.square_channel1.length_counter.set_enabled((value & 0b0000_0001) != 0);
+                self.square_channel1
+                    .length_counter
+                    .set_enabled((value & 0b0000_0001) != 0);
             }
             0x4017 => {
                 //println!("Calling frame_sequencer.write_register({value:x})");
                 self.frame_sequencer.write_register(value)
-            },
+            }
             _ => {}
         }
-
     }
 
     fn read_4015_status(&self) -> (u8, u8) {
         // IF-D NT21	DMC interrupt (I), frame interrupt (F), DMC active (D), length counter > 0 (N/T/2/1)
 
-        let dmc_interrupt = if self.dmc_channel.interrupt_flagged { 0b1000_0000} else { 0u8 };
-        let frame_interrupt = if self.frame_sequencer.interrupt_flagged { 0b0100_0000} else { 0u8 };
+        let dmc_interrupt = if self.dmc_channel.interrupt_flagged {
+            0b1000_0000
+        } else {
+            0u8
+        };
+        let frame_interrupt = if self.frame_sequencer.interrupt_flagged {
+            0b0100_0000
+        } else {
+            0u8
+        };
 
         // "D will read as 1 if the DMC bytes remaining is more than 0."
-        let dmc_active = if self.dmc_channel.is_active() { 0b0001_0000 } else { 0u8 };
+        let dmc_active = if self.dmc_channel.is_active() {
+            0b0001_0000
+        } else {
+            0u8
+        };
 
-        let noise_has_len = if self.noise_channel.length() > 0 { 0b0000_1000 } else { 0u8 };
-        let triangle_has_len = if self.triangle_channel.length() > 0 { 0b0000_0100 } else { 0u8 };
-        let square2_has_len = if self.square_channel2.length() > 0 { 0b0000_0010 } else { 0u8 };
-        let square1_has_len = if self.square_channel1.length() > 0 { 0b0000_0001 } else { 0u8 };
+        let noise_has_len = if self.noise_channel.length() > 0 {
+            0b0000_1000
+        } else {
+            0u8
+        };
+        let triangle_has_len = if self.triangle_channel.length() > 0 {
+            0b0000_0100
+        } else {
+            0u8
+        };
+        let square2_has_len = if self.square_channel2.length() > 0 {
+            0b0000_0010
+        } else {
+            0u8
+        };
+        let square1_has_len = if self.square_channel1.length() > 0 {
+            0b0000_0001
+        } else {
+            0u8
+        };
 
-        let value = dmc_interrupt | frame_interrupt | dmc_active | noise_has_len | triangle_has_len | square2_has_len | square1_has_len;
+        let value = dmc_interrupt
+            | frame_interrupt
+            | dmc_active
+            | noise_has_len
+            | triangle_has_len
+            | square2_has_len
+            | square1_has_len;
 
         //println!("$4015 read = {value:08b}");
         (value, 0b0010_0000)
@@ -261,7 +310,8 @@ impl Apu {
     // Returns: (value, undefined_bits)
     pub fn read(&mut self, address: u16) -> (u8, u8) {
         match address {
-            0x4015 => { // Status
+            0x4015 => {
+                // Status
                 // "Reading this register clears the frame interrupt flag (but not the DMC interrupt flag)."
                 // TODO: "If an interrupt flag was set at the same moment of the read, it will read back as 1 but it will not be cleared"
 
@@ -270,7 +320,7 @@ impl Apu {
                 self.frame_sequencer.clear_irq();
                 status
             }
-            _ => (0, 0xff )
+            _ => (0, 0xff),
         }
     }
 
@@ -278,7 +328,7 @@ impl Apu {
     pub fn peek(&mut self, address: u16) -> (u8, u8) {
         match address {
             0x4015 => self.read_4015_status(),
-            _ => (0, 0xff )
+            _ => (0, 0xff),
         }
     }
 }

@@ -1,26 +1,26 @@
 use std::ops::Index;
 use std::ops::IndexMut;
 
-use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::Result;
 //use bitvec::BitArr;
 
+use crate::cartridge::Cartridge;
 use crate::color::Color32;
 use crate::constants::FRAME_HEIGHT;
 use crate::constants::FRAME_WIDTH;
+use crate::framebuffer::Framebuffer;
+use crate::framebuffer::FramebufferDataRental;
 use crate::framebuffer::PixelFormat;
+use crate::hook::{HookHandle, HooksList};
 use crate::ppu_palette::rgb_lut;
 use crate::ppu_registers::Control1Flags;
 use crate::ppu_registers::Control2Flags;
 use crate::ppu_registers::StatusFlags;
-use crate::cartridge::Cartridge;
-use crate::framebuffer::Framebuffer;
-use crate::framebuffer::FramebufferDataRental;
-use crate::hook::{HooksList, HookHandle};
 use crate::system::Model;
 
 use crate::trace::TraceBuffer;
-#[cfg(feature="trace-events")]
+#[cfg(feature = "trace-events")]
 use crate::trace::TraceEvent;
 
 //pub const CPU_CYCLE_PER_LINE: usize = 341 / 3; // ppu cyc -> cpu cyc
@@ -32,9 +32,9 @@ pub const N_LINES: u16 = 262;
 pub const DOTS_PER_LINE: u16 = 341;
 pub const NAMETABLE_PIXELS_PER_TILE: u16 = 8; // 1tile=8*8
 pub const NAMETABLE_X_TILES_COUNT: u16 = (FRAME_WIDTH as u16) / NAMETABLE_PIXELS_PER_TILE; // 256/8=32
-//pub const NAMETABLE_Y_TILES_COUNT: u16 = (FRAME_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
-//pub const BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY: u16 = 4;
-//pub const ATTRIBUTE_TABLE_WIDTH: u16 = NAMETABLE_X_TILES_COUNT / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
+                                                                                           //pub const NAMETABLE_Y_TILES_COUNT: u16 = (FRAME_HEIGHT as u16) / PIXEL_PER_TILE; // 240/8=30
+                                                                                           //pub const BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY: u16 = 4;
+                                                                                           //pub const ATTRIBUTE_TABLE_WIDTH: u16 = NAMETABLE_X_TILES_COUNT / BG_NUM_OF_TILE_PER_ATTRIBUTE_TABLE_ENTRY;
 
 const VT_HORIZONTAL_SCROLL_BITS_MASK: u16 = 0b0000_0100_0001_1111;
 const VT_VERTICAL_SCROLL_BITS_MASK: u16 = 0b0111_1011_1110_0000;
@@ -68,15 +68,15 @@ pub const PALETTE_SPRITE_OFFSET: u16 = 0x10;
 const FRAMEBUFFER_BPP: isize = 4;
 const FRAMEBUFFER_STRIDE: isize = FRAME_WIDTH as isize * FRAMEBUFFER_BPP;
 
-
 /// Closure type for the callback when a breakpoint is hit
-pub type FnDotBreakpointCallback = dyn FnMut(&mut Ppu, u32, u16, u16) -> DotBreakpointCallbackAction;
+pub type FnDotBreakpointCallback =
+    dyn FnMut(&mut Ppu, u32, u16, u16) -> DotBreakpointCallbackAction;
 
 /// Determines whether a breakpoint should be kept or removed after being hit
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DotBreakpointCallbackAction {
     Keep,
-    Remove
+    Remove,
 }
 
 /// A unique handle for a registered breakpoint that can be used to remove the breakpoint
@@ -88,7 +88,7 @@ pub(super) struct DotBreakpoint {
     pub(super) frame: Option<u32>,
     pub(super) line: Option<u16>,
     pub(super) dot: u16,
-    pub(super) callback: Box<FnDotBreakpointCallback>
+    pub(super) callback: Box<FnDotBreakpointCallback>,
 }
 
 /// Debugger state attached to a PPU instance that won't be
@@ -96,25 +96,25 @@ pub(super) struct DotBreakpoint {
 /// a power cycle
 #[derive(Default)]
 pub struct NoCloneDebugState {
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub last_cartridge_read: Option<(u16, u8, u16, u16)>,
 
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub(super) next_breakpoint_handle: u32,
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub(super) breakpoints: Vec<DotBreakpoint>,
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub breakpoint_hit: bool,
 
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     pub trace_events_current: TraceBuffer,
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     pub trace_events_prev: TraceBuffer,
 
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     mux_hooks: HooksList<FnMuxHook>,
 
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     dot_hooks: Vec<[HooksList<FnDotHook>; 341]>,
 }
 impl Clone for NoCloneDebugState {
@@ -128,7 +128,7 @@ pub enum MuxDecision {
     Sprite,
     Background,
     PaletteHackBackground,
-    UniversalBackground
+    UniversalBackground,
 }
 impl Default for MuxDecision {
     fn default() -> Self {
@@ -203,10 +203,8 @@ pub struct MuxHookState {
 //type LineHookMask = BitArr!(for 262);
 //type DotHookMask = BitArr!(for 341);
 
-
 pub type FnDotHook = dyn FnMut(&mut Ppu, &mut Cartridge);
 pub type FnMuxHook = dyn FnMut(&mut Ppu, &mut Cartridge, &MuxHookState);
-
 
 #[derive(Copy, Clone)]
 pub struct Position(pub u8, pub u8);
@@ -244,21 +242,27 @@ pub enum SpriteEvalState {
     #[default]
     Copying,
     LookingForOverflow,
-    Done
+    Done,
 }
 
 /// Newtype for 256 byte array so we can impl Default
 #[derive(Clone)]
 pub struct Arr256([u8; 256]);
 impl Default for Arr256 {
-    fn default() -> Self { Self([0u8; 256]) }
+    fn default() -> Self {
+        Self([0u8; 256])
+    }
 }
 impl Index<usize> for Arr256 {
     type Output = u8;
-    fn index(&self, index: usize) -> &Self::Output { self.0.index(index) }
+    fn index(&self, index: usize) -> &Self::Output {
+        self.0.index(index)
+    }
 }
 impl IndexMut<usize> for Arr256 {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output { self.0.index_mut(index) }
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.0.index_mut(index)
+    }
 }
 impl Arr256 {
     pub unsafe fn get_unchecked(&self, index: usize) -> &u8 {
@@ -425,11 +429,10 @@ pub struct Ppu {
 }
 
 impl Ppu {
-
     pub fn new(nes_model: Model) -> Self {
         let clock_hz = match nes_model {
             Model::Ntsc => 5369318, // +- 10Hz
-            Model::Pal => 4295454, // more like 4295454.4 +- 10Hz
+            Model::Pal => 4295454,  // more like 4295454.4 +- 10Hz
         };
 
         // For now we have a conservative decay rate for the IO bus latch which will
@@ -494,7 +497,9 @@ impl Ppu {
             self.framebuffer = rental;
             Ok(old)
         } else {
-            Err(anyhow!("Failed to rent access to framebuffer data for rendering"))
+            Err(anyhow!(
+                "Failed to rent access to framebuffer data for rendering"
+            ))
         }
     }
 
@@ -503,25 +508,35 @@ impl Ppu {
     /// This is a debug mechanism for being able to track mid-frame events which a
     /// debug tool can plot onto an expanded (341 x 262) framebuffer view covering
     /// the full dot clock range for a frame
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     #[inline(always)]
     pub fn trace(&mut self, event: TraceEvent) {
         self.debug.trace_events_current.push(event);
     }
 
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     #[inline(always)]
     pub fn trace_start_of_line(&mut self, cpu_clock: u64, new_frame: bool) {
         if new_frame {
-            std::mem::swap(&mut self.debug.trace_events_current, &mut self.debug.trace_events_prev);
+            std::mem::swap(
+                &mut self.debug.trace_events_current,
+                &mut self.debug.trace_events_prev,
+            );
             self.debug.trace_events_current.clear();
         }
-        self.trace(TraceEvent::PpuCpuLineSync { cpu_clk: cpu_clock, ppu_clk: self.clock, line: self.line });
+        self.trace(TraceEvent::PpuCpuLineSync {
+            cpu_clk: cpu_clock,
+            ppu_clk: self.clock,
+            line: self.line,
+        });
     }
 
     #[inline(always)]
     fn is_rendering(&self) -> bool {
-        matches!(self.line_status, LineStatus::Visible | LineStatus::PreRender) && self.rendering_enabled
+        matches!(
+            self.line_status,
+            LineStatus::Visible | LineStatus::PreRender
+        ) && self.rendering_enabled
     }
 
     /// .....BGR
@@ -593,7 +608,8 @@ impl Ppu {
     ///
     /// Returns (value, undefined_bit_mask)
     fn buffered_ppu_data_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
-        if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
+        if let 0x3f00..=0x3fff = addr {
+            // Pallet reads bypass buffering
             self.read_buffer = cartridge.vram_read(addr);
             (self.palette_read(addr), 0xc0)
         } else {
@@ -605,7 +621,8 @@ impl Ppu {
 
     /// Peek what a buffered ppu data read (via $2007) would fetch without any side effects
     pub fn buffered_ppu_data_peek(&mut self, _cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
-        if let 0x3f00..=0x3fff = addr { // Pallet reads bypass buffering
+        if let 0x3f00..=0x3fff = addr {
+            // Pallet reads bypass buffering
             (self.palette_read(addr), 0xc0)
         } else {
             (self.read_buffer, 0)
@@ -629,11 +646,11 @@ impl Ppu {
         let value = if let 0x3f00..=0x3fff = addr {
             self.palette_read(addr)
         } else {
-            let value= cartridge.vram_read(addr);
+            let value = cartridge.vram_read(addr);
 
             // So we can do a running comparison of what the emulated PPU reads vs
             // what the simulated PPU reads we trace each read operation
-            #[cfg(feature="ppu-sim")]
+            #[cfg(feature = "ppu-sim")]
             {
                 self.debug.last_cartridge_read = Some((addr, value, self.dot, self.line));
             }
@@ -654,7 +671,6 @@ impl Ppu {
     }
 
     pub fn increment_data_addr(&mut self, cartridge: &mut Cartridge) {
-
         // nesdev:
         //
         // "Outside of rendering, reads from or writes to $2007 will add either
@@ -670,7 +686,9 @@ impl Ppu {
         // inputs are set up to linearly increment v by either 1 or 32)"
 
         if !self.is_rendering() {
-            self.shared_v_register = self.shared_v_register.wrapping_add(self.address_increment());
+            self.shared_v_register = self
+                .shared_v_register
+                .wrapping_add(self.address_increment());
 
             // "During VBlank and when rendering is disabled, the value on
             // the PPU address bus is the current value of the v register."
@@ -745,14 +763,17 @@ impl Ppu {
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         match addr {
-            0x2000 => { // Control (Write-only)
+            0x2000 => {
+                // Control (Write-only)
                 (0, 0xff)
             }
-            0x2001 => {  // Mask (Write-only)
+            0x2001 => {
+                // Mask (Write-only)
                 (0, 0xff)
             }
             // PPU_STATUS (read-only) Resets double-write register status, clears VBLANK flag
-            0x2002 => { // Status (Read-only)
+            0x2002 => {
+                // Status (Read-only)
                 let data = self.status.bits();
                 self.shared_w_toggle = false;
                 //self.ppu_is_second_write = false;
@@ -760,24 +781,30 @@ impl Ppu {
                 //println!("Clear IN_VBLANK flag (status read)");
                 (data, StatusFlags::UNDEFINED_BITS.bits())
             }
-            0x2003 => { // OAMADDR (Write-only)
+            0x2003 => {
+                // OAMADDR (Write-only)
                 (0, 0xff)
             }
-            0x2004 => { // OAMDATA (Read/Write)
+            0x2004 => {
+                // OAMDATA (Read/Write)
                 (self.read_oam_data_register(), 0x0)
             }
-            0x2005 => { // PPU_SCROLL (Write-only)
+            0x2005 => {
+                // PPU_SCROLL (Write-only)
                 (0, 0xff)
             }
-            0x2006 => { // PPU_ADDR (Write-only)
+            0x2006 => {
+                // PPU_ADDR (Write-only)
                 (0, 0xff)
             }
-            0x2007 => { // PPU_DATA (Read/Write)
-                let (data, undefined_mask) = self.buffered_ppu_data_read(cartridge, self.shared_v_register);
+            0x2007 => {
+                // PPU_DATA (Read/Write)
+                let (data, undefined_mask) =
+                    self.buffered_ppu_data_read(cartridge, self.shared_v_register);
                 self.increment_data_addr(cartridge);
                 (data, undefined_mask)
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
@@ -794,17 +821,20 @@ impl Ppu {
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         let (value, undefined_bits) = match addr {
-            0x2002 => { // Status (Read-only)
+            0x2002 => {
+                // Status (Read-only)
                 let data = self.status.bits();
                 (data, StatusFlags::UNDEFINED_BITS.bits())
             }
-            0x2004 => { // OamData
+            0x2004 => {
+                // OamData
                 (self.read_oam_data_register(), 0x0)
             }
-            0x2007 => { // PPU_DATA (Read/Write)
+            0x2007 => {
+                // PPU_DATA (Read/Write)
                 self.buffered_ppu_data_peek(cartridge, self.shared_v_register)
             }
-            _ => (0, 0xff)
+            _ => (0, 0xff),
         };
 
         let value = self.finish_peek_with_latch(value, undefined_bits);
@@ -817,23 +847,28 @@ impl Ppu {
         let addr = ((addr - 0x2000) % 8) + 0x2000;
         self.io_latch_value = data;
         match addr {
-            0x2000 => { // Control 1
+            0x2000 => {
+                // Control 1
                 self.control1 = Control1Flags::from_bits_truncate(data);
                 self.nmi_enable = self.control1.contains(Control1Flags::NMI_ENABLE);
                 self.update_nmi();
 
                 // The lower nametable bits become 10-11 of the shared (15 bit) temp register that's
                 // used by PPU_SCROLL and PPU_ADDR
-                self.shared_t_register = (self.shared_t_register & 0b0111_0011_1111_1111) | ((data as u16 & 0b11) << 10);
+                self.shared_t_register =
+                    (self.shared_t_register & 0b0111_0011_1111_1111) | ((data as u16 & 0b11) << 10);
             }
-            0x2001 => {  // Control 2
+            0x2001 => {
+                // Control 2
 
                 self.control2 = Control2Flags::from_bits_truncate(data);
                 self.show_background = self.control2.contains(Control2Flags::SHOW_BG);
                 self.show_sprites = self.control2.contains(Control2Flags::SHOW_SPRITES);
                 self.rendering_enabled = self.show_background || self.show_sprites;
-                self.show_sprites_in_left_margin = self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW);
-                self.show_background_in_left_margin = self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW);
+                self.show_sprites_in_left_margin =
+                    self.control2.contains(Control2Flags::SPRITES_LEFT_COL_SHOW);
+                self.show_background_in_left_margin =
+                    self.control2.contains(Control2Flags::BG_LEFT_COL_SHOW);
                 self.monochrome = self.control2.contains(Control2Flags::MONOCHROME);
                 //self.monochrome = true;
                 self.emphasize_red = self.control2.contains(Control2Flags::EMPHASIZE_RED);
@@ -842,25 +877,26 @@ impl Ppu {
                 //println!("PPU Control2 write = {:08b}: rendering_enabled = {:?}", data, self.rendering_enabled);
             }
             0x2002 => { // Status
-                // Read Only
+                 // Read Only
             }
-            0x2003 => { // OAMADDR
+            0x2003 => {
+                // OAMADDR
                 /* TODO: also corrupts OAM data...
-                   https://forums.nesdev.org/viewtopic.php?t=10189
+                  https://forums.nesdev.org/viewtopic.php?t=10189
 
-                    * Take old value from $2003 and AND it with $F8
-                    * Read 8 bytes from OAM starting at this masked value
-                    * Write them starting at $XX in OAM, where $XX is the high byte of the PPU register written to ($20-$3F) masked with $F8
-                    * Use new value written to $2003 as OAM address
+                   * Take old value from $2003 and AND it with $F8
+                   * Read 8 bytes from OAM starting at this masked value
+                   * Write them starting at $XX in OAM, where $XX is the high byte of the PPU register written to ($20-$3F) masked with $F8
+                   * Use new value written to $2003 as OAM address
 
-                    But this is just for the "preferred" CPU-PPU alignment. For another,
-                    I get totally different corruptions at portions of OAM related to the
-                    new value written. It's probably using a different value to write the
-                    8-byte chunk to OAM
+                   But this is just for the "preferred" CPU-PPU alignment. For another,
+                   I get totally different corruptions at portions of OAM related to the
+                   new value written. It's probably using a different value to write the
+                   8-byte chunk to OAM
 
-                    Seems like this has been more an issue for people writing tests, and
-                    hopefully no games depend on this
-                 */
+                   Seems like this has been more an issue for people writing tests, and
+                   hopefully no games depend on this
+                */
                 self.oam_offset = data;
             }
             0x2004 => {
@@ -889,22 +925,27 @@ impl Ppu {
                     self.oam_offset = self.oam_offset.wrapping_add(4);
                 }
             }
-            0x2005 => { // PPU_SCROLL
+            0x2005 => {
+                // PPU_SCROLL
 
                 if self.shared_w_toggle {
                     let fine3_y = (data & 0b111) as u16;
                     let coarse5_y = ((data & 0b1111_1000) >> 3) as u16;
-                    self.shared_t_register = (self.shared_t_register & 0b0000_1100_0001_1111) | (fine3_y << 12) | (coarse5_y << 5);
+                    self.shared_t_register = (self.shared_t_register & 0b0000_1100_0001_1111)
+                        | (fine3_y << 12)
+                        | (coarse5_y << 5);
 
                     // TODO: supporting mid-frame updates from t -> v
                     //self.update_scroll_xy();
                 } else {
                     self.scroll_x_fine3 = data & 0b111;
-                    self.shared_t_register = (self.shared_t_register & 0b0111_1111_1110_0000) | (((data >> 3) as u16) & 0b1_1111);
+                    self.shared_t_register = (self.shared_t_register & 0b0111_1111_1110_0000)
+                        | (((data >> 3) as u16) & 0b1_1111);
                 }
                 self.shared_w_toggle = !self.shared_w_toggle;
             }
-            0x2006 => { // PPU_ADDR
+            0x2006 => {
+                // PPU_ADDR
                 if self.shared_w_toggle {
                     let lsb = data;
                     self.shared_t_register = (self.shared_t_register & 0xff00) | (lsb as u16);
@@ -933,14 +974,15 @@ impl Ppu {
                 }
                 self.shared_w_toggle = !self.shared_w_toggle;
             }
-            0x2007 => { // PPU_DATA
+            0x2007 => {
+                // PPU_DATA
                 //println!("data_write_u8: {:x}, {data:x}", self.shared_vram_addr);
                 //debug_assert!(self.line >239);
                 //println!("ppu data: writing = {:02x} to {:04x}", data, self.shared_v_register);
                 self.ppu_data_write(cartridge, self.shared_v_register, data);
                 self.increment_data_addr(cartridge);
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         };
     }
 
@@ -979,7 +1021,6 @@ impl Ppu {
     }
 
     fn step_sprite_evaluation(&mut self) {
-
         // Note: sprite evaluation may be done even if sprite rendering is disabled:
         //  "With background rendering on, sprite evaluation will resume but remain hidden"
 
@@ -1039,9 +1080,11 @@ impl Ppu {
                     self.secondary_oam[self.secondary_oam_offset] = self.oam_evaluate_read;
 
                     if self.secondary_oam_offset % 4 == 0 {
-                        self.oam_evaluate_sprite_in_range = self.is_sprite_in_range(self.oam_evaluate_read);
+                        self.oam_evaluate_sprite_in_range =
+                            self.is_sprite_in_range(self.oam_evaluate_read);
                         if self.secondary_oam_offset == 0 {
-                            self.oam_evaluate_sprite_zero_in_range = self.oam_evaluate_sprite_in_range;
+                            self.oam_evaluate_sprite_zero_in_range =
+                                self.oam_evaluate_sprite_in_range;
                         }
                         if self.oam_evaluate_sprite_in_range {
                             //println!("Found in-range sprite[{}] @ dot = {}, line = {}, Y = {}", self.secondary_oam_offset / 4, self.dot, self.line, self.oam_evaluate_read);
@@ -1108,10 +1151,10 @@ impl Ppu {
 
         // We have decomposed the oam offset for sprite evaluation (including emulating the overflow bug) but
         // need to recompose it since self.read_oam_data() will refer to .oam_offset.
-        self.oam_offset = ((self.oam_evaluate_n % 64) as u8) << 2 | (self.oam_evaluate_m as u8) & 0b11;
+        self.oam_offset =
+            ((self.oam_evaluate_n % 64) as u8) << 2 | (self.oam_evaluate_m as u8) & 0b11;
         //println!("Updating OAM offset = {}, N = {}, M = {}", self.oam_offset, self.oam_evaluate_n, self.oam_evaluate_m);
     }
-
 
     /// Compose the sprite into an intermediate `sprite_line_back`, in priority order (i.e. lowest secondary oam index to highest)
     /// This avoids needing more intricate shift register emulation for all the sprites while rendering the background
@@ -1121,24 +1164,32 @@ impl Ppu {
     /// bit 4 = background priority
     /// bit 5 = is zero sprite
     fn compose_sprite(&mut self) {
-
         // Don't cull sprites at this stage in case this flag gets changed by the time we render the final pixels
         //if !self.control2.contains(Control2Flags::SHOW_SPRITES) {
         //    return;
         //}
 
         if self.sprite_fetch_index >= self.oam_evaluate_n_sprites as usize {
-            return
+            return;
         }
 
         //println!("line = {}, composing sprite {} of {}", self.line, self.sprite_fetch_index, self.oam_evaluate_n_sprites);
 
         // We store the sprite-zero state in bit 5
-        let sprite_zero_bit = if self.sprite_fetch_index == 0 && self.oam_evaluate_sprite_zero_in_range { 0b0010_0000u8 } else { 0 };
+        let sprite_zero_bit =
+            if self.sprite_fetch_index == 0 && self.oam_evaluate_sprite_zero_in_range {
+                0b0010_0000u8
+            } else {
+                0
+            };
 
         let sprite_attr = self.secondary_oam[self.sprite_fetch_index * 4 + 2];
         let sprite_palette_bits = (sprite_attr & 0b11) << 2;
-        let sprite_priority_bit = if sprite_attr & 0b0010_0000 != 0 { 0b0001_0000 } else { 0 }; // we store the priority state in bit 4
+        let sprite_priority_bit = if sprite_attr & 0b0010_0000 != 0 {
+            0b0001_0000
+        } else {
+            0
+        }; // we store the priority state in bit 4
         let x_flip = sprite_attr & 0b0100_0000 != 0;
         //let y_flip = sprite_attr & 0b1000_0000 != 0;
         let sprite_x = self.secondary_oam[self.sprite_fetch_index * 4 + 3] as usize;
@@ -1158,12 +1209,23 @@ impl Ppu {
                 // "the first non-transparent pixel moves on to a multiplexer, where it joins the BG pixel."
                 if existing & 0b11 == 0 {
                     let sprite_pattern = if x_flip {
-                        Ppu::right_select_bits_from_lo_hi_u8(sprite_row_pattern_low, sprite_row_pattern_hi, x)
+                        Ppu::right_select_bits_from_lo_hi_u8(
+                            sprite_row_pattern_low,
+                            sprite_row_pattern_hi,
+                            x,
+                        )
                     } else {
-                        Ppu::left_select_bits_from_lo_hi_u8(sprite_row_pattern_low, sprite_row_pattern_hi, x)
+                        Ppu::left_select_bits_from_lo_hi_u8(
+                            sprite_row_pattern_low,
+                            sprite_row_pattern_hi,
+                            x,
+                        )
                     };
                     if sprite_pattern & 0b11 != 0 {
-                        self.sprite_line_back[screen_x as usize] = sprite_zero_bit | sprite_priority_bit | sprite_palette_bits | sprite_pattern;
+                        self.sprite_line_back[screen_x as usize] = sprite_zero_bit
+                            | sprite_priority_bit
+                            | sprite_palette_bits
+                            | sprite_pattern;
                         //if sprite_zero_bit != 0 {
                         //    println!("Sprite Zero: Writing sprite_line[{}] = {:02x}, sz = {:08b}, sp = {:08b}, plt = {:08b}, pat = {:08b}",
                         //            screen_x, self.sprite_line_back[screen_x as usize], sprite_zero_bit, sprite_priority_bit, sprite_palette_bits, sprite_pattern);
@@ -1185,8 +1247,15 @@ impl Ppu {
 
         println!("Latched state:");
         for i in 0..8 {
-            let pattern = Ppu::left_select_bits_from_lo_hi_u8(self.pattern_table0_latch, self.pattern_table1_latch, i);
-            println!("{i}) palette = {}, pattern = {}", self.palette_latch, pattern);
+            let pattern = Ppu::left_select_bits_from_lo_hi_u8(
+                self.pattern_table0_latch,
+                self.pattern_table1_latch,
+                i,
+            );
+            println!(
+                "{i}) palette = {}, pattern = {}",
+                self.palette_latch, pattern
+            );
         }
     }
 
@@ -1210,14 +1279,24 @@ impl Ppu {
 
     /// Load data for the next tile (8 pixel span) into the low 8 bits of our shift registers
     fn reload_shift_registers(&mut self) {
-        self.pattern_table0_shift = self.pattern_table0_shift & 0xff00 | self.pattern_table0_latch as u16;
-        self.pattern_table1_shift = self.pattern_table1_shift & 0xff00 | self.pattern_table1_latch as u16;
+        self.pattern_table0_shift =
+            self.pattern_table0_shift & 0xff00 | self.pattern_table0_latch as u16;
+        self.pattern_table1_shift =
+            self.pattern_table1_shift & 0xff00 | self.pattern_table1_latch as u16;
 
         // The palette bits will be constant for the next tile so we extend into 8 bits for
         // consistency with the pattern table shift registers (the actual hardware instead has
         // 1bit latches to feed the constant into the shift register for 8 pixels)
-        let palette0_bits = if self.palette_latch & 1 != 0 { 0xffu16 } else { 0u16 };
-        let palette1_bits = if self.palette_latch & 2 != 0 { 0xffu16 } else { 0u16 };
+        let palette0_bits = if self.palette_latch & 1 != 0 {
+            0xffu16
+        } else {
+            0u16
+        };
+        let palette1_bits = if self.palette_latch & 2 != 0 {
+            0xffu16
+        } else {
+            0u16
+        };
         self.palette0_shift = self.palette0_shift & 0xff00 | palette0_bits as u16;
         self.palette1_shift = self.palette1_shift & 0xff00 | palette1_bits as u16;
 
@@ -1255,7 +1334,6 @@ impl Ppu {
         //if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
         //    println!("read NT byte 0,29 @ 0x{tile_address:04x} = {:02x}, dot = {}, line = {}", self.nametable_latch, self.dot, self.line);
         //}
-
     }
 
     fn read_attribute_table_byte(&mut self, cartridge: &mut Cartridge) {
@@ -1264,12 +1342,12 @@ impl Ppu {
 
         let tile_x = self.scroll_tile_x();
         let tile_y = self.scroll_tile_y();
-        self.palette_latch = match (tile_y & 2)  | ((tile_x >> 1) & 1) {
-            0 => attr_value & 0b11, // Top-left
-            1 => (attr_value & 0b1100) >> 2, // Top-right
-            2 => (attr_value & 0b11_0000) >> 4, // Bottom-left
+        self.palette_latch = match (tile_y & 2) | ((tile_x >> 1) & 1) {
+            0 => attr_value & 0b11,               // Top-left
+            1 => (attr_value & 0b1100) >> 2,      // Top-right
+            2 => (attr_value & 0b11_0000) >> 4,   // Bottom-left
             3 => (attr_value & 0b1100_0000) >> 6, // Bottom-right
-            _ => unreachable!()
+            _ => unreachable!(),
         };
 
         /*
@@ -1280,14 +1358,15 @@ impl Ppu {
             println!("read attribute byte 0,29 @ 0x{attr_address:04x} = {:02x}, palette_latch = {:08b}/{:02x}, dot = {}, line = {}", attr_value, self.palette_latch, self.palette_latch, self.dot, self.line);
         }
         */
-
     }
 
     fn read_pattern_table_low_byte(&mut self, cartridge: &mut Cartridge) {
         let pattern_table_index = self.nametable_latch;
-		let bg_pattern_table_addr_lower = self.bg_pattern_table_addr() |
-			((pattern_table_index as u16) << 4) | (self.scroll_fine_y() as u16);
-        self.pattern_table0_latch = self.unbuffered_ppu_bus_read(cartridge, bg_pattern_table_addr_lower);
+        let bg_pattern_table_addr_lower = self.bg_pattern_table_addr()
+            | ((pattern_table_index as u16) << 4)
+            | (self.scroll_fine_y() as u16);
+        self.pattern_table0_latch =
+            self.unbuffered_ppu_bus_read(cartridge, bg_pattern_table_addr_lower);
 
         /*
         if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
@@ -1298,9 +1377,11 @@ impl Ppu {
 
     fn read_pattern_table_high_byte(&mut self, cartridge: &mut Cartridge) {
         let pattern_table_index = self.nametable_latch;
-		let bg_pattern_table_addr_lower = self.bg_pattern_table_addr() |
-			((pattern_table_index as u16) << 4) | (self.scroll_fine_y() as u16);
-        self.pattern_table1_latch = self.unbuffered_ppu_bus_read(cartridge, bg_pattern_table_addr_lower + 8);
+        let bg_pattern_table_addr_lower = self.bg_pattern_table_addr()
+            | ((pattern_table_index as u16) << 4)
+            | (self.scroll_fine_y() as u16);
+        self.pattern_table1_latch =
+            self.unbuffered_ppu_bus_read(cartridge, bg_pattern_table_addr_lower + 8);
 
         /*
         if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
@@ -1325,14 +1406,18 @@ impl Ppu {
         // garbage just for consistent timing (some mappers drive clocks based
         // on ppu fetches)
         let delta = line.wrapping_sub(sprite_y) % 16;
-        let sprite_row = if y_flip {
-            15 - delta
+        let sprite_row = if y_flip { 15 - delta } else { delta };
+        let row_offset = if sprite_row > 8 {
+            8 + sprite_row
         } else {
-            delta
+            sprite_row
         };
-        let row_offset = if sprite_row > 8 { 8 + sprite_row } else { sprite_row };
 
-        let pattern_table_base = if sprite_index_byte & 1 != 0 { 0x1000 } else { 0x0000 };
+        let pattern_table_base = if sprite_index_byte & 1 != 0 {
+            0x1000
+        } else {
+            0x0000
+        };
         pattern_table_base | ((sprite_tile_index as u16) << 4) | (row_offset as u16)
     }
 
@@ -1351,11 +1436,7 @@ impl Ppu {
         // garbage just for consistent timing (some mappers drive clocks based
         // on ppu fetches)
         let delta = line.wrapping_sub(sprite_y) % 8;
-        let row_offset = if y_flip {
-            7 - delta
-        } else {
-            delta
-        };
+        let row_offset = if y_flip { 7 - delta } else { delta };
         let pattern_table_base = self.sprites8x8_pattern_table_addr();
         pattern_table_base | ((sprite_tile_index as u16) << 4) | (row_offset as u16)
     }
@@ -1374,7 +1455,6 @@ impl Ppu {
     }
 
     fn fetch_sprite_pattern_high_byte(&mut self, addr_high: u16, cartridge: &mut Cartridge) {
-
         self.pattern_table1_latch = self.unbuffered_ppu_bus_read(cartridge, addr_high);
     }
 
@@ -1428,7 +1508,8 @@ impl Ppu {
 
     #[inline]
     fn select_bg_palette_from_shift_registers(&self, fine_x: usize) -> u8 {
-        let bits = Ppu::left_select_bits_from_lo_hi_u16(self.palette0_shift, self.palette1_shift, fine_x);
+        let bits =
+            Ppu::left_select_bits_from_lo_hi_u16(self.palette0_shift, self.palette1_shift, fine_x);
 
         /*
         if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
@@ -1474,7 +1555,7 @@ impl Ppu {
     pub fn scroll_y(&self) -> u16 {
         let nametable_y = (self.shared_v_register & 0b0000_1000_0000_0000) >> 3;
         let coarse_y = (self.scroll_tile_y() as u16) << 3; // 5 bits
-        let fine_y   = self.scroll_fine_y() as u16; // 3 bits
+        let fine_y = self.scroll_fine_y() as u16; // 3 bits
         nametable_y | coarse_y | fine_y
     }
 
@@ -1564,7 +1645,8 @@ impl Ppu {
         let nametable_select_x = (coarse_x & 0b10_0000) << 5;
         let coarse_x = coarse_x & 0b01_1111;
 
-        self.shared_v_register = (self.shared_v_register & VT_VERTICAL_SCROLL_BITS_MASK) | nametable_select_x | coarse_x;
+        self.shared_v_register =
+            (self.shared_v_register & VT_VERTICAL_SCROLL_BITS_MASK) | nametable_select_x | coarse_x;
         //println!("Increment coarse x scroll: (line = {}, dot = {}), scroll_tile_x = {}, scroll_tile_y = {}", self.line, self.dot, self.scroll_tile_x(), self.scroll_tile_y());
     }
 
@@ -1588,9 +1670,9 @@ impl Ppu {
     /// > appear before the nametable's tile data is reached. (Some games use
     /// > this to move the top of the nametable out of the Overscan area.)"
     fn increment_fine_y_scroll(&mut self) {
-        let mut nametable_select_y  = self.shared_v_register & 0b0000_1000_0000_0000;
+        let mut nametable_select_y = self.shared_v_register & 0b0000_1000_0000_0000;
         let mut coarse_y = self.scroll_tile_y() as u16;
-        let fine_y   = self.scroll_fine_y() as u16 + 1;
+        let fine_y = self.scroll_fine_y() as u16 + 1;
         if fine_y == 8 {
             if coarse_y == 29 {
                 nametable_select_y = nametable_select_y ^ 0b0000_1000_0000_0000;
@@ -1603,13 +1685,16 @@ impl Ppu {
         }
 
         let coarse_y = (coarse_y & 0b1_1111) << 5;
-        let fine_y   = (fine_y & 0b111) << 12;
+        let fine_y = (fine_y & 0b111) << 12;
 
-        self.shared_v_register = (self.shared_v_register & VT_HORIZONTAL_SCROLL_BITS_MASK) | nametable_select_y | coarse_y | fine_y;
+        self.shared_v_register = (self.shared_v_register & VT_HORIZONTAL_SCROLL_BITS_MASK)
+            | nametable_select_y
+            | coarse_y
+            | fine_y;
         //println!("Increment fine Y scroll: scroll_tile_x = {}, scroll_tile_y = {}, scroll_fine_y = {}", self.scroll_tile_x(), self.scroll_tile_y(), self.scroll_fine_y());
     }
 
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     #[inline]
     fn call_mux_hooks(&mut self, cartridge: &mut Cartridge, state: &MuxHookState) {
         let mut hooks = std::mem::take(&mut self.debug.mux_hooks);
@@ -1622,8 +1707,14 @@ impl Ppu {
     /// Combines background and sprite pixels according to priority rules
     ///
     /// Also handles sprite zero hit detection and left margin clipping
-    fn background_priority_mux(&mut self, bg_palette: u8, bg_pattern: u8, sprite_pix: u8, screen_x: usize, cartridge: &mut Cartridge) -> Color32 {
-
+    fn background_priority_mux(
+        &mut self,
+        bg_palette: u8,
+        bg_pattern: u8,
+        sprite_pix: u8,
+        screen_x: usize,
+        cartridge: &mut Cartridge,
+    ) -> Color32 {
         //let is_sprite_zero_debug = sprite_pix & 0b10_0000 != 0;
         //if is_sprite_zero_debug {
         //    println!("PX: line = {}, screen_x = {screen_x}, sprite pix = {sprite_pix:02x}m bg_pattern = {bg_pattern:02x}", self.line);
@@ -1631,19 +1722,21 @@ impl Ppu {
 
         let sprite_bg_priority = sprite_pix & 0b01_0000 != 0;
 
-        let sprite_pattern = if self.show_sprites && (self.show_sprites_in_left_margin || screen_x >= 8) {
-            sprite_pix & 0b11
-        } else {
-            0
-        };
+        let sprite_pattern =
+            if self.show_sprites && (self.show_sprites_in_left_margin || screen_x >= 8) {
+                sprite_pix & 0b11
+            } else {
+                0
+            };
 
         // Determine background clipping up-front, even if we might not select the background color
         // to simplify sprite0 hit detection
-        let bg_pattern = if self.show_background && (self.show_background_in_left_margin || screen_x >= 8) {
-            bg_pattern
-        } else {
-            0
-        };
+        let bg_pattern =
+            if self.show_background && (self.show_background_in_left_margin || screen_x >= 8) {
+                bg_pattern
+            } else {
+                0
+            };
 
         //if is_sprite_zero_debug {
         //    println!("PX: line = {}, screen_x = {screen_x}, sprite pattern = {sprite_pattern:02x}, bg pattern = {bg_pattern:02x}", self.line);
@@ -1664,13 +1757,15 @@ impl Ppu {
         // - The palette. The contents of the palette are irrelevant to sprite 0 hits. For example: a black ($0F) sprite pixel can hit a black ($0F) background as long as neither is the transparent color index %00.
         // - The PAL PPU blanking on the left and right edges at x=0, x=1, and x=254 (see Overscan).
         let is_sprite_zero = sprite_pix & 0b10_0000 != 0;
-        let sprite_zero_hit = is_sprite_zero && sprite_pattern != 0 && bg_pattern != 0 && screen_x != 255;
+        let sprite_zero_hit =
+            is_sprite_zero && sprite_pattern != 0 && bg_pattern != 0 && screen_x != 255;
         if sprite_zero_hit {
             //println!("PX: line = {}, screen_x = {screen_x}: SPRITE ZERO HIT", self.line);
             self.status.set(StatusFlags::SPRITE0_HIT, true);
         }
 
-        let sprite_priority = sprite_pattern != 0 && (sprite_bg_priority == false || bg_pattern == 0);
+        let sprite_priority =
+            sprite_pattern != 0 && (sprite_bg_priority == false || bg_pattern == 0);
         let (palette_addr, pattern) = if sprite_priority {
             let sprite_palette = (sprite_pix & 0b1100) >> 2;
             let addr = (0x3f10 | (sprite_palette as u16) << 2, sprite_pattern);
@@ -1693,7 +1788,7 @@ impl Ppu {
 
         let color = rgb_lut(palette_value);
 
-        #[cfg(feature="ppu-hooks")]
+        #[cfg(feature = "ppu-hooks")]
         if self.debug.mux_hooks.hooks.len() > 0 {
             // Copied code from above
             let sprite_palette = (sprite_pix & 0b1100) >> 2;
@@ -1703,7 +1798,13 @@ impl Ppu {
 
             let state = MuxHookState {
                 rendering_enabled: true,
-                decision: if sprite_priority { MuxDecision::Sprite } else if bg_pattern != 0 { MuxDecision::Background } else { MuxDecision::UniversalBackground },
+                decision: if sprite_priority {
+                    MuxDecision::Sprite
+                } else if bg_pattern != 0 {
+                    MuxDecision::Background
+                } else {
+                    MuxDecision::UniversalBackground
+                },
                 screen_x: screen_x as u8,
                 screen_y: self.line as u8,
                 sprite_palette,
@@ -1731,7 +1832,12 @@ impl Ppu {
         color
     }
 
-    fn compose_enabled_pixel(&mut self, screen_x: usize, _screen_y: usize, cartridge: &mut Cartridge) -> Color32 {
+    fn compose_enabled_pixel(
+        &mut self,
+        screen_x: usize,
+        _screen_y: usize,
+        cartridge: &mut Cartridge,
+    ) -> Color32 {
         let bg_palette = self.select_bg_palette_from_shift_registers(self.scroll_x_fine3 as usize);
         let bg_pattern = self.select_bg_pattern_from_shift_registers(self.scroll_x_fine3 as usize);
 
@@ -1743,13 +1849,18 @@ impl Ppu {
         //let bg_pattern_bits = 2u8; // HACK
 
         let sprite_pixel = self.sprite_line_front[screen_x];
-        let color = self.background_priority_mux(bg_palette, bg_pattern, sprite_pixel, screen_x, cartridge);
+        let color =
+            self.background_priority_mux(bg_palette, bg_pattern, sprite_pixel, screen_x, cartridge);
 
         color
     }
 
-    fn compose_disabled_pixel(&mut self, screen_x: usize, _screen_y: usize, cartridge: &mut Cartridge) -> Color32 {
-
+    fn compose_disabled_pixel(
+        &mut self,
+        screen_x: usize,
+        _screen_y: usize,
+        cartridge: &mut Cartridge,
+    ) -> Color32 {
         // "During forced blanking, when neither background nor sprites are
         // enabled in PPUMASK ($2001), the picture will show the backdrop color"
         //
@@ -1773,11 +1884,15 @@ impl Ppu {
         };
         let palette_value = self.palette_read(palette_addr);
 
-        #[cfg(feature="ppu-hooks")]
+        #[cfg(feature = "ppu-hooks")]
         if self.debug.mux_hooks.hooks.len() > 0 {
             let state = MuxHookState {
                 rendering_enabled: false,
-                decision: if palette_addr != 0x3f00 { MuxDecision::PaletteHackBackground } else { MuxDecision::UniversalBackground },
+                decision: if palette_addr != 0x3f00 {
+                    MuxDecision::PaletteHackBackground
+                } else {
+                    MuxDecision::UniversalBackground
+                },
                 screen_x: screen_x as u8,
                 screen_y: self.line as u8,
 
@@ -1797,7 +1912,6 @@ impl Ppu {
     }
 
     fn render_pixel(&mut self, screen_x: usize, screen_y: usize, cartridge: &mut Cartridge) {
-
         let color = if self.rendering_enabled {
             self.compose_enabled_pixel(screen_x, screen_y, cartridge)
         } else {
@@ -1830,21 +1944,27 @@ impl Ppu {
         }
 
         self.framebuffer_offset += 4;
-
     }
 
     /// Treating VRAM as a 2x2 grid of nametables / screens this samples a single (background) pixel
     pub fn peek_vram_four_screens(&self, x: usize, y: usize, cartridge: &mut Cartridge) -> [u8; 3] {
-
         //let nametable_base_addr = self.name_table_base_addr();
         let pattern_table_addr = self.bg_pattern_table_addr();
         //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
 
         // Which nametable are we in
         let nametable_base_addr = if y < FRAME_HEIGHT {
-            if x < FRAME_WIDTH { 0x2000 } else { 0x2400 }
+            if x < FRAME_WIDTH {
+                0x2000
+            } else {
+                0x2400
+            }
         } else {
-            if x < FRAME_WIDTH { 0x2800 } else { 0x2c00 }
+            if x < FRAME_WIDTH {
+                0x2800
+            } else {
+                0x2c00
+            }
         };
 
         let nametable_y = y as u16 % FRAME_HEIGHT as u16; //self.line + u16::from(self.current_scroll_y);
@@ -1858,12 +1978,11 @@ impl Ppu {
         let attribute_base_addr = nametable_base_addr + ATTRIBUTE_TABLE_OFFSET;
         let attribute_x_offset = (tile_x >> 2) & 0x7;
         let attribute_y_offset = tile_y >> 2;
-        let attribute_addr =
-            attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
+        let attribute_addr = attribute_base_addr + (attribute_y_offset << 3) + attribute_x_offset;
 
         let raw_attribute = cartridge.vram_peek(attribute_addr);
         let bg_palette_id = match (tile_x & 0x03 < 0x2, tile_y & 0x03 < 0x2) {
-            (true, true) => (raw_attribute >> 0) & 0x03, // top left
+            (true, true) => (raw_attribute >> 0) & 0x03,  // top left
             (false, true) => (raw_attribute >> 2) & 0x03, // top right
             (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
             (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
@@ -1884,9 +2003,7 @@ impl Ppu {
             | ((bg_tile_pattern_lower >> (7 - tile_pixel_x)) & 0x01);
 
         let palette_addr = if bg_pattern != 0 {
-            0x3f00 +
-                (u16::from(bg_palette_id) << 2) +
-                u16::from(bg_pattern)
+            0x3f00 + (u16::from(bg_palette_id) << 2) + u16::from(bg_pattern)
         } else {
             0x3f00 // universal background color for transparent pixels
         };
@@ -1898,7 +2015,6 @@ impl Ppu {
     }
 
     fn step_line(&mut self, cartridge: &mut Cartridge) {
-
         //println!("tick, dot = {}, line = {}", self.dot, self.line);
 
         /*
@@ -1950,7 +2066,7 @@ impl Ppu {
                         7 => {
                             self.read_pattern_table_high_byte(cartridge);
                         }
-                        _ => unreachable!()
+                        _ => unreachable!(),
                     }
                 }
             } else if let 257..=320 = self.dot {
@@ -1966,14 +2082,15 @@ impl Ppu {
                         // "If rendering is enabled, the PPU copies all bits related to horizontal position from t to v"
                         // rendering enabled = "(i.e., when either background or sprite rendering is enabled in $2001:3-4)"
                         // ref: https://www.nesdev.org/wiki/File:Ntsc_timing.png
-                        self.shared_v_register = (self.shared_v_register & (!VT_HORIZONTAL_SCROLL_BITS_MASK)) | (self.shared_t_register & VT_HORIZONTAL_SCROLL_BITS_MASK);
+                        self.shared_v_register = (self.shared_v_register
+                            & (!VT_HORIZONTAL_SCROLL_BITS_MASK))
+                            | (self.shared_t_register & VT_HORIZONTAL_SCROLL_BITS_MASK);
                         //println!("sync horizontal V bits: scroll_tile_x = {}, scroll_tile_y = {}", self.scroll_tile_x(), self.scroll_tile_y());
                     }
 
                     self.sprite_fetch_index = (self.dot as usize - 257) / 8;
                     match self.dot % 8 {
-                        0 => {
-                        }
+                        0 => {}
                         1 => {
                             // These are a continuation of the nametable reads that happen between 1..=256 | 321..=336 that
                             // are redundant except that mappers may depend on observing them for synchronization
@@ -1987,12 +2104,19 @@ impl Ppu {
                         }
                         4 => {}
                         5 => {
-                            self.sprite_pattern_addr_lo = self.calculate_sprite_pattern_table_row_address();
-                            self.fetch_sprite_pattern_low_byte(self.sprite_pattern_addr_lo, cartridge);
+                            self.sprite_pattern_addr_lo =
+                                self.calculate_sprite_pattern_table_row_address();
+                            self.fetch_sprite_pattern_low_byte(
+                                self.sprite_pattern_addr_lo,
+                                cartridge,
+                            );
                         }
                         6 => {}
                         7 => {
-                            self.fetch_sprite_pattern_high_byte(self.sprite_pattern_addr_lo + 8, cartridge);
+                            self.fetch_sprite_pattern_high_byte(
+                                self.sprite_pattern_addr_lo + 8,
+                                cartridge,
+                            );
 
                             // Although the PPU fetches sprite data during the pre-render line, we currently infer
                             // that it doesn't set up the the sprite outputs. As a minor optimization we can can also
@@ -2005,10 +2129,9 @@ impl Ppu {
                                 self.compose_sprite();
                             }
                         }
-                        _ => unreachable!()
+                        _ => unreachable!(),
                     }
                 }
-
             } else if let 337 | 339 = self.dot {
                 if self.rendering_enabled {
                     // Dummy nametable reads that might be expected by mappers for synchronization (e.g. MMC5)
@@ -2032,9 +2155,7 @@ impl Ppu {
         }
 
         match self.line_status {
-
             LineStatus::Visible => {
-
                 if self.rendering_enabled {
                     // Attempts to read OAM data via $2004 will return 0xff while secondary OAM is being cleared
                     if self.dot == 1 {
@@ -2073,7 +2194,8 @@ impl Ppu {
                     self.draw_tile_span(cartridge, fb);
                 }*/
             }
-            LineStatus::PostRender => { // TODO: remove redundant enum value
+            LineStatus::PostRender => {
+                // TODO: remove redundant enum value
                 if self.dot == 340 {
                     //println!("PPU: Finished Frame");
                     self.frame_ready = true;
@@ -2125,7 +2247,9 @@ impl Ppu {
                 // from t":
                 if let 280..=304 = self.dot {
                     if self.rendering_enabled {
-                        self.shared_v_register = (self.shared_v_register & (!VT_VERTICAL_SCROLL_BITS_MASK)) | (self.shared_t_register & VT_VERTICAL_SCROLL_BITS_MASK);
+                        self.shared_v_register = (self.shared_v_register
+                            & (!VT_VERTICAL_SCROLL_BITS_MASK))
+                            | (self.shared_t_register & VT_VERTICAL_SCROLL_BITS_MASK);
                         //println!("sync vertical V bits: scroll_tile_x = {}, scroll_tile_y = {}, scroll_fine_y = {}", self.scroll_tile_x(), self.scroll_tile_y(), self.scroll_fine_y());
                         //println!("sync vertical V bits: new PPU ADDR = 0x{:04x}, control2 = {:?}", self.shared_v_register, self.control2);
                         //self.update_scroll_xy();
@@ -2142,14 +2266,23 @@ impl Ppu {
             }
         }
 
-        #[cfg(feature="ppu-hooks")]
+        #[cfg(feature = "ppu-hooks")]
         {
-            if self.debug.dot_hooks[self.line as usize][self.dot as usize].hooks.len() != 0 {
-                let mut hooks = std::mem::take(&mut self.debug.dot_hooks[self.line as usize][self.dot as usize]);
+            if self.debug.dot_hooks[self.line as usize][self.dot as usize]
+                .hooks
+                .len()
+                != 0
+            {
+                let mut hooks = std::mem::take(
+                    &mut self.debug.dot_hooks[self.line as usize][self.dot as usize],
+                );
                 for hook in hooks.hooks.iter_mut() {
                     (hook.func)(self, cartridge);
                 }
-                std::mem::swap(&mut self.debug.dot_hooks[self.line as usize][self.dot as usize], &mut hooks);
+                std::mem::swap(
+                    &mut self.debug.dot_hooks[self.line as usize][self.dot as usize],
+                    &mut hooks,
+                );
             }
         }
     }
@@ -2159,13 +2292,12 @@ impl Ppu {
 
         //println!("ppu clock = {ppu_clock}");
 
-        #[cfg(feature="debugger")]
+        #[cfg(feature = "debugger")]
         {
             if self.debug.breakpoints.len() > 0 {
                 let mut tmp = std::mem::take(&mut self.debug.breakpoints);
                 let mut remove = vec![];
                 for bp in tmp.iter_mut() {
-
                     if let Some(frame) = bp.frame {
                         if self.frame != frame {
                             continue;
@@ -2174,14 +2306,16 @@ impl Ppu {
                     //println!("PPU breakpoint frame {:?} matches", self.frame);
                     if let Some(line) = bp.line {
                         if self.line != line {
-                            continue
+                            continue;
                         }
                     }
                     //println!("PPU breakpoint line {:?} matches", self.line);
                     if self.dot == bp.dot {
                         //println!("PPU breakpoint dot matches frame = {}, line = {}, dot = {}", self.frame, self.line, self.dot);
                         self.debug.breakpoint_hit = true;
-                        if (bp.callback)(self, self.frame, self.line, self.dot) == DotBreakpointCallbackAction::Remove {
+                        if (bp.callback)(self, self.frame, self.line, self.dot)
+                            == DotBreakpointCallbackAction::Remove
+                        {
                             remove.push(bp.handle);
                         }
                     }
@@ -2225,7 +2359,8 @@ impl Ppu {
 
     #[inline(always)]
     fn decay_io_latch(&mut self) {
-        if self.clock - self.io_latch_last_update_clock >= (self.io_latch_decay_clock_period as u64) {
+        if self.clock - self.io_latch_last_update_clock >= (self.io_latch_decay_clock_period as u64)
+        {
             let keep = self.io_latch_keep_alive_masks[0] | self.io_latch_keep_alive_masks[1];
             self.io_latch_value &= keep;
             self.io_latch_keep_alive_masks[1] = self.io_latch_keep_alive_masks[0];
@@ -2234,12 +2369,12 @@ impl Ppu {
         }
     }
 
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     pub fn add_dot_hook(&mut self, line: usize, dot: usize, func: Box<FnDotHook>) -> HookHandle {
         self.debug.dot_hooks[line][dot].add_hook(func)
     }
 
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     pub fn remove_dot_hook(&mut self, line: usize, dot: usize, handle: HookHandle) {
         self.debug.dot_hooks[line][dot].remove_hook(handle);
     }
@@ -2248,20 +2383,26 @@ impl Ppu {
     ///
     /// Debuggers can use this to trace key rendering state at the heart of the PPU rendering
     /// emulation
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     pub fn add_mux_hook(&mut self, func: Box<FnMuxHook>) -> HookHandle {
         self.debug.mux_hooks.add_hook(func)
     }
 
     /// Remove a hook function, with a given `key` from the background priority MUX operation
-    #[cfg(feature="ppu-hooks")]
+    #[cfg(feature = "ppu-hooks")]
     pub fn remove_mux_hook(&mut self, handle: HookHandle) {
         self.debug.mux_hooks.remove_hook(handle);
     }
 
     /// Request that the emulator should stop once it reaches the given frame, line and dot
-    #[cfg(feature="debugger")]
-    pub fn add_dot_breakpoint(&mut self, frame: Option<u32>, line: Option<u16>, dot: u16, callback: Box<FnDotBreakpointCallback>) -> DotBreakpointHandle {
+    #[cfg(feature = "debugger")]
+    pub fn add_dot_breakpoint(
+        &mut self,
+        frame: Option<u32>,
+        line: Option<u16>,
+        dot: u16,
+        callback: Box<FnDotBreakpointCallback>,
+    ) -> DotBreakpointHandle {
         let handle = DotBreakpointHandle(self.debug.next_breakpoint_handle);
         self.debug.next_breakpoint_handle += 1;
 
@@ -2270,20 +2411,23 @@ impl Ppu {
             frame,
             line,
             dot,
-            callback
+            callback,
         });
 
         handle
     }
 
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub fn remove_dot_breakpoint(&mut self, handle: DotBreakpointHandle) {
-        if let Some(i) = self.debug.breakpoints.iter().position(|b| b.handle == handle) {
+        if let Some(i) = self
+            .debug
+            .breakpoints
+            .iter()
+            .position(|b| b.handle == handle)
+        {
             self.debug.breakpoints.swap_remove(i);
         }
     }
-
-
 }
 
 /*

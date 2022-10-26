@@ -4,7 +4,7 @@ pub struct HookHandle(u32);
 pub struct Hook<F: ?Sized> {
     handle: HookHandle,
     //pub(super) key: String,
-    pub(super) func: Box<F>
+    pub(super) func: Box<F>,
 }
 impl<F: ?Sized> PartialEq for Hook<F> {
     fn eq(&self, other: &Self) -> bool {
@@ -12,11 +12,11 @@ impl<F: ?Sized> PartialEq for Hook<F> {
         self.handle == other.handle
     }
 }
-impl<F: ?Sized> Eq for Hook<F> { }
+impl<F: ?Sized> Eq for Hook<F> {}
 
 pub struct HooksList<F: ?Sized> {
     handle_counter: u32,
-    pub hooks: Vec<Hook<F>>
+    pub hooks: Vec<Hook<F>>,
 }
 // We don't want to block structures that contain a HookList from
 // automatically deriving Clone, but lists themselves will be
@@ -28,7 +28,10 @@ impl<F: ?Sized> Clone for HooksList<F> {
 }
 impl<F: ?Sized> Default for HooksList<F> {
     fn default() -> Self {
-        Self { hooks: vec![], handle_counter: 0 }
+        Self {
+            hooks: vec![],
+            handle_counter: 0,
+        }
     }
 }
 

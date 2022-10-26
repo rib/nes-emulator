@@ -1,40 +1,67 @@
-use std::{collections::{VecDeque}, fmt::Debug, time::{Instant, Duration}, path::{Path, PathBuf}, fs::File, io::{BufWriter}, num::NonZeroUsize, rc::Rc, cell::RefCell, sync::mpsc};
 use std::io::Write;
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    fmt::Debug,
+    fs::File,
+    io::BufWriter,
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 
-use log::{error, debug};
+use log::{debug, error};
 
 use anyhow::Result;
 
-use winit::{event::{WindowEvent, VirtualKeyCode, ModifiersState}, event_loop::EventLoopProxy};
+use winit::{
+    event::{ModifiersState, VirtualKeyCode, WindowEvent},
+    event_loop::EventLoopProxy,
+};
 
-use egui::{self, RichText, Color32, Ui, ImageData, TextureHandle};
-use egui::{ColorImage, epaint::ImageDelta};
+use egui::{self, Color32, ImageData, RichText, TextureHandle, Ui};
+use egui::{epaint::ImageDelta, ColorImage};
 
 use cpal::traits::StreamTrait;
-use cpal::{traits::{HostTrait, DeviceTrait}, OutputCallbackInfo, SampleFormat, Sample};
+use cpal::{
+    traits::{DeviceTrait, HostTrait},
+    OutputCallbackInfo, Sample, SampleFormat,
+};
 
-use ring_channel::{ring_channel, TryRecvError, RingReceiver, RingSender};
+use ring_channel::{ring_channel, RingReceiver, RingSender, TryRecvError};
 
-use nes_emulator::{nes::*, system::Model, port::ControllerButton, hook::HookHandle, cpu::cpu::BreakpointHandle};
-use nes_emulator::genie::GameGenieCode;
 use nes_emulator::framebuffer::*;
+use nes_emulator::genie::GameGenieCode;
+use nes_emulator::{
+    cpu::cpu::BreakpointHandle, hook::HookHandle, nes::*, port::ControllerButton, system::Model,
+};
 
-use crate::{Args, utils, benchmark::BenchmarkState, macros::{Macro, MacroPlayer, self}, view::{macro_builder::MacroBuilderView, memory::MemView, nametable::NametablesView, trace_events::TraceEventsView, sprites::SpritesView, debugger::DebuggerView, apu::ApuView}};
+use crate::{
+    benchmark::BenchmarkState,
+    macros::{self, Macro, MacroPlayer},
+    utils,
+    view::{
+        apu::ApuView, debugger::DebuggerView, macro_builder::MacroBuilderView, memory::MemView,
+        nametable::NametablesView, sprites::SpritesView, trace_events::TraceEventsView,
+    },
+    Args,
+};
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
 pub enum Status {
     Ok,
-    Quit
+    Quit,
 }
 
 const NOTICE_TIMEOUT_SECS: u8 = 7;
 struct Notice {
     level: log::Level,
     text: String,
-    timestamp: Instant
+    timestamp: Instant,
 }
-
 
 /// Each debug view / tool is fairly self-contained and although they can directly inspect
 /// and modify the Nes they don't have arbitrary control over the rest of the EmulatorUi
@@ -53,7 +80,7 @@ pub enum ViewRequest {
 #[derive(Clone)]
 pub struct ViewRequestSender {
     tx: mpsc::Sender<ViewRequest>,
-    proxy: EventLoopProxy<crate::ui_winit::Event>
+    proxy: EventLoopProxy<crate::ui_winit::Event>,
 }
 
 impl ViewRequestSender {
@@ -63,21 +90,38 @@ impl ViewRequestSender {
     }
 }
 
-fn load_nes(path: Option<impl AsRef<Path>>, rom_dirs: &Vec<PathBuf>, audio_sample_rate: u32, start_timestamp: Instant, notices: &mut VecDeque<Notice>) -> (Nes, Option<PathBuf>) {
+fn load_nes(
+    path: Option<impl AsRef<Path>>,
+    rom_dirs: &Vec<PathBuf>,
+    audio_sample_rate: u32,
+    start_timestamp: Instant,
+    notices: &mut VecDeque<Notice>,
+) -> (Nes, Option<PathBuf>) {
     if let Some(path) = path {
         if let Some(ref path) = utils::find_rom(path, rom_dirs) {
             match utils::create_nes_from_binary(path, audio_sample_rate, start_timestamp) {
                 Ok(nes) => return (nes, Some(path.clone())),
                 Err(err) => {
-                    notices.push_back(Notice { level: log::Level::Error, text: format!("{}", err), timestamp: Instant::now() });
+                    notices.push_back(Notice {
+                        level: log::Level::Error,
+                        text: format!("{}", err),
+                        timestamp: Instant::now(),
+                    });
                 }
             }
         }
     }
-    (Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp), None)
+    (
+        Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp),
+        None,
+    )
 }
 
-pub fn blank_texture_for_framebuffer(ctx: &egui::Context, info: &impl FramebufferInfo, name: impl Into<String>) -> TextureHandle {
+pub fn blank_texture_for_framebuffer(
+    ctx: &egui::Context,
+    info: &impl FramebufferInfo,
+    name: impl Into<String>,
+) -> TextureHandle {
     let blank = ColorImage {
         size: [info.width(), info.height()],
         pixels: vec![Color32::default(); info.width() * info.height()],
@@ -92,36 +136,48 @@ pub fn full_framebuffer_image_delta(fb: &FramebufferDataRental) -> ImageDelta {
     let height = owner.height();
 
     match owner.format() {
-        PixelFormat::RGBA8888 => {
-            ImageDelta::full(ImageData::Color(ColorImage {
+        PixelFormat::RGBA8888 => ImageDelta::full(
+            ImageData::Color(ColorImage {
                 size: [width, height],
-                pixels: fb.data.chunks_exact(4)
+                pixels: fb
+                    .data
+                    .chunks_exact(4)
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
                     .collect(),
-            }), egui::TextureFilter::Nearest)
-        }
-        PixelFormat::RGB888 => {
-            ImageDelta::full(ImageData::Color(ColorImage {
+            }),
+            egui::TextureFilter::Nearest,
+        ),
+        PixelFormat::RGB888 => ImageDelta::full(
+            ImageData::Color(ColorImage {
                 size: [width, height],
-                pixels: fb.data.chunks_exact(3)
+                pixels: fb
+                    .data
+                    .chunks_exact(3)
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 0xff))
                     .collect(),
-            }), egui::TextureFilter::Nearest)
-        }
-        PixelFormat::GREY8 => {
-            ImageDelta::full(ImageData::Color(ColorImage {
+            }),
+            egui::TextureFilter::Nearest,
+        ),
+        PixelFormat::GREY8 => ImageDelta::full(
+            ImageData::Color(ColorImage {
                 size: [width, height],
-                pixels: fb.data.iter()
+                pixels: fb
+                    .data
+                    .iter()
                     .map(|p| Color32::from_rgba_premultiplied(*p, *p, *p, 0xff))
                     .collect(),
-            }), egui::TextureFilter::Nearest)
-        }
+            }),
+            egui::TextureFilter::Nearest,
+        ),
     }
 }
 
 unsafe fn u8_slice_as_color32_slice(u8_data: &[u8]) -> &[egui::Color32] {
     debug_assert!(u8_data.len() % 4 == 0);
-    std::slice::from_raw_parts::<egui::Color32>(u8_data.as_ptr() as *const egui::Color32, u8_data.len() / 4)
+    std::slice::from_raw_parts::<egui::Color32>(
+        u8_data.as_ptr() as *const egui::Color32,
+        u8_data.len() / 4,
+    )
 }
 
 fn sample_next(o: &mut SampleRequestOptions) -> f32 {
@@ -153,7 +209,7 @@ fn generate_debug_sample(o: &mut SampleRequestOptions) -> f32 {
 
 fn generate_debug_samples<T>(output: &mut [T], request: &mut SampleRequestOptions)
 where
-    T: cpal::Sample
+    T: cpal::Sample,
 {
     for frame in output.chunks_mut(request.nchannels) {
         let value: T = cpal::Sample::from::<f32>(&generate_debug_sample(request));
@@ -165,13 +221,19 @@ where
 
 const DEBUG_CLOCK_DIV: usize = 1;
 
-fn read_audio_samples<T: Sample + Send + Debug>(rx: &mut RingReceiver<f32>, sampler_state: &mut EmulatorAudioState<T>, nchannels: usize, output: &mut [T], _info: &OutputCallbackInfo) {
+fn read_audio_samples<T: Sample + Send + Debug>(
+    rx: &mut RingReceiver<f32>,
+    sampler_state: &mut EmulatorAudioState<T>,
+    nchannels: usize,
+    output: &mut [T],
+    _info: &OutputCallbackInfo,
+) {
     for frame in output.chunks_mut(nchannels * DEBUG_CLOCK_DIV as usize) {
         let value: T = match rx.try_recv() {
             Err(TryRecvError::Empty) => {
                 //warn!("Audio underflow!");
                 sampler_state.last_sample
-            },
+            }
             Err(err) => {
                 error!("Audio stream error: {err}");
                 sampler_state.last_sample
@@ -192,31 +254,34 @@ fn read_audio_samples<T: Sample + Send + Debug>(rx: &mut RingReceiver<f32>, samp
 }
 
 struct EmulatorAudioState<T: Sample + Send + Debug + 'static> {
-    last_sample: T
+    last_sample: T,
 }
 fn make_audio_stream<T: Sample + Send + Debug + 'static>(
-                        device: &cpal::Device,
-                        config: &cpal::StreamConfig,
-                        mut rx: RingReceiver<f32>) -> Result<cpal::Stream, anyhow::Error>
-{
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    mut rx: RingReceiver<f32>,
+) -> Result<cpal::Stream, anyhow::Error> {
     let mut _debug_options = SampleRequestOptions {
         sample_rate: config.sample_rate.0 as f32,
         sample_clock: 0f32,
-        nchannels: config.channels as usize
+        nchannels: config.channels as usize,
     };
     let nchannels = config.channels as usize;
 
     let mut sampler_state = EmulatorAudioState::<T> {
-        last_sample: Sample::from::<f32>(&0.0f32)
+        last_sample: Sample::from::<f32>(&0.0f32),
     };
 
-    Ok(device.build_output_stream(config, move |output, info| {
+    Ok(device.build_output_stream(
+        config,
+        move |output, info| {
             //generate_debug_samples::<T>(output, &mut debug_options);
             read_audio_samples::<T>(&mut rx, &mut sampler_state, nchannels, output, info)
         },
         |err| {
             error!("Audio stream failure: {err:?}");
-        })?)
+        },
+    )?)
 }
 
 pub struct EmulatorUi {
@@ -259,17 +324,17 @@ pub struct EmulatorUi {
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
 
-    #[cfg(feature="cpu-debugger")]
+    #[cfg(feature = "cpu-debugger")]
     debugger_view: DebuggerView,
 
-    #[cfg(feature="macro-builder")]
+    #[cfg(feature = "macro-builder")]
     macro_builder_view: MacroBuilderView,
 
     nametables_view: NametablesView,
 
     apu_view: ApuView,
 
-    #[cfg(feature="sprite-view")]
+    #[cfg(feature = "sprite-view")]
     sprites_view: SpritesView,
 
     mem_view: MemView,
@@ -279,13 +344,14 @@ pub struct EmulatorUi {
     view_request_sender: ViewRequestSender,
 
     stats: BenchmarkState,
-
 }
 
 impl EmulatorUi {
-
-    pub fn new(args: &Args, ctx: &egui::Context, event_loop_proxy: EventLoopProxy<crate::ui_winit::Event>) -> Result<Self> {
-
+    pub fn new(
+        args: &Args,
+        ctx: &egui::Context,
+        event_loop_proxy: EventLoopProxy<crate::ui_winit::Event>,
+    ) -> Result<Self> {
         let mut notices = VecDeque::new();
 
         let audio_host = cpal::default_host();
@@ -297,9 +363,7 @@ impl EmulatorUi {
         debug!("Audio sample rate = {}", audio_sample_rate);
 
         let buffer_time_millis = 5000;
-        let ring_size =
-            ((audio_sample_rate as u64) *
-            (buffer_time_millis as u64)) / 1000;
+        let ring_size = ((audio_sample_rate as u64) * (buffer_time_millis as u64)) / 1000;
         let ring_size = ((ring_size * 2) - (ring_size / 2)) as usize;
         debug!("Audio ring buffer size = {ring_size} samples");
 
@@ -308,19 +372,30 @@ impl EmulatorUi {
             SampleFormat::F32 => make_audio_stream::<f32>(&audio_device, &audio_config.into(), rx),
             SampleFormat::I16 => make_audio_stream::<i16>(&audio_device, &audio_config.into(), rx),
             SampleFormat::U16 => make_audio_stream::<u16>(&audio_device, &audio_config.into(), rx),
-        }.unwrap();
+        }
+        .unwrap();
 
         let rom_dirs = utils::canonicalize_rom_dirs(&args.rom_dir);
         let rom_path = match &args.rom {
             Some(rom) => utils::find_rom(rom, &rom_dirs),
-            None => None
+            None => None,
         };
-        let (mut nes, loaded_rom) = load_nes(rom_path.as_ref(), &rom_dirs, audio_sample_rate, Instant::now(), &mut notices);
+        let (mut nes, loaded_rom) = load_nes(
+            rom_path.as_ref(),
+            &rom_dirs,
+            audio_sample_rate,
+            Instant::now(),
+            &mut notices,
+        );
 
-        let genie_codes: Result<Vec<GameGenieCode>> = args.genie_codes.iter().map(|code| {
-            let res: Result<GameGenieCode> = code.as_str().try_into();
-            res
-        }).collect();
+        let genie_codes: Result<Vec<GameGenieCode>> = args
+            .genie_codes
+            .iter()
+            .map(|code| {
+                let res: Result<GameGenieCode> = code.as_str().try_into();
+                res
+            })
+            .collect();
         let genie_codes = genie_codes?;
         nes.set_game_genie_codes(genie_codes);
 
@@ -349,14 +424,17 @@ impl EmulatorUi {
             vec![]
         };
 
-        let stats = BenchmarkState::new(&nes, Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64));
+        let stats = BenchmarkState::new(
+            &nes,
+            Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64),
+        );
 
         let now = Instant::now();
 
         let (tx, rx) = mpsc::channel();
         let view_request_sender = ViewRequestSender {
             tx,
-            proxy: event_loop_proxy
+            proxy: event_loop_proxy,
         };
 
         let paused = false;
@@ -394,16 +472,23 @@ impl EmulatorUi {
             queue_framebuffer_upload: false,
             last_frame_time: now,
 
-            #[cfg(feature="cpu-debugger")]
+            #[cfg(feature = "cpu-debugger")]
             debugger_view: DebuggerView::new(view_request_sender.clone(), paused),
 
-            #[cfg(feature="macro-builder")]
-            macro_builder_view: MacroBuilderView::new(ctx, args, rom_dirs.clone(), loaded_rom.clone(), view_request_sender.clone(), paused),
+            #[cfg(feature = "macro-builder")]
+            macro_builder_view: MacroBuilderView::new(
+                ctx,
+                args,
+                rom_dirs.clone(),
+                loaded_rom.clone(),
+                view_request_sender.clone(),
+                paused,
+            ),
             nametables_view: NametablesView::new(ctx),
 
             apu_view: ApuView::new(),
 
-            #[cfg(feature="sprite-view")]
+            #[cfg(feature = "sprite-view")]
             sprites_view: SpritesView::new(ctx),
 
             trace_events_view: TraceEventsView::new(ctx),
@@ -435,31 +520,41 @@ impl EmulatorUi {
     }
 
     fn power_on_new_nes(&mut self) {
-        self.stats = BenchmarkState::new(&self.nes, Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64));
+        self.stats = BenchmarkState::new(
+            &self.nes,
+            Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64),
+        );
 
         if self.tracing {
             if let Some(writer) = &self.trace_writer {
                 let writer = writer.clone();
-                self.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
-                    if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
-                        log::error!("Failed to write to CPU trace: {err}");
-                    }
-                }));
+                self.nes
+                    .add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                        if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
+                            log::error!("Failed to write to CPU trace: {err}");
+                        }
+                    }));
             } else {
-                self.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
-                    println!("{trace_state}");
-                }));
+                self.nes
+                    .add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                        println!("{trace_state}");
+                    }));
             }
         }
 
         let start_timestamp = std::time::Instant::now();
         self.nes.power_cycle(start_timestamp);
         if let Err(err) = self.audio_stream.play() {
-            self.notices.push_back(Notice { level: log::Level::Error, text: format!("Couldn't start audio stream: {:#?}", err), timestamp: Instant::now() });
+            self.notices.push_back(Notice {
+                level: log::Level::Error,
+                text: format!("Couldn't start audio stream: {:#?}", err),
+                timestamp: Instant::now(),
+            });
         }
 
-        #[cfg(feature="macro-builder")]
-        self.macro_builder_view.power_on_new_nes_hook(&mut self.nes, self.loaded_rom.as_ref());
+        #[cfg(feature = "macro-builder")]
+        self.macro_builder_view
+            .power_on_new_nes_hook(&mut self.nes, self.loaded_rom.as_ref());
     }
 
     /*
@@ -475,7 +570,13 @@ impl EmulatorUi {
 
     pub fn open_binary(&mut self, path: impl AsRef<Path>) {
         self.disconnect_nes();
-        let (nes, loaded_rom) = load_nes(Some(path.as_ref().clone()), &self.rom_dirs, self.audio_sample_rate, Instant::now(), &mut self.notices);
+        let (nes, loaded_rom) = load_nes(
+            Some(path.as_ref().clone()),
+            &self.rom_dirs,
+            self.audio_sample_rate,
+            Instant::now(),
+            &mut self.notices,
+        );
         self.nes = nes;
         self.loaded_rom = loaded_rom;
 
@@ -488,7 +589,7 @@ impl EmulatorUi {
             self.crc_hook_handle = None;
         }
 
-        #[cfg(feature="macro-builder")]
+        #[cfg(feature = "macro-builder")]
         self.macro_builder_view.disconnect_nes(&mut self.nes);
     }
 
@@ -524,12 +625,16 @@ impl EmulatorUi {
                 *pixel = image::Rgb([r, g, b]);
             }
             println!("Saving debug image");
-            imgbuf.save(format!("nes-emulator-frame-{}.png", utils::epoch_timestamp())).unwrap();
+            imgbuf
+                .save(format!(
+                    "nes-emulator-frame-{}.png",
+                    utils::epoch_timestamp()
+                ))
+                .unwrap();
         }
     }
 
     pub fn draw_notices_header(&mut self, ui: &mut Ui) {
-
         while self.notices.len() > 0 {
             let ts = self.notices.front().unwrap().timestamp;
             if Instant::now() - ts > Duration::from_secs(NOTICE_TIMEOUT_SECS as u64) {
@@ -541,12 +646,11 @@ impl EmulatorUi {
 
         if self.notices.len() > 0 {
             for notice in self.notices.iter() {
-                let mut rt = RichText::new(notice.text.clone())
-                    .strong();
+                let mut rt = RichText::new(notice.text.clone()).strong();
                 let (fg, bg) = match notice.level {
                     log::Level::Warn => (Color32::YELLOW, Color32::DARK_GRAY),
                     log::Level::Error => (Color32::WHITE, Color32::DARK_RED),
-                    _ => (Color32::TRANSPARENT, Color32::BLACK)
+                    _ => (Color32::TRANSPARENT, Color32::BLACK),
                 };
                 rt = rt.color(fg).background_color(bg);
                 ui.label(rt);
@@ -555,13 +659,16 @@ impl EmulatorUi {
     }
 
     pub fn update(&mut self) {
-
         match self.view_requests_rx.try_recv() {
             Ok(req) => {
                 println!("Got view request: {req:?}");
                 match req {
                     ViewRequest::ShowUserNotice(level, text) => {
-                        self.notices.push_back(Notice { level, text, timestamp: Instant::now() });
+                        self.notices.push_back(Notice {
+                            level,
+                            text,
+                            timestamp: Instant::now(),
+                        });
                     }
                     ViewRequest::RunMacro(recording) => {
                         self.macro_queue.clear();
@@ -573,27 +680,27 @@ impl EmulatorUi {
                             self.set_paused(false);
 
                             // TODO: have a generic way of notifying all views
-                            #[cfg(feature="macro-builder")]
-                            self.macro_builder_view.load_rom_request_finished(&mut self.nes, true);
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view
+                                .load_rom_request_finished(&mut self.nes, true);
                         } else {
-                            self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
+                            self.notices.push_back(Notice {
+                                level: log::Level::Error,
+                                text: "Failed to find ROM for macro".to_string(),
+                                timestamp: Instant::now(),
+                            });
 
                             // TODO: have a generic way of notifying all views
-                            #[cfg(feature="macro-builder")]
-                            self.macro_builder_view.load_rom_request_finished(&mut self.nes, false);
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view
+                                .load_rom_request_finished(&mut self.nes, false);
                         }
                     }
-                    ViewRequest::InstructionStepIn => {
-                        self.step_instruction_in()
-                    }
-                    ViewRequest::InstructionStepOut => {
-                        self.step_instruction_out()
-                    }
-                    ViewRequest::InstructionStepOver => {
-                        self.step_instruction_over()
-                    }
+                    ViewRequest::InstructionStepIn => self.step_instruction_in(),
+                    ViewRequest::InstructionStepOut => self.step_instruction_out(),
+                    ViewRequest::InstructionStepOver => self.step_instruction_over(),
                 }
-            },
+            }
             Err(_) => {}
         }
 
@@ -603,25 +710,37 @@ impl EmulatorUi {
                     self.open_binary(rom);
 
                     if self.crc_hook_handle.is_none() {
-                        self.crc_hook_handle = Some(macros::register_frame_crc_hasher(&mut self.nes, self.shared_crc32.clone()));
+                        self.crc_hook_handle = Some(macros::register_frame_crc_hasher(
+                            &mut self.nes,
+                            self.shared_crc32.clone(),
+                        ));
                     }
-                    self.macro_player = Some(MacroPlayer::new(next_macro, &mut self.nes, self.shared_crc32.clone()));
+                    self.macro_player = Some(MacroPlayer::new(
+                        next_macro,
+                        &mut self.nes,
+                        self.shared_crc32.clone(),
+                    ));
 
                     self.set_paused(false);
                     if let Some(macro_player) = &mut self.macro_player {
-
                         // TODO: have a generic way of notifying all views
-                        #[cfg(feature="macro-builder")]
-                        self.macro_builder_view.started_playback(&mut self.nes, macro_player);
+                        #[cfg(feature = "macro-builder")]
+                        self.macro_builder_view
+                            .started_playback(&mut self.nes, macro_player);
 
                         macro_player.update(&mut self.nes);
 
                         // TODO: have a generic way of notifying all views
-                        #[cfg(feature="macro-builder")]
-                        self.macro_builder_view.playback_update(&mut self.nes, macro_player);
+                        #[cfg(feature = "macro-builder")]
+                        self.macro_builder_view
+                            .playback_update(&mut self.nes, macro_player);
                     }
                 } else {
-                    self.notices.push_back(Notice { level: log::Level::Error, text: "Failed to find ROM for macro".to_string(), timestamp: Instant::now() });
+                    self.notices.push_back(Notice {
+                        level: log::Level::Error,
+                        text: "Failed to find ROM for macro".to_string(),
+                        timestamp: Instant::now(),
+                    });
                 }
             }
         }
@@ -634,27 +753,35 @@ impl EmulatorUi {
 
             let target = if self.real_time {
                 let ideal_target = self.nes.cpu_clocks_for_time_since_power_cycle(update_start);
-                if self.stats.estimate_duration_for_cpu_clocks(ideal_target - self.nes.cpu_clock()) < update_limit {
+                if self
+                    .stats
+                    .estimate_duration_for_cpu_clocks(ideal_target - self.nes.cpu_clock())
+                    < update_limit
+                {
                     // The happy path: we are emulating in real-time and we are keeping up
 
                     // TODO: if we are consistently vblank synchronized and not missing frames then we
                     // should aim to accurately snap+align update intervals with the vblank interval (even
                     // if that might technically have a small time skew compared to the original hardware
                     // with 60hz vs 59.94hz)
-                    ProgressTarget::Clock(self.nes.cpu_clocks_for_time_since_power_cycle(update_start))
+                    ProgressTarget::Clock(
+                        self.nes.cpu_clocks_for_time_since_power_cycle(update_start),
+                    )
                 } else {
                     // We are _trying_ to emulate in real-time but not keeping up, so we limit
                     // how much we try and progress based on the emulation performance we have
                     // observed.
                     let ideal_target = self.nes.cpu_clocks_for_time_since_power_cycle(update_start);
-                    let limit_step_target = self.nes.cpu_clock() + self.stats.estimated_cpu_clocks_for_duration(update_limit);
+                    let limit_step_target = self.nes.cpu_clock()
+                        + self.stats.estimated_cpu_clocks_for_duration(update_limit);
                     let target = limit_step_target.min(ideal_target);
                     ProgressTarget::Clock(target)
                 }
             } else {
                 // Non-real-time emulation: we progress the emulator forwards based on
                 // the limit duration and based on the emulation performance we have observed
-                let limit_step_target = self.nes.cpu_clock() + self.stats.estimated_cpu_clocks_for_duration(update_limit);
+                let limit_step_target = self.nes.cpu_clock()
+                    + self.stats.estimated_cpu_clocks_for_duration(update_limit);
                 ProgressTarget::Clock(limit_step_target)
             };
 
@@ -666,20 +793,23 @@ impl EmulatorUi {
                         //self.back_framebuffer = (self.back_framebuffer + 1) % self.framebuffers.len();
 
                         //println!("Frame Ready: swapping in new PPU back buffer");
-                        self.front_framebuffer = self.nes.swap_framebuffer(self.front_framebuffer.clone()).expect("Failed to swap in new framebuffer for PPU");
+                        self.front_framebuffer = self
+                            .nes
+                            .swap_framebuffer(self.front_framebuffer.clone())
+                            .expect("Failed to swap in new framebuffer for PPU");
 
                         self.queue_framebuffer_upload = true;
                         if self.nametables_view.visible {
                             self.nametables_view.update(&mut self.nes);
                         }
-                        #[cfg(feature="sprite-view")]
+                        #[cfg(feature = "sprite-view")]
                         if self.sprites_view.visible {
                             self.sprites_view.update(&mut self.nes);
                         }
                         if self.trace_events_view.visible {
                             self.trace_events_view.update(&mut self.nes);
                         }
-                    },
+                    }
                     ProgressStatus::ReachedTarget => {
                         break 'progress;
                     }
@@ -707,26 +837,26 @@ impl EmulatorUi {
                             self.temp_debug_breakpoint = None;
                         }
                         break 'progress;
-                    }
-                    //ProgressStatus::Error => {
-                    //    error!("Internal emulator error");
-                    //    break 'progress;
-                    //}
+                    } //ProgressStatus::Error => {
+                      //    error!("Internal emulator error");
+                      //    break 'progress;
+                      //}
                 }
                 //let delta = std::time::Instant::now() - start;
                 //if delta > Duration::from_millis(buffer_time_millis) {
-                    for s in self.nes.apu_mut().sample_buffer.iter() {
-                        let _ = self.audio_tx.send(*s);
-                    }
-                    self.nes.apu_mut().sample_buffer.clear();
+                for s in self.nes.apu_mut().sample_buffer.iter() {
+                    let _ = self.audio_tx.send(*s);
+                }
+                self.nes.apu_mut().sample_buffer.clear();
                 //}
             }
 
             if let Some(macro_player) = &mut self.macro_player {
                 macro_player.update(&mut self.nes);
 
-                #[cfg(feature="macro-builder")]
-                self.macro_builder_view.playback_update(&mut self.nes, &macro_player);
+                #[cfg(feature = "macro-builder")]
+                self.macro_builder_view
+                    .playback_update(&mut self.nes, &macro_player);
 
                 if !macro_player.playing() {
                     if macro_player.all_checks_passed() {
@@ -737,7 +867,10 @@ impl EmulatorUi {
                         }
                     } else {
                         if macro_player.checks_for_failure() {
-                            log::warn!("UNKNOWN (didn't hit expected failure): {}", macro_player.name());
+                            log::warn!(
+                                "UNKNOWN (didn't hit expected failure): {}",
+                                macro_player.name()
+                            );
                         } else {
                             log::error!("FAILED: {}", macro_player.name());
                         }
@@ -755,7 +888,6 @@ impl EmulatorUi {
         //self.framebuffers[self.front_framebuffer].clone()
     }
 
-
     pub fn draw(&mut self, ctx: &egui::Context) -> Status {
         let mut status = Status::Ok;
 
@@ -767,14 +899,21 @@ impl EmulatorUi {
             let rental = self.front_framebuffer.rent_data().unwrap();
 
             // hmmm, redundant copy, grumble grumble...
-            let copy = ImageDelta::full(ImageData::Color(ColorImage {
-                size: [front.width() as _, front.height() as _],
-                pixels: rental.data.chunks_exact(4)
-                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
-                    .collect(),
-            }), egui::TextureFilter::Nearest);
+            let copy = ImageDelta::full(
+                ImageData::Color(ColorImage {
+                    size: [front.width() as _, front.height() as _],
+                    pixels: rental
+                        .data
+                        .chunks_exact(4)
+                        .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
+                        .collect(),
+                }),
+                egui::TextureFilter::Nearest,
+            );
 
-            ctx.tex_manager().write().set(self.framebuffer_texture.id(), copy);
+            ctx.tex_manager()
+                .write()
+                .set(self.framebuffer_texture.id(), copy);
 
             /*
             // DEBUG clear to red, to be able to see if any framebuffer pixels aren't rendered in the next frame
@@ -806,8 +945,14 @@ impl EmulatorUi {
 
                 ui.menu_button("Nes", |ui| {
                     egui::Grid::new("some_unique_id").show(ui, |ui| {
-
-                        if ui.button(if self.paused == false { "Pause" } else { "Resume" }).clicked() {
+                        if ui
+                            .button(if self.paused == false {
+                                "Pause"
+                            } else {
+                                "Resume"
+                            })
+                            .clicked()
+                        {
                             ui.close_menu();
                             self.set_paused(!self.paused);
                         }
@@ -833,7 +978,6 @@ impl EmulatorUi {
         });
 
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
-
             ui.spacing();
             ui.label("Tools");
             ui.group(|ui| {
@@ -844,27 +988,34 @@ impl EmulatorUi {
 
                     ui.toggle_value(&mut self.apu_view.visible, "APU");
 
-                    ui.add_enabled_ui(cfg!(feature="sprite-view"), |ui| {
-                        let resp = ui.toggle_value(&mut self.sprites_view.visible, "Show Sprites")
+                    ui.add_enabled_ui(cfg!(feature = "sprite-view"), |ui| {
+                        let resp = ui
+                            .toggle_value(&mut self.sprites_view.visible, "Show Sprites")
                             .on_disabled_hover_text("\"sprite-view\" feature not enabled");
-                        #[cfg(feature="sprite-view")]
+                        #[cfg(feature = "sprite-view")]
                         {
                             if resp.changed {
-                                self.sprites_view.set_visible(&mut self.nes, self.sprites_view.visible);
+                                self.sprites_view
+                                    .set_visible(&mut self.nes, self.sprites_view.visible);
                             }
                         }
                     });
 
-                    ui.add_enabled_ui(cfg!(feature="macro-builder"), |ui| {
+                    ui.add_enabled_ui(cfg!(feature = "macro-builder"), |ui| {
                         let mut visible = {
-                            #[cfg(feature="macro-builder")]
-                            {self.macro_builder_view.visible}
-                            #[cfg(not(feature="macro-builder"))]
-                            {false}
+                            #[cfg(feature = "macro-builder")]
+                            {
+                                self.macro_builder_view.visible
+                            }
+                            #[cfg(not(feature = "macro-builder"))]
+                            {
+                                false
+                            }
                         };
-                        let resp = ui.toggle_value(&mut visible, "Record Macros")
+                        let resp = ui
+                            .toggle_value(&mut visible, "Record Macros")
                             .on_disabled_hover_text("\"macro-builder\" feature not enabled");
-                        #[cfg(feature="macro-builder")]
+                        #[cfg(feature = "macro-builder")]
                         {
                             if resp.changed() {
                                 self.macro_builder_view.set_visible(&mut self.nes, visible);
@@ -881,10 +1032,13 @@ impl EmulatorUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add(egui::Image::new(self.framebuffer_texture.id(), egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32)));
+            ui.add(egui::Image::new(
+                self.framebuffer_texture.id(),
+                egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32),
+            ));
         });
 
-        #[cfg(feature="cpu-debugger")]
+        #[cfg(feature = "cpu-debugger")]
         {
             if self.debugger_view.visible {
                 self.debugger_view.draw(&mut self.nes, ctx);
@@ -899,12 +1053,12 @@ impl EmulatorUi {
             self.apu_view.draw(&mut self.nes, ctx);
         }
 
-        #[cfg(feature="sprite-view")]
+        #[cfg(feature = "sprite-view")]
         if self.sprites_view.visible {
             self.sprites_view.draw(&mut self.nes, ctx);
         }
 
-        #[cfg(feature="macro-builder")]
+        #[cfg(feature = "macro-builder")]
         {
             if self.macro_builder_view.visible {
                 self.macro_builder_view.draw(&mut self.nes, ctx);
@@ -929,15 +1083,15 @@ impl EmulatorUi {
             }
         }
 
-        #[cfg(feature="cpu-debugger")]
+        #[cfg(feature = "cpu-debugger")]
         {
             self.debugger_view.set_paused(paused, &mut self.nes);
         }
-        #[cfg(feature="macro-builder")]
+        #[cfg(feature = "macro-builder")]
         {
             self.macro_builder_view.set_paused(paused, &mut self.nes);
         }
-        #[cfg(feature="trace-events")]
+        #[cfg(feature = "trace-events")]
         {
             self.trace_events_view.set_paused(paused, &mut self.nes);
         }
@@ -952,18 +1106,18 @@ impl EmulatorUi {
         self.paused
     }
 
-    #[cfg(feature="cpu-debugger")]
+    #[cfg(feature = "cpu-debugger")]
     pub fn step_instruction_in(&mut self) {
         self.nes.step_instruction_in();
     }
 
-    #[cfg(feature="cpu-debugger")]
+    #[cfg(feature = "cpu-debugger")]
     pub fn step_instruction_over(&mut self) {
         self.temp_debug_breakpoint = Some(self.nes.add_tmp_step_over_breakpoint());
         self.set_paused(false);
     }
 
-    #[cfg(feature="cpu-debugger")]
+    #[cfg(feature = "cpu-debugger")]
     pub fn step_instruction_out(&mut self) {
         self.temp_debug_breakpoint = self.nes.add_tmp_step_out_breakpoint();
         self.set_paused(false);
@@ -971,7 +1125,9 @@ impl EmulatorUi {
 
     pub fn handle_window_event(&mut self, event: winit::event::WindowEvent) {
         match event {
-            WindowEvent::ModifiersChanged(modifiers) => { self.modifiers = modifiers; },
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers;
+            }
             WindowEvent::KeyboardInput { input, .. } => {
                 if let Some(keycode) = input.virtual_keycode {
                     if input.state == winit::event::ElementState::Released {
@@ -986,8 +1142,7 @@ impl EmulatorUi {
                                 self.nes.power_cycle(Instant::now());
                             }
                             VirtualKeyCode::S if self.modifiers.contains(ModifiersState::CTRL) => {
-
-                                #[cfg(feature="macro-builder")]
+                                #[cfg(feature = "macro-builder")]
                                 self.macro_builder_view.save();
                             }
                             _ => {}
@@ -995,34 +1150,40 @@ impl EmulatorUi {
                     }
 
                     let button = match keycode {
-                        VirtualKeyCode::Return => { Some(ControllerButton::Start) }
-                        VirtualKeyCode::Space => { Some(ControllerButton::Select) }
-                        VirtualKeyCode::A => { Some(ControllerButton::Left) }
-                        VirtualKeyCode::D => { Some(ControllerButton::Right) }
-                        VirtualKeyCode::W => { Some(ControllerButton::Up) }
-                        VirtualKeyCode::S => { Some(ControllerButton::Down) }
-                        VirtualKeyCode::Right => { Some(ControllerButton::A) }
-                        VirtualKeyCode::Left => { Some(ControllerButton::B) }
-                        _ => None
+                        VirtualKeyCode::Return => Some(ControllerButton::Start),
+                        VirtualKeyCode::Space => Some(ControllerButton::Select),
+                        VirtualKeyCode::A => Some(ControllerButton::Left),
+                        VirtualKeyCode::D => Some(ControllerButton::Right),
+                        VirtualKeyCode::W => Some(ControllerButton::Up),
+                        VirtualKeyCode::S => Some(ControllerButton::Down),
+                        VirtualKeyCode::Right => Some(ControllerButton::A),
+                        VirtualKeyCode::Left => Some(ControllerButton::B),
+                        _ => None,
                     };
                     if let Some(button) = button {
                         if input.state == winit::event::ElementState::Pressed {
                             // run the macro builder hook first so it can see if the input is redundant
-                            #[cfg(feature="macro-builder")]
-                            self.macro_builder_view.controller_input_hook(&mut self.nes, button, true);
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view.controller_input_hook(
+                                &mut self.nes,
+                                button,
+                                true,
+                            );
                             self.nes.system_mut().port1.press_button(button);
                         } else {
                             // run the macro builder hook first so it can see if the input is redundant
-                            #[cfg(feature="macro-builder")]
-                            self.macro_builder_view.controller_input_hook(&mut self.nes, button, false);
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view.controller_input_hook(
+                                &mut self.nes,
+                                button,
+                                false,
+                            );
                             self.nes.system_mut().port1.release_button(button);
                         }
                     }
                 }
             }
-            _ => {
-
-            }
+            _ => {}
         }
     }
 }

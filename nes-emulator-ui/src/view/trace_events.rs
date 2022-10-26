@@ -1,9 +1,15 @@
-
-use std::{cell::RefCell, rc::Rc};
 use bitflags::bitflags;
+use std::{cell::RefCell, rc::Rc};
 
-use egui::{TextureHandle, pos2, vec2, epaint, Rect, Ui, Painter};
-use nes_emulator::{constants::*, nes::Nes, hook::HookHandle, framebuffer::{FramebufferDataRental, Framebuffer, PixelFormat, FramebufferClearMode}, trace::{TraceEvent, CpuInterruptStatus}, apu::channel::frame_sequencer::FrameSequencerStatus};
+use egui::{epaint, pos2, vec2, Painter, Rect, TextureHandle, Ui};
+use nes_emulator::{
+    apu::channel::frame_sequencer::FrameSequencerStatus,
+    constants::*,
+    framebuffer::{Framebuffer, FramebufferClearMode, FramebufferDataRental, PixelFormat},
+    hook::HookHandle,
+    nes::Nes,
+    trace::{CpuInterruptStatus, TraceEvent},
+};
 
 use crate::ui::{blank_texture_for_framebuffer, full_framebuffer_image_delta};
 
@@ -20,7 +26,7 @@ enum IoOp {
     Write(u16, u8),
 }
 
-bitflags!{
+bitflags! {
     #[derive(Default)]
     struct DotViewFlags: u32 {
         const APU_IRQ_RAISED = 1<<0;
@@ -55,7 +61,7 @@ enum ApuOutput {
     Pulse2,
     Noise,
     Triangle,
-    Dmc
+    Dmc,
 }
 
 #[derive(Default, Clone)]
@@ -125,11 +131,16 @@ pub struct TraceEventsView {
 
 impl TraceEventsView {
     pub fn new(ctx: &egui::Context) -> Self {
-        let screen_framebuffer_front = Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
+        let screen_framebuffer_front =
+            Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
         let screen_framebuffer_front = screen_framebuffer_front.rent_data().unwrap();
-        let screen_texture = blank_texture_for_framebuffer(ctx, &screen_framebuffer_front, "trace_events_screen_framebuffer");
+        let screen_texture = blank_texture_for_framebuffer(
+            ctx,
+            &screen_framebuffer_front,
+            "trace_events_screen_framebuffer",
+        );
 
-        Self  {
+        Self {
             visible: false,
             paused: false,
 
@@ -182,28 +193,40 @@ impl TraceEventsView {
             // By giving the closure ownership of the back buffer then this per-pixel hook
             // avoids needing to poke into the Rc<RefCell<>> every pixel and only needs
             // to swap the back buffer into the shared state at the end of the frame
-            let screen_framebuffer_back = Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
+            let screen_framebuffer_back =
+                Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
             let mut screen_framebuffer_back = screen_framebuffer_back.rent_data().unwrap();
             self.mux_hook_handle = Some(nes.ppu_mut().add_mux_hook(Box::new(
                 move |_ppu, _cartridge, state| {
-
                     //println!("screen x = {}, y = {}, enabled = {}", state.screen_x, state.screen_y, state.rendering_enabled);
                     if state.screen_x == 0 && state.screen_y == 0 {
-                        screen_framebuffer_back.clear(FramebufferClearMode::Checkerboard(0x80, 0xa0));
+                        screen_framebuffer_back
+                            .clear(FramebufferClearMode::Checkerboard(0x80, 0xa0));
                     }
                     let color = nes_emulator::ppu_palette::rgb_lut(state.palette_value);
-                    screen_framebuffer_back.plot(state.screen_x as usize, state.screen_y as usize, color);
+                    screen_framebuffer_back.plot(
+                        state.screen_x as usize,
+                        state.screen_y as usize,
+                        color,
+                    );
 
                     if state.screen_x == 255 && state.screen_y == 239 {
-                        std::mem::swap(&mut screen_framebuffer_back, &mut shared.borrow_mut().screen_framebuffer_front);
+                        std::mem::swap(
+                            &mut screen_framebuffer_back,
+                            &mut shared.borrow_mut().screen_framebuffer_front,
+                        );
                         //println!("Finished frame");
                     }
-            })));
+                },
+            )));
 
-            self.dot_hook_handle = Some(nes.ppu_mut().add_dot_hook(240, 0, Box::new(
-                move |_ppu, _cartridge| {
+            self.dot_hook_handle = Some(nes.ppu_mut().add_dot_hook(
+                240,
+                0,
+                Box::new(move |_ppu, _cartridge| {
                     //self.queue_screen_fb_upload = true;
-            })));
+                }),
+            ));
         } else {
             if let Some(handle) = self.mux_hook_handle {
                 nes.ppu_mut().remove_mux_hook(handle);
@@ -236,8 +259,7 @@ impl TraceEventsView {
         self.queue_screen_fb_upload = true;
     }
 
-    pub fn zoom_in(&mut self)
-    {
+    pub fn zoom_in(&mut self) {
         self.zoom += 1.0f32;
         self.line_height -= 0.1f32;
         if self.line_height < 0.5 {
@@ -248,8 +270,7 @@ impl TraceEventsView {
             self.line_gap_height = 2.0;
         }
     }
-    pub fn zoom_out(&mut self)
-    {
+    pub fn zoom_out(&mut self) {
         self.zoom -= 1.0f32;
         if self.zoom < 1.0f32 {
             self.zoom = 1.0f32;
@@ -268,31 +289,49 @@ impl TraceEventsView {
         match addr {
             0x0000..=0x1fff => { // RAM
             }
-            0x2000..=0x3fff => { // PPU I/O
-                if self.show_ppu_register_io { return true; }
+            0x2000..=0x3fff => {
+                // PPU I/O
+                if self.show_ppu_register_io {
+                    return true;
+                }
             }
             0x4000..=0x401f => {
                 let index = usize::from(addr - 0x4000);
                 match index {
                     0x14 => { // OAMDMA
                     }
-                    0x16 => { // READ = controller port 1, WRITE = APU + port 1/2
+                    0x16 => {
+                        // READ = controller port 1, WRITE = APU + port 1/2
                         if read {
-                            if self.show_port_register_io { return true; }
+                            if self.show_port_register_io {
+                                return true;
+                            }
                         } else {
-                            if self.show_port_register_io { return true; }
-                            if self.show_apu_register_io { return true; }
+                            if self.show_port_register_io {
+                                return true;
+                            }
+                            if self.show_apu_register_io {
+                                return true;
+                            }
                         }
                     }
-                    0x17 => { // READ = controller port 2, WRITE = APU
+                    0x17 => {
+                        // READ = controller port 2, WRITE = APU
                         if read {
-                            if self.show_port_register_io { return true; }
+                            if self.show_port_register_io {
+                                return true;
+                            }
                         } else {
-                            if self.show_apu_register_io { return true; }
+                            if self.show_apu_register_io {
+                                return true;
+                            }
                         }
                     }
-                    _ => {  // APU I/O
-                        if self.show_apu_register_io { return true; }
+                    _ => {
+                        // APU I/O
+                        if self.show_apu_register_io {
+                            return true;
+                        }
                     }
                 }
             }
@@ -306,40 +345,53 @@ impl TraceEventsView {
     /// Returns: (next_line, modified-scanline, modified-next-scanline)
     #[inline(always)]
     fn process_main_events_line<F: Fn(u64) -> u64, C: Fn(usize) -> bool>(
-            &mut self, nes:
-            &mut Nes,
-            cull_line: bool,
-            dot_horizontal_cull: C,
-            show_current_events: bool,
-            ppu_to_cpu_mapper: F,
-            line_start_index: usize, // in-out
-            line_start_cpu_clk: u64,
-            scanline_view: &mut Vec<DotView>,
-            next_scanline_view: &mut Vec<DotView>,
-        ) -> (Option<(u64, u16, usize)>, bool, bool)
-    {
+        &mut self,
+        nes: &mut Nes,
+        cull_line: bool,
+        dot_horizontal_cull: C,
+        show_current_events: bool,
+        ppu_to_cpu_mapper: F,
+        line_start_index: usize, // in-out
+        line_start_cpu_clk: u64,
+        scanline_view: &mut Vec<DotView>,
+        next_scanline_view: &mut Vec<DotView>,
+    ) -> (Option<(u64, u16, usize)>, bool, bool) {
         let mut found_next_line = None;
         let mut modified_scanline = false;
         let mut modified_next_scanline = false;
 
-        let events = if show_current_events { &nes.ppu_mut().debug.trace_events_current } else { &nes.ppu_mut().debug.trace_events_prev };
+        let events = if show_current_events {
+            &nes.ppu_mut().debug.trace_events_current
+        } else {
+            &nes.ppu_mut().debug.trace_events_prev
+        };
         let slice = &events[line_start_index..];
         //println!("Scanning {} events for line", slice.len());
         for (i, event) in slice.iter().enumerate() {
             if i > 0 {
-                if let TraceEvent::PpuCpuLineSync { cpu_clk, ppu_clk: _, line } = event {
+                if let TraceEvent::PpuCpuLineSync {
+                    cpu_clk,
+                    ppu_clk: _,
+                    line,
+                } = event
+                {
                     found_next_line = Some((*cpu_clk, *line, line_start_index + i));
                     //println!("Next line sync found: line = {next_line}, index = {}", line_start_index);
                     break;
                 }
             }
 
-            if cull_line { // Just scan for the next line sync event
+            if cull_line {
+                // Just scan for the next line sync event
                 continue;
             }
 
             let dot = match event {
-                TraceEvent::PpuCpuLineSync { cpu_clk, ppu_clk, line: _ } => {
+                TraceEvent::PpuCpuLineSync {
+                    cpu_clk,
+                    ppu_clk,
+                    line: _,
+                } => {
                     //debug_assert_eq!(current_line, *line);
                     //debug_assert_eq!(*cpu_clk, line_start_clk);
 
@@ -376,10 +428,14 @@ impl TraceEventsView {
                     self.line_cpu_to_dot.push(0);
                     let mut prev_clk = *cpu_clk;
                     for dot in 0..TRACE_EVENTS_DOT_WIDTH {
-                        let clk = (ppu_to_cpu_mapper(*ppu_clk + dot as u64) as i64 + clk_fixup) as u64;
+                        let clk =
+                            (ppu_to_cpu_mapper(*ppu_clk + dot as u64) as i64 + clk_fixup) as u64;
                         self.line_dot_to_cpu.push(clk);
                         if clk != prev_clk {
-                            debug_assert_eq!(clk - line_start_cpu_clk, self.line_cpu_to_dot.len() as u64);
+                            debug_assert_eq!(
+                                clk - line_start_cpu_clk,
+                                self.line_cpu_to_dot.len() as u64
+                            );
                             self.line_cpu_to_dot.push(dot as u16);
                             prev_clk = clk;
                         }
@@ -396,13 +452,21 @@ impl TraceEventsView {
                     // according to clk_fixup + 1 cycle - and then cpu cycles any further out of range will
                     // simply generate a warning and the events will be discarded since they can't be mapped to
                     // a dot.
-                    let mut overflow_cyc = if clk_fixup < 0 { -clk_fixup as usize + 1 } else { 1 };
+                    let mut overflow_cyc = if clk_fixup < 0 {
+                        -clk_fixup as usize + 1
+                    } else {
+                        1
+                    };
                     //println!("Allowing for {} cpu clocks of overflow", overflow_cyc);
                     let mut overflow_dot = 341u16; // Dots >= 341 will be recognised later as overflow for the next line
                     while overflow_cyc > 0 {
-                        let clk = (ppu_to_cpu_mapper(*ppu_clk + overflow_dot as u64) as i64 + clk_fixup) as u64;
+                        let clk = (ppu_to_cpu_mapper(*ppu_clk + overflow_dot as u64) as i64
+                            + clk_fixup) as u64;
                         if clk != prev_clk {
-                            debug_assert_eq!(clk - line_start_cpu_clk, self.line_cpu_to_dot.len() as u64);
+                            debug_assert_eq!(
+                                clk - line_start_cpu_clk,
+                                self.line_cpu_to_dot.len() as u64
+                            );
                             self.line_cpu_to_dot.push(overflow_dot);
                             prev_clk = clk;
                             overflow_cyc -= 1;
@@ -415,13 +479,14 @@ impl TraceEventsView {
                     //println!("line debug map: {:?}", debug);
                     0u16
                 }
-                TraceEvent::CpuRead { clk_lower, .. } |
-                TraceEvent::CpuWrite { clk_lower, .. } |
-                TraceEvent::CpuDmaRead { clk_lower, .. } |
-                TraceEvent::CpuDmaWrite { clk_lower, .. } |
-                TraceEvent::CpuInterruptStatus { clk_lower, .. } => {
+                TraceEvent::CpuRead { clk_lower, .. }
+                | TraceEvent::CpuWrite { clk_lower, .. }
+                | TraceEvent::CpuDmaRead { clk_lower, .. }
+                | TraceEvent::CpuDmaWrite { clk_lower, .. }
+                | TraceEvent::CpuInterruptStatus { clk_lower, .. } => {
                     let mut full_clk = line_start_cpu_clk & 0xffffffff_ffffff00 | *clk_lower as u64;
-                    if full_clk < line_start_cpu_clk { // check if there was an overflow in the lower 8 bits
+                    if full_clk < line_start_cpu_clk {
+                        // check if there was an overflow in the lower 8 bits
                         full_clk += 256
                     }
 
@@ -431,7 +496,7 @@ impl TraceEventsView {
                         continue;
                     }
                     self.line_cpu_to_dot[clk_line_delta as usize]
-                },
+                }
                 _ => {
                     continue;
                 }
@@ -464,24 +529,24 @@ impl TraceEventsView {
                     if self.is_address_filtered(*addr, true) {
                         dot_view.system_bus_io = Some(IoOp::Read(*addr, *value));
                     }
-                },
+                }
                 TraceEvent::CpuWrite { addr, value, .. } => {
                     if self.is_address_filtered(*addr, false) {
                         dot_view.system_bus_io = Some(IoOp::Write(*addr, *value));
                     }
-                },
+                }
                 TraceEvent::CpuDmaRead { addr, value, .. } => {
                     if self.show_dma_io {
                         dot_view.system_bus_io = Some(IoOp::Read(*addr, *value));
                         dot_view.flags.set(DotViewFlags::DMA_READ, true);
                     }
-                },
+                }
                 TraceEvent::CpuDmaWrite { addr, value, .. } => {
                     if self.show_dma_io {
                         dot_view.system_bus_io = Some(IoOp::Write(*addr, *value));
                         dot_view.flags.set(DotViewFlags::DMA_WRITE, true);
                     }
-                },
+                }
                 TraceEvent::CpuInterruptStatus { status, .. } => {
                     if status.contains(CpuInterruptStatus::IRQ_DETECTED_PHI2) {
                         dot_view.flags.set(DotViewFlags::IRQ_DETECT_PHI2, true);
@@ -502,9 +567,7 @@ impl TraceEventsView {
                         dot_view.flags.set(DotViewFlags::NMI_POLL, true);
                     }
                 }
-                _ => {
-
-                }
+                _ => {}
             }
         }
 
@@ -514,23 +577,26 @@ impl TraceEventsView {
     /// Returns: (found-next-line, modified-scanline, modified-next-scanline)
     #[inline(always)]
     fn process_secondary_apu_events_line<C: Fn(usize) -> bool>(
-            &mut self, nes:
-            &mut Nes,
-            cull_line: bool,
-            //line: u16,
-            dot_horizontal_cull: C,
-            show_current_events: bool,
-            line_start_index: usize,
-            line_start_cpu_clk: u64,
-            scanline_view: &mut Vec<DotView>,
-            next_scanline_view: &mut Vec<DotView>,
-        ) -> (Option<(u64, usize)>, bool, bool)
-    {
+        &mut self,
+        nes: &mut Nes,
+        cull_line: bool,
+        //line: u16,
+        dot_horizontal_cull: C,
+        show_current_events: bool,
+        line_start_index: usize,
+        line_start_cpu_clk: u64,
+        scanline_view: &mut Vec<DotView>,
+        next_scanline_view: &mut Vec<DotView>,
+    ) -> (Option<(u64, usize)>, bool, bool) {
         let mut found_next_line = None;
         let mut modified_scanline = false;
         let mut modified_next_scanline = false;
 
-        let events = if show_current_events { &nes.apu_mut().debug.trace_events_current } else { &nes.apu_mut().debug.trace_events_prev };
+        let events = if show_current_events {
+            &nes.apu_mut().debug.trace_events_current
+        } else {
+            &nes.apu_mut().debug.trace_events_prev
+        };
         let slice = &events[line_start_index..];
         //println!("Scanning {} events for line", slice.len());
         for (i, event) in slice.iter().enumerate() {
@@ -542,17 +608,18 @@ impl TraceEventsView {
                 }
             }
 
-            if cull_line { // Just scan for the next line sync event
+            if cull_line {
+                // Just scan for the next line sync event
                 continue;
             }
 
             let dot = match event {
-                TraceEvent::ApuFrameSeqFrame { clk_lower, .. } |
-                TraceEvent::ApuMixerOut { clk_lower, .. } |
-                TraceEvent::ApuIrqRaised { clk_lower, .. }
-                => {
+                TraceEvent::ApuFrameSeqFrame { clk_lower, .. }
+                | TraceEvent::ApuMixerOut { clk_lower, .. }
+                | TraceEvent::ApuIrqRaised { clk_lower, .. } => {
                     let mut full_clk = line_start_cpu_clk & 0xffffffff_ffffff00 | *clk_lower as u64;
-                    if full_clk < line_start_cpu_clk { // check if there was an overflow in the lower 8 bits
+                    if full_clk < line_start_cpu_clk {
+                        // check if there was an overflow in the lower 8 bits
                         full_clk += 256
                     }
 
@@ -562,7 +629,7 @@ impl TraceEventsView {
                         continue;
                     }
                     self.line_cpu_to_dot[clk_line_delta as usize]
-                },
+                }
                 _ => {
                     continue;
                 }
@@ -600,76 +667,93 @@ impl TraceEventsView {
                             dot_view.flags.set(DotViewFlags::APU_HALF_FRAME, true);
                         }
                     }
-                },
-                TraceEvent::ApuMixerOut { output, square1, square2, triangle, noise, dmc, .. } => {
-                    match self.show_apu_output {
-                        ApuOutput::Mixer => {
-                            dot_view.apu_output = *output;
-                        },
-                        ApuOutput::Pulse1 => {
-                            dot_view.apu_output = *square1 as f32 / 16.0f32;
-                        },
-                        ApuOutput::Pulse2 => {
-                            dot_view.apu_output = *square2 as f32 / 16.0f32;
-                        },
-                        ApuOutput::Noise => {
-                            dot_view.apu_output = *noise as f32 / 16.0f32;
-                        },
-                        ApuOutput::Triangle => {
-                            dot_view.apu_output = *triangle as f32 / 16.0f32;
-                        },
-                        ApuOutput::Dmc => {
-                            dot_view.apu_output = *dmc as f32 / 128.0f32;
-                        },
-                        ApuOutput::None => {},
-                    }
                 }
+                TraceEvent::ApuMixerOut {
+                    output,
+                    square1,
+                    square2,
+                    triangle,
+                    noise,
+                    dmc,
+                    ..
+                } => match self.show_apu_output {
+                    ApuOutput::Mixer => {
+                        dot_view.apu_output = *output;
+                    }
+                    ApuOutput::Pulse1 => {
+                        dot_view.apu_output = *square1 as f32 / 16.0f32;
+                    }
+                    ApuOutput::Pulse2 => {
+                        dot_view.apu_output = *square2 as f32 / 16.0f32;
+                    }
+                    ApuOutput::Noise => {
+                        dot_view.apu_output = *noise as f32 / 16.0f32;
+                    }
+                    ApuOutput::Triangle => {
+                        dot_view.apu_output = *triangle as f32 / 16.0f32;
+                    }
+                    ApuOutput::Dmc => {
+                        dot_view.apu_output = *dmc as f32 / 128.0f32;
+                    }
+                    ApuOutput::None => {}
+                },
                 TraceEvent::ApuIrqRaised { .. } => {
                     dot_view.flags.set(DotViewFlags::APU_IRQ_RAISED, true);
                 }
-                _ => {
-
-                }
+                _ => {}
             }
         }
 
         (found_next_line, modified_scanline, modified_next_scanline)
     }
 
-    fn draw_dot_view(&mut self, nes: &mut Nes, ui: &mut Ui, painter: &Painter, dot_view: &DotView, line: u16, dot: u16, rect: Rect) {
+    fn draw_dot_view(
+        &mut self,
+        nes: &mut Nes,
+        ui: &mut Ui,
+        painter: &Painter,
+        dot_view: &DotView,
+        line: u16,
+        dot: u16,
+        rect: Rect,
+    ) {
         let mut highlight = false;
         if dot_view.system_bus_io.is_some() {
             highlight = true;
         }
-        if self.show_dma_io && (dot_view.flags.contains(DotViewFlags::DMA_READ) || dot_view.flags.contains(DotViewFlags::DMA_WRITE)) {
+        if self.show_dma_io
+            && (dot_view.flags.contains(DotViewFlags::DMA_READ)
+                || dot_view.flags.contains(DotViewFlags::DMA_WRITE))
+        {
             highlight = true;
         }
 
-        if self.show_nmi_interrupts && (
-            dot_view.flags.contains(DotViewFlags::NMI_RAISED) ||
-            dot_view.flags.contains(DotViewFlags::NMI_DETECT_PHI2) ||
-            dot_view.flags.contains(DotViewFlags::NMI_DETECT_PHI1) ||
-            dot_view.flags.contains(DotViewFlags::NMI_POLL)
-        ) {
+        if self.show_nmi_interrupts
+            && (dot_view.flags.contains(DotViewFlags::NMI_RAISED)
+                || dot_view.flags.contains(DotViewFlags::NMI_DETECT_PHI2)
+                || dot_view.flags.contains(DotViewFlags::NMI_DETECT_PHI1)
+                || dot_view.flags.contains(DotViewFlags::NMI_POLL))
+        {
             highlight = true;
         }
 
-        if self.show_irq_interrupts && (
-            dot_view.flags.contains(DotViewFlags::APU_IRQ_RAISED) ||
-            dot_view.flags.contains(DotViewFlags::MAPPER_IRQ_RAISED) ||
-            dot_view.flags.contains(DotViewFlags::IRQ_DETECT_PHI2) ||
-            dot_view.flags.contains(DotViewFlags::IRQ_DETECT_PHI1) ||
-            dot_view.flags.contains(DotViewFlags::IRQ_POLL)
-        ) {
+        if self.show_irq_interrupts
+            && (dot_view.flags.contains(DotViewFlags::APU_IRQ_RAISED)
+                || dot_view.flags.contains(DotViewFlags::MAPPER_IRQ_RAISED)
+                || dot_view.flags.contains(DotViewFlags::IRQ_DETECT_PHI2)
+                || dot_view.flags.contains(DotViewFlags::IRQ_DETECT_PHI1)
+                || dot_view.flags.contains(DotViewFlags::IRQ_POLL))
+        {
             highlight = true;
         }
         {
             let pad_x = rect.width() / 5.0f32;
             let pad_y = rect.height() / 5.0f32;
-            let inset = Rect::from_min_max(rect.min + vec2(pad_x, pad_y), rect.max - vec2(pad_x, pad_y));
+            let inset =
+                Rect::from_min_max(rect.min + vec2(pad_x, pad_y), rect.max - vec2(pad_x, pad_y));
             //painter.add(egui::Shape::Rect(epaint::RectShape::filled(inset, epaint::Rounding::none(), egui::Color32::LIGHT_GREEN)));
         }
-/*
+        /*
         if highlight {
             painter.add(egui::Shape::Rect(epaint::RectShape::filled(rect, epaint::Rounding::none(), egui::Color32::YELLOW)));
         }
@@ -680,13 +764,22 @@ impl TraceEventsView {
             let full_output_rect = Rect::from_min_max(rect.min + vec2(half_width, 0.0), rect.max);
             let full_height = rect.height();
             let output_height = full_height * dot_view.apu_output;
-            let output_rect = Rect::from_min_max(rect.min + vec2(half_width, full_height - output_height), rect.max);
+            let output_rect = Rect::from_min_max(
+                rect.min + vec2(half_width, full_height - output_height),
+                rect.max,
+            );
 
-            painter.add(egui::Shape::Rect(epaint::RectShape::filled(full_output_rect, epaint::Rounding::none(), egui::Color32::DARK_GRAY)));
-            painter.add(egui::Shape::Rect(epaint::RectShape::filled(output_rect, epaint::Rounding::none(), egui::Color32::LIGHT_GREEN)));
+            painter.add(egui::Shape::Rect(epaint::RectShape::filled(
+                full_output_rect,
+                epaint::Rounding::none(),
+                egui::Color32::DARK_GRAY,
+            )));
+            painter.add(egui::Shape::Rect(epaint::RectShape::filled(
+                output_rect,
+                epaint::Rounding::none(),
+                egui::Color32::LIGHT_GREEN,
+            )));
         }
-
-
     }
 
     fn draw_viewport(&mut self, nes: &mut Nes, ui: &mut Ui, viewport_rect: Rect) {
@@ -694,13 +787,14 @@ impl TraceEventsView {
         let n_dots_per_line = TRACE_EVENTS_DOT_WIDTH as f32;
         //let line_gap_height = 0.5f32;
         let dot_gap_px = 0.0f32;
-        let logical_width = n_dots_per_line  + (n_dots_per_line - 1.0f32) * dot_gap_px;
+        let logical_width = n_dots_per_line + (n_dots_per_line - 1.0f32) * dot_gap_px;
         let req_width = logical_width * self.zoom;
         let logical_height = n_lines * self.line_height + n_lines * self.line_gap_height;
         let req_height = logical_height * self.zoom;
-        let (response, painter) =
-            ui.allocate_painter(egui::Vec2::new(req_width, req_height), egui::Sense::click_and_drag());
-
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(req_width, req_height),
+            egui::Sense::click_and_drag(),
+        );
 
         if ui.rect_contains_pointer(response.rect) {
             let scroll_delta = ui.ctx().input().zoom_delta();
@@ -711,9 +805,12 @@ impl TraceEventsView {
             }
         }
 
-        let _img = egui::Image::new(self.screen_texture.id(), egui::Vec2::new(FRAME_WIDTH as f32, FRAME_HEIGHT as f32));
+        let _img = egui::Image::new(
+            self.screen_texture.id(),
+            egui::Vec2::new(FRAME_WIDTH as f32, FRAME_HEIGHT as f32),
+        );
         //let response = ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
-                        // TODO(emilk): builder pattern for Mesh
+        // TODO(emilk): builder pattern for Mesh
 
         let allocation_pos = response.rect.left_top();
         let allocation_width = response.rect.width();
@@ -726,7 +823,8 @@ impl TraceEventsView {
         //let _nes_px_to_allocation = 1.0 / allocation_to_nes_px;
 
         let screen_width = (FRAME_WIDTH as f32 / TRACE_EVENTS_DOT_WIDTH as f32) * allocation_width;
-        let screen_height = (FRAME_HEIGHT as f32 / TRACE_EVENTS_DOT_HEIGHT as f32) * allocation_height;
+        let screen_height =
+            (FRAME_HEIGHT as f32 / TRACE_EVENTS_DOT_HEIGHT as f32) * allocation_height;
 
         let px_width = alloc_scale_x;
         let line_height = self.line_height * alloc_scale_y;
@@ -742,15 +840,26 @@ impl TraceEventsView {
         for line in 0..262 {
             let line_y = line as f32 * (line_height + line_gap_height);
 
-            let rect = egui::Rect::from_min_size(allocation_pos + vec2(0.0, line_y), vec2(allocation_width, line_height));
-            painter.add(egui::Shape::Rect(epaint::RectShape::filled(rect, epaint::Rounding::none(), egui::Color32::GRAY)));
+            let rect = egui::Rect::from_min_size(
+                allocation_pos + vec2(0.0, line_y),
+                vec2(allocation_width, line_height),
+            );
+            painter.add(egui::Shape::Rect(epaint::RectShape::filled(
+                rect,
+                epaint::Rounding::none(),
+                egui::Color32::GRAY,
+            )));
 
             if let 0..=239 = line {
-                let rect = egui::Rect::from_min_size(allocation_pos + vec2(0.0, line_y), vec2(screen_width, line_height));
+                let rect = egui::Rect::from_min_size(
+                    allocation_pos + vec2(0.0, line_y),
+                    vec2(screen_width, line_height),
+                );
 
                 let uv_line_top = line as f32 / 240.0f32;
                 let uv_line_bottom = (line as f32 + 1.0f32) / 240.0f32;
-                let uv_rect = egui::Rect::from_min_max(pos2(0.0, uv_line_top), pos2(1.0, uv_line_bottom));
+                let uv_rect =
+                    egui::Rect::from_min_max(pos2(0.0, uv_line_top), pos2(1.0, uv_line_bottom));
 
                 if line < current_ppu_line {
                     mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::WHITE);
@@ -790,11 +899,20 @@ impl TraceEventsView {
 
         // Find the first line sync events (when the emulator starts then the line sync might not be the first event)
         {
-            let ppu_events = if show_current_events { &nes.ppu_mut().debug.trace_events_current } else { &nes.ppu_mut().debug.trace_events_prev };
+            let ppu_events = if show_current_events {
+                &nes.ppu_mut().debug.trace_events_current
+            } else {
+                &nes.ppu_mut().debug.trace_events_prev
+            };
             //println!("Event trace buffer len = {}", events.len());
 
             for (i, event) in ppu_events[0..].iter().enumerate() {
-                if let TraceEvent::PpuCpuLineSync { cpu_clk, ppu_clk: _, line } = event {
+                if let TraceEvent::PpuCpuLineSync {
+                    cpu_clk,
+                    ppu_clk: _,
+                    line,
+                } = event
+                {
                     next_line = Some((*line, *cpu_clk));
                     ppu_line_start_index = i;
                     break;
@@ -803,7 +921,11 @@ impl TraceEventsView {
 
             if let Some((_, first_line_start_clk)) = next_line {
                 let mut found = false;
-                let apu_events = if show_current_events { &nes.apu_mut().debug.trace_events_current } else { &nes.apu_mut().debug.trace_events_prev };
+                let apu_events = if show_current_events {
+                    &nes.apu_mut().debug.trace_events_current
+                } else {
+                    &nes.apu_mut().debug.trace_events_prev
+                };
                 for (i, event) in apu_events[0..].iter().enumerate() {
                     if let TraceEvent::CpuClockLineSync { cpu_clk } = event {
                         if *cpu_clk == first_line_start_clk {
@@ -840,30 +962,34 @@ impl TraceEventsView {
         // after the completion of a PPU clock cycle.
         //
         while next_line.is_some() {
-
             // Inherit the state of next_scanline_view from the previous line (which may contain overflow
             // state from the previous line) and then make sure next_scanline_view is clear for any
             // further overflow state
             std::mem::swap(&mut self.scanline_view, &mut self.next_scanline_view);
-            std::mem::swap(&mut scanline_view_is_clear, &mut next_scanline_view_is_clear);
+            std::mem::swap(
+                &mut scanline_view_is_clear,
+                &mut next_scanline_view_is_clear,
+            );
             if !next_scanline_view_is_clear {
                 self.next_scanline_view = vec![DotView::default(); TRACE_EVENTS_DOT_WIDTH];
                 next_scanline_view_is_clear = true;
             }
 
             let (current_line, line_start_cpu_clk) = next_line.unwrap();
-            let line_y_gap_min = current_line as f32 * (line_height + line_gap_height) + line_height;
+            let line_y_gap_min =
+                current_line as f32 * (line_height + line_gap_height) + line_height;
             let line_y_gap_max = line_y_gap_min + line_gap_height;
 
             // Determine if this line is going to be culled, though we don't jump ahead
             // immediately since we still have to find the next line start even if we
             // aren't rendering this line
-            let cull_line = if line_y_gap_max < viewport_rect.min.y || line_y_gap_min > viewport_rect.max.y {
-                //println!("Culling line {current_line} line");
-                true
-            } else  {
-                false
-            };
+            let cull_line =
+                if line_y_gap_max < viewport_rect.min.y || line_y_gap_min > viewport_rect.max.y {
+                    //println!("Culling line {current_line} line");
+                    true
+                } else {
+                    false
+                };
 
             // Temporarily pluck the scanline_view and next_scanline_view vectors out of self
             // so we can access self state while also updating view state
@@ -871,11 +997,23 @@ impl TraceEventsView {
                 let mut borrowed_scanline_view = vec![];
                 let mut borrowed_next_scanline_view = vec![];
                 std::mem::swap(&mut borrowed_scanline_view, &mut self.scanline_view);
-                std::mem::swap(&mut borrowed_next_scanline_view, &mut self.next_scanline_view);
+                std::mem::swap(
+                    &mut borrowed_next_scanline_view,
+                    &mut self.next_scanline_view,
+                );
 
-                let (found_next_line, modified_scanline, modified_next_scanline) =
-                    self.process_main_events_line(nes, cull_line, &dot_horizontal_cull, show_current_events, &ppu_to_cpu_mapper, ppu_line_start_index, line_start_cpu_clk,
-                        &mut borrowed_scanline_view, &mut borrowed_next_scanline_view);
+                let (found_next_line, modified_scanline, modified_next_scanline) = self
+                    .process_main_events_line(
+                        nes,
+                        cull_line,
+                        &dot_horizontal_cull,
+                        show_current_events,
+                        &ppu_to_cpu_mapper,
+                        ppu_line_start_index,
+                        line_start_cpu_clk,
+                        &mut borrowed_scanline_view,
+                        &mut borrowed_next_scanline_view,
+                    );
                 if let Some((next_line_clk_start, line, next_line_start_index)) = found_next_line {
                     next_line = Some((line, next_line_clk_start));
                     ppu_line_start_index = next_line_start_index;
@@ -893,9 +1031,17 @@ impl TraceEventsView {
 
                 // Next scan through APU events up until the next line sync (and check it's consistent with the main trace events)
                 // For secondary events we can re-use the line_cpu_to_dot mapping we set up above
-                let (found_next_apu_line, modified_scanline, modified_next_scanline) =
-                    self.process_secondary_apu_events_line(nes, cull_line, &dot_horizontal_cull, show_current_events, apu_line_start_index, line_start_cpu_clk,
-                        &mut borrowed_scanline_view, &mut borrowed_next_scanline_view);
+                let (found_next_apu_line, modified_scanline, modified_next_scanline) = self
+                    .process_secondary_apu_events_line(
+                        nes,
+                        cull_line,
+                        &dot_horizontal_cull,
+                        show_current_events,
+                        apu_line_start_index,
+                        line_start_cpu_clk,
+                        &mut borrowed_scanline_view,
+                        &mut borrowed_next_scanline_view,
+                    );
                 if let Some((next_line_clk_start, next_line_start_index)) = found_next_apu_line {
                     #[cfg(debug_assertions)]
                     {
@@ -917,7 +1063,10 @@ impl TraceEventsView {
                 }
 
                 std::mem::swap(&mut borrowed_scanline_view, &mut self.scanline_view);
-                std::mem::swap(&mut borrowed_next_scanline_view, &mut self.next_scanline_view);
+                std::mem::swap(
+                    &mut borrowed_next_scanline_view,
+                    &mut self.next_scanline_view,
+                );
             }
 
             if cull_line {
@@ -945,7 +1094,10 @@ impl TraceEventsView {
 
                 let dot_x_gap_min = px_width * i as f32;
                 let dot_x_gap_max = px_width * (i + 1) as f32;
-                let rect = Rect::from_min_max(allocation_pos + vec2(dot_x_gap_min, line_y_gap_min), allocation_pos + vec2(dot_x_gap_max, line_y_gap_max));
+                let rect = Rect::from_min_max(
+                    allocation_pos + vec2(dot_x_gap_min, line_y_gap_min),
+                    allocation_pos + vec2(dot_x_gap_max, line_y_gap_max),
+                );
                 self.draw_dot_view(nes, ui, &painter, dot, current_line, i as u16, rect);
             }
             std::mem::swap(&mut borrowed_view, &mut self.scanline_view);
@@ -956,9 +1108,15 @@ impl TraceEventsView {
         // Draw a line to represent the line that the PPU is currently processing
         let ppu_line = nes.ppu_mut().line;
         let ppu_line_y = ppu_line as f32 * (line_height + line_gap_height);
-        let ppu_dot_x = allocation_width * (nes.ppu_mut().dot as f32 / TRACE_EVENTS_DOT_WIDTH as f32);
-        painter.line_segment([allocation_pos + vec2(0.0f32, ppu_line_y), allocation_pos + vec2(ppu_dot_x, ppu_line_y)], (1.0f32, egui::Color32::YELLOW));
-
+        let ppu_dot_x =
+            allocation_width * (nes.ppu_mut().dot as f32 / TRACE_EVENTS_DOT_WIDTH as f32);
+        painter.line_segment(
+            [
+                allocation_pos + vec2(0.0f32, ppu_line_y),
+                allocation_pos + vec2(ppu_dot_x, ppu_line_y),
+            ],
+            (1.0f32, egui::Color32::YELLOW),
+        );
 
         if let Some(hover_pos) = response.hover_pos() {
             let x = ((hover_pos.x - allocation_pos.x) * allocation_x_to_nes_px) as usize;
@@ -979,12 +1137,12 @@ impl TraceEventsView {
     }
 
     pub fn draw_left_sidebar(&mut self, nes: &mut Nes, ui: &mut Ui) {
-    // show_irq_interrupts: bool,
-    // show_nmi_interrupts: bool,
-    // show_dma_io: bool,
-    // show_ppu_register_io: bool,
-    // show_apu_register_io: bool,
-    // show_mapper_register_io: bool,
+        // show_irq_interrupts: bool,
+        // show_nmi_interrupts: bool,
+        // show_dma_io: bool,
+        // show_ppu_register_io: bool,
+        // show_apu_register_io: bool,
+        // show_mapper_register_io: bool,
 
         ui.toggle_value(&mut self.show_irq_interrupts, "IRQs");
         ui.toggle_value(&mut self.show_nmi_interrupts, "NMIs");
@@ -995,30 +1153,30 @@ impl TraceEventsView {
         ui.toggle_value(&mut self.show_apu_sequencer, "APU Sequencer");
         //ui.toggle_value(&mut self.show_apu_output, "APU Output");
         //if self.show_apu_output {
-            egui::ComboBox::from_label("APU Output")
-                .selected_text(format!("{:?}", self.show_apu_output))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::None, "None");
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::Mixer, "Mixer");
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::Pulse1, "Pulse 1");
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::Pulse2, "Pulse 2");
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::Noise, "Noise");
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::Triangle, "Triangle");
-                    ui.selectable_value(&mut self.show_apu_output, ApuOutput::Dmc, "Dmc");
-                }
-            );
+        egui::ComboBox::from_label("APU Output")
+            .selected_text(format!("{:?}", self.show_apu_output))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::None, "None");
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::Mixer, "Mixer");
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::Pulse1, "Pulse 1");
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::Pulse2, "Pulse 2");
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::Noise, "Noise");
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::Triangle, "Triangle");
+                ui.selectable_value(&mut self.show_apu_output, ApuOutput::Dmc, "Dmc");
+            });
         //}
     }
 
-    pub fn draw_right_sidebar(&mut self, nes: &mut Nes, ui: &mut Ui) {
-
-    }
+    pub fn draw_right_sidebar(&mut self, nes: &mut Nes, ui: &mut Ui) {}
 
     pub fn draw(&mut self, nes: &mut Nes, ctx: &egui::Context) {
         if self.queue_screen_fb_upload {
             let _hook_state = self.hook_state.borrow();
-            let copy = full_framebuffer_image_delta(&self.hook_state.borrow().screen_framebuffer_front);
-            ctx.tex_manager().write().set(self.screen_texture.id(), copy);
+            let copy =
+                full_framebuffer_image_delta(&self.hook_state.borrow().screen_framebuffer_front);
+            ctx.tex_manager()
+                .write()
+                .set(self.screen_texture.id(), copy);
             self.queue_screen_fb_upload = false;
         }
         egui::Window::new("Trace Events")
@@ -1026,7 +1184,6 @@ impl TraceEventsView {
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
-
                 let panels_width = ui.fonts().pixels_per_point() * 100.0;
 
                 egui::SidePanel::left("trace_events_options_panel")
@@ -1043,7 +1200,7 @@ impl TraceEventsView {
                         //ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_x()));
                         //ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_y()));
                         self.draw_right_sidebar(nes, ui);
-                });
+                    });
 
                 egui::TopBottomPanel::bottom("trace_events_footer").show_inside(ui, |ui| {
                     ui.label(format!("[{}, {}]", self.hover_pos[0], self.hover_pos[1]));
@@ -1053,10 +1210,8 @@ impl TraceEventsView {
                 egui::CentralPanel::default()
                     //.frame(frame)
                     .show_inside(ui, |ui| {
-
                         egui::ScrollArea::both().show_viewport(ui, |ui, viewport_rect| {
                             self.draw_viewport(nes, ui, viewport_rect);
-
                         });
                         /*
                         let x_off = self.nes.system_ppu().scroll_x();
@@ -1067,8 +1222,7 @@ impl TraceEventsView {
                             egui::Rounding::none(),
                             egui::Stroke::new(2.0, Color32::YELLOW));
                             */
-                });
-
-        });
+                    });
+            });
     }
 }

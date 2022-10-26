@@ -2,7 +2,7 @@ use bitflags::bitflags;
 
 //use crate::emulation::CPU_CLOCK_HZ;
 
-use crate::trace::{TraceEvent, TraceBuffer};
+use crate::trace::{TraceBuffer, TraceEvent};
 
 /*
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,7 +24,7 @@ bitflags! {
 pub enum FrameSequencerMode {
     #[default]
     FourStep,
-    FiveStep
+    FiveStep,
 }
 
 #[derive(Clone, Default)]
@@ -56,19 +56,16 @@ impl FrameSequencer {
             interrupt_enable: true,
             clock,
 
-            ..Default::default()
-
-            /*
-            clock: 0,
-            queue_clock_reset: false,
-            mode: FrameSequencerMode::FourStep,
-            interrupt_enable: true,
-            interrupt_flagged: false,
-            pending_register_write: None,
-            pending_register_write_delay: None,
-            */
-
-            //pending_4017_write_clock: false,
+            ..Default::default() /*
+                                 clock: 0,
+                                 queue_clock_reset: false,
+                                 mode: FrameSequencerMode::FourStep,
+                                 interrupt_enable: true,
+                                 interrupt_flagged: false,
+                                 pending_register_write: None,
+                                 pending_register_write_delay: None,
+                                 */
+                                 //pending_4017_write_clock: false,
         }
     }
 
@@ -91,7 +88,6 @@ impl FrameSequencer {
     }
 
     pub fn write_register(&mut self, value: u8) {
-
         // "Writing to $4017 with bit 7 set ($80) will immediately clock all of its controlled units at the
         // beginning of the 5-step sequence; with bit 7 clear, only the sequence is reset without clocking
         // any of its units."
@@ -100,9 +96,7 @@ impl FrameSequencer {
         // behaviour. e.g. apu_test/rom_singles/1-len_ctr.nes does two back-to-back writes of $80 to $4017
         // with a length counter of two and expects that the APU will be silenced.
         if value & 0b1000_0000 != 0 {
-
         } else {
-
         }
 
         // "If the write occurs during an APU cycle, the effects occur 3 CPU cycles after the $4017 write cycle,
@@ -129,7 +123,11 @@ impl FrameSequencer {
 
         {
             let is_apu_clock = self.clock % 2 == 1;
-            let apply_target = if is_apu_clock { self.clock + 3 } else { self.clock + 4 };
+            let apply_target = if is_apu_clock {
+                self.clock + 3
+            } else {
+                self.clock + 4
+            };
             //println!("Queue pending 4017 write: clock = {}, expect write apply @ {}", self.clock, apply_target);
         }
 
@@ -152,7 +150,6 @@ impl FrameSequencer {
     }
 
     pub fn step(&mut self, apu_clock: u64, trace: &mut TraceBuffer) -> FrameSequencerStatus {
-
         if self.queue_clock_reset {
             // Note: we must only ever reset the clock to zero on an even clock cycle
             // to ensure that the apu_clock and self.clock maintain the same polarity.
@@ -196,22 +193,20 @@ impl FrameSequencer {
                         self.set_irq();
                         FrameSequencerStatus::default()
                     }
-                    _ => FrameSequencerStatus::default()
+                    _ => FrameSequencerStatus::default(),
                 }
             }
-            FrameSequencerMode::FiveStep => {
-                match self.clock {
-                    7457 => FrameSequencerStatus::QUARTER_FRAME,
-                    14913 => FrameSequencerStatus::QUARTER_FRAME | FrameSequencerStatus::HALF_FRAME,
-                    22371 => FrameSequencerStatus::QUARTER_FRAME,
-                    37281 => FrameSequencerStatus::QUARTER_FRAME | FrameSequencerStatus::HALF_FRAME,
-                    37282 => {
-                        self.clock = 0;
-                        FrameSequencerStatus::default()
-                    }
-                    _ => FrameSequencerStatus::default()
+            FrameSequencerMode::FiveStep => match self.clock {
+                7457 => FrameSequencerStatus::QUARTER_FRAME,
+                14913 => FrameSequencerStatus::QUARTER_FRAME | FrameSequencerStatus::HALF_FRAME,
+                22371 => FrameSequencerStatus::QUARTER_FRAME,
+                37281 => FrameSequencerStatus::QUARTER_FRAME | FrameSequencerStatus::HALF_FRAME,
+                37282 => {
+                    self.clock = 0;
+                    FrameSequencerStatus::default()
                 }
-            }
+                _ => FrameSequencerStatus::default(),
+            },
         };
         //if status != FrameSequencerStatus::default() {
         //    println!("Frame Sequencer Status = {:?}, clock = {}", status, self.clock);
@@ -249,9 +244,12 @@ impl FrameSequencer {
         //    println!("half frame: status = {status:?}");
         //}
 
-        #[cfg(feature="trace-events")]
+        #[cfg(feature = "trace-events")]
         if !status.is_empty() {
-            trace.push(TraceEvent::ApuFrameSeqFrame { clk_lower: (apu_clock & 0xff) as u8, status });
+            trace.push(TraceEvent::ApuFrameSeqFrame {
+                clk_lower: (apu_clock & 0xff) as u8,
+                status,
+            });
         }
 
         // If other units are only stepped on APU cycles then they could miss half/quarter frames if
@@ -267,5 +265,4 @@ impl FrameSequencer {
         }
         status
     }
-
 }

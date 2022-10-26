@@ -1,6 +1,5 @@
 use crate::trace::{TraceBuffer, TraceEvent};
 
-
 #[derive(Clone, Default)]
 pub struct Mixer {
     pub square1_muted: bool,
@@ -13,14 +12,13 @@ pub struct Mixer {
 impl Mixer {
     pub fn new() -> Self {
         Self {
-            ..Default::default()
-            /*
-            square1_muted: false,
-            square2_muted: false,
-            triangle_muted: false,
-            noise_muted: false,
-            dmc_muted: false,
-            */
+            ..Default::default() /*
+                                 square1_muted: false,
+                                 square2_muted: false,
+                                 triangle_muted: false,
+                                 noise_muted: false,
+                                 dmc_muted: false,
+                                 */
         }
     }
 
@@ -36,7 +34,7 @@ impl Mixer {
         noise_channel: u8,
         dmc_channel: u8,
         clock: u64,
-        trace: &mut TraceBuffer
+        trace: &mut TraceBuffer,
     ) -> f32 {
         debug_assert!(square1_channel < 16);
         debug_assert!(square2_channel < 16);
@@ -49,9 +47,21 @@ impl Mixer {
         //    println!("Mixer: square 2 input = {square2_channel}");
         //}
 
-        let square1_channel = if !self.square1_muted { square1_channel } else { 0 };
-        let square2_channel = if !self.square2_muted { square2_channel } else { 0 };
-        let triangle_channel = if !self.triangle_muted { triangle_channel } else { 0 };
+        let square1_channel = if !self.square1_muted {
+            square1_channel
+        } else {
+            0
+        };
+        let square2_channel = if !self.square2_muted {
+            square2_channel
+        } else {
+            0
+        };
+        let triangle_channel = if !self.triangle_muted {
+            triangle_channel
+        } else {
+            0
+        };
         let noise_channel = if !self.noise_muted { noise_channel } else { 0 };
         let dmc_channel = if !self.dmc_muted { dmc_channel } else { 0 };
 
@@ -67,7 +77,9 @@ impl Mixer {
         //    println!("Square output {square_out}");
         //}
 
-        let tnd_denominator = (triangle_channel as f64 / 8227.0f64) + (noise_channel as f64 / 12241.0f64) + (dmc_channel as f64 / 22638.0f64);
+        let tnd_denominator = (triangle_channel as f64 / 8227.0f64)
+            + (noise_channel as f64 / 12241.0f64)
+            + (dmc_channel as f64 / 22638.0f64);
         let tnd_out = if tnd_denominator == 0.0f64 {
             0.0f64
         } else {
@@ -79,7 +91,7 @@ impl Mixer {
         //let sample = ((square_out + tnd_out) - 0.5) * 2.0;
         let sample = square_out + tnd_out;
 
-        #[cfg(feature="trace-events")]
+        #[cfg(feature = "trace-events")]
         {
             trace.push(TraceEvent::ApuMixerOut {
                 clk_lower: (clock & 0xff) as u8,
@@ -88,7 +100,7 @@ impl Mixer {
                 square2: square2_channel,
                 triangle: triangle_channel,
                 noise: noise_channel,
-                dmc: dmc_channel
+                dmc: dmc_channel,
             })
         }
 
@@ -116,4 +128,3 @@ impl Mixer {
         self.dmc_muted = enabled;
     }
 }
-

@@ -1,4 +1,4 @@
-use egui::{TextureHandle, ColorImage, ImageData, Ui, epaint::ImageDelta, pos2};
+use egui::{epaint::ImageDelta, pos2, ColorImage, ImageData, TextureHandle, Ui};
 use nes_emulator::{constants::*, nes::Nes};
 
 pub struct NametablesView {
@@ -27,7 +27,11 @@ impl NametablesView {
                 pixels: vec![egui::Color32::default(); fb_width * fb_height],
             };
             let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture("nametables_framebuffer", blank, egui::TextureFilter::Nearest);
+            let tex = ctx.load_texture(
+                "nametables_framebuffer",
+                blank,
+                egui::TextureFilter::Nearest,
+            );
             tex
         };
 
@@ -71,14 +75,18 @@ impl NametablesView {
     }
 
     pub fn draw(&mut self, ctx: &egui::Context) {
-
         if self.queue_fb_upload {
-            let copy = ImageDelta::full(ImageData::Color(ColorImage {
-                size: [self.fb_width, self.fb_height],
-                pixels: self.framebuffer.chunks_exact(3)
-                    .map(|p| egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
-                    .collect(),
-            }), egui::TextureFilter::Nearest);
+            let copy = ImageDelta::full(
+                ImageData::Color(ColorImage {
+                    size: [self.fb_width, self.fb_height],
+                    pixels: self
+                        .framebuffer
+                        .chunks_exact(3)
+                        .map(|p| egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
+                        .collect(),
+                }),
+                egui::TextureFilter::Nearest,
+            );
 
             ctx.tex_manager().write().set(self.texture.id(), copy);
             self.queue_fb_upload = false;
@@ -89,7 +97,6 @@ impl NametablesView {
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
-
                 let panels_width = ui.fonts().pixels_per_point() * 100.0;
 
                 egui::SidePanel::left("nametables_options_panel")
@@ -104,7 +111,7 @@ impl NametablesView {
                     .show_inside(ui, |_ui| {
                         //ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_x()));
                         //ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_y()));
-                });
+                    });
 
                 egui::TopBottomPanel::bottom("nametables_footer").show_inside(ui, |ui| {
                     ui.label(format!("[{}, {}]", self.hover_pos[0], self.hover_pos[1]));
@@ -114,16 +121,24 @@ impl NametablesView {
                 egui::CentralPanel::default()
                     //.frame(frame)
                     .show_inside(ui, |ui| {
+                        let (response, painter) = ui.allocate_painter(
+                            egui::Vec2::new(self.fb_width as f32, self.fb_height as f32),
+                            egui::Sense::hover(),
+                        );
 
-                        let (response, painter) =
-                            ui.allocate_painter(egui::Vec2::new(self.fb_width as f32, self.fb_height as f32), egui::Sense::hover());
-
-                        let _img = egui::Image::new(self.texture.id(), egui::Vec2::new(self.fb_width as f32, self.fb_height as f32));
+                        let _img = egui::Image::new(
+                            self.texture.id(),
+                            egui::Vec2::new(self.fb_width as f32, self.fb_height as f32),
+                        );
                         //let response = ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
-                                        // TODO(emilk): builder pattern for Mesh
+                        // TODO(emilk): builder pattern for Mesh
 
                         let mut mesh = egui::Mesh::with_texture(self.texture.id());
-                        mesh.add_rect_with_uv(response.rect, egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE,);
+                        mesh.add_rect_with_uv(
+                            response.rect,
+                            egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
                         painter.add(egui::Shape::mesh(mesh));
 
                         let img_pos = response.rect.left_top();
@@ -158,8 +173,7 @@ impl NametablesView {
                             egui::Rounding::none(),
                             egui::Stroke::new(2.0, Color32::YELLOW));
                             */
-                });
-
-        });
+                    });
+            });
     }
 }

@@ -1,14 +1,13 @@
 #[allow(unused_imports)]
-use log::{error, trace, debug};
+use log::{debug, error, trace};
 
-use crate::constants::*;
-use crate::mappers::Mapper;
 use crate::binary::INesConfig;
 use crate::cartridge::NameTableMirror;
+use crate::constants::*;
+use crate::mappers::Mapper;
 
-use super::mirror_vram_address;
 use super::bank_select_mask;
-
+use super::mirror_vram_address;
 
 /// iNES Mapper 007: aka AxROM
 ///
@@ -51,7 +50,6 @@ pub struct Mapper7 {
 }
 
 impl Mapper7 {
-
     pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
         // Although we expect the PRG / CHR data to be padded to have a page aligned size
         // when they are loaded (16K and 8K alignment respectively), for this mapper
@@ -84,14 +82,12 @@ impl Mapper7 {
     }
 
     fn system_bus_read_direct(&self, addr: u16) -> u8 {
-         match addr {
+        match addr {
             0x8000..=0xffff => {
                 let off = addr as usize - 0x8000 + self.prg_bank;
                 arr_read!(self.prg_rom, off as usize)
             }
-            _ => {
-                return 0
-            }
+            _ => return 0,
         }
     }
 }
@@ -116,11 +112,16 @@ impl Mapper for Mapper7 {
         }
 
         match addr {
-            0x8000..=0xffff => { // PRG Bank Select
-                let page_select = (data  & 0b1111 & self.prg_bank_select_mask) % self.n_prg_pages;
+            0x8000..=0xffff => {
+                // PRG Bank Select
+                let page_select = (data & 0b1111 & self.prg_bank_select_mask) % self.n_prg_pages;
                 self.prg_bank = PAGE_SIZE_32K * page_select as usize;
 
-                self.single_screen_offset = if data & 0b1_0000 == 0 { 0 } else { PAGE_SIZE_1K };
+                self.single_screen_offset = if data & 0b1_0000 == 0 {
+                    0
+                } else {
+                    PAGE_SIZE_1K
+                };
             }
             _ => {}
         }
@@ -131,10 +132,14 @@ impl Mapper for Mapper7 {
             0x0000..=0x1fff => {
                 arr_read!(self.chr_data, addr as usize)
             }
-            0x2000..=0x3fff => { // VRAM
-                arr_read!(self.vram, mirror_vram_address(addr, NameTableMirror::SingleScreenA))
+            0x2000..=0x3fff => {
+                // VRAM
+                arr_read!(
+                    self.vram,
+                    mirror_vram_address(addr, NameTableMirror::SingleScreenA)
+                )
             }
-            _ => { 0 }
+            _ => 0,
         }
     }
 
@@ -147,12 +152,19 @@ impl Mapper for Mapper7 {
             0x0000..=0x1fff => {
                 arr_write!(self.chr_data, addr as usize, data);
             }
-            0x2000..=0x3fff => { // VRAM
-                arr_write!(self.vram, mirror_vram_address(addr, NameTableMirror::SingleScreenA), data);
+            0x2000..=0x3fff => {
+                // VRAM
+                arr_write!(
+                    self.vram,
+                    mirror_vram_address(addr, NameTableMirror::SingleScreenA),
+                    data
+                );
             }
             _ => {}
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::SingleScreenA }
+    fn mirror_mode(&self) -> NameTableMirror {
+        NameTableMirror::SingleScreenA
+    }
 }

@@ -9,17 +9,17 @@ use crate::binary::NesBinaryConfig;
 use crate::cpu::instruction::FetchedOperand;
 use crate::cpu::instruction::Instruction;
 //use crate::cartridge;
-use crate::framebuffer::*;
 use crate::cartridge::*;
 use crate::constants::*;
-use crate::genie::GameGenieCode;
-#[cfg(feature="trace")]
-use crate::hook::{HooksList, HookHandle};
-use crate::system::*;
 use crate::cpu::cpu::*;
+use crate::framebuffer::*;
+use crate::genie::GameGenieCode;
+#[cfg(feature = "trace")]
+use crate::hook::{HookHandle, HooksList};
 use crate::ppu::*;
+use crate::system::*;
 
-#[cfg(feature="nsf-player")]
+#[cfg(feature = "nsf-player")]
 use crate::binary::NsfConfig;
 
 pub type FnInstructionTraceHook = dyn FnMut(&mut Nes, &TraceState);
@@ -67,7 +67,7 @@ pub enum ProgressTarget {
     /// This is generally only recommended for batched, non-interactive emulation
     /// in case the emulator is unable to run at full speed (such as for debug
     /// builds)
-    FrameReady
+    FrameReady,
 }
 
 pub enum ProgressStatus {
@@ -76,7 +76,7 @@ pub enum ProgressStatus {
     Breakpoint,
 }
 
-#[cfg(feature="nsf-player")]
+#[cfg(feature = "nsf-player")]
 #[derive(Clone, Debug, Default)]
 struct NsfPlayer {
     nsf_config: Option<NsfConfig>,
@@ -86,7 +86,7 @@ struct NsfPlayer {
     nsf_last_step_cycle: u64,
     nsf_current_track: u8,
 }
-#[cfg(feature="nsf-player")]
+#[cfg(feature = "nsf-player")]
 impl NsfPlayer {
     pub(crate) fn restart(&mut self) {
         *self = Self {
@@ -95,7 +95,6 @@ impl NsfPlayer {
         };
     }
 }
-
 
 /// The top-level representation of a full NES console
 pub struct Nes {
@@ -109,18 +108,17 @@ pub struct Nes {
 
     system: System,
 
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     ppu_sim_visible: bool,
 
-    #[cfg(feature="nsf-player")]
+    #[cfg(feature = "nsf-player")]
     nsf_player: NsfPlayer,
 
-    #[cfg(feature="trace")]
+    #[cfg(feature = "trace")]
     trace_hooks: HooksList<FnInstructionTraceHook>,
 }
 
 impl Nes {
-
     /// Creates a new Nes console, powered on but with no cartridge inserted.
     ///
     /// The next step is to load and insert a cartridge, either manually via
@@ -148,10 +146,10 @@ impl Nes {
             cpu,
             system,
 
-            #[cfg(feature="ppu-sim")]
+            #[cfg(feature = "ppu-sim")]
             ppu_sim_visible: true,
 
-            #[cfg(feature="nsf-player")]
+            #[cfg(feature = "nsf-player")]
             nsf_player: NsfPlayer {
                 nsf_config: None,
                 nsf_initialized: false,
@@ -161,7 +159,7 @@ impl Nes {
                 nsf_current_track: 0,
             },
 
-            #[cfg(feature="trace")]
+            #[cfg(feature = "trace")]
             trace_hooks: HooksList::default(),
         };
 
@@ -202,15 +200,17 @@ impl Nes {
     pub fn insert_cartridge(&mut self, cartridge: Option<Cartridge>) -> Result<()> {
         if let Some(cartridge) = cartridge {
             if let NesBinaryConfig::Nsf(nsf_config) = &cartridge.config {
-                #[cfg(feature="nsf-player")]
+                #[cfg(feature = "nsf-player")]
                 {
                     self.nsf_player.nsf_config = Some(nsf_config.clone());
                     self.system.insert_cartridge(cartridge);
                 }
-                #[cfg(not(feature="nsf-player"))]
+                #[cfg(not(feature = "nsf-player"))]
                 {
                     let _ = nsf_config;
-                    Err(anyhow::anyhow!("NSF cartridges not supported (missing \"nsf-player\" feature"))?
+                    Err(anyhow::anyhow!(
+                        "NSF cartridges not supported (missing \"nsf-player\" feature"
+                    ))?
                 }
             } else {
                 self.system.insert_cartridge(cartridge);
@@ -221,13 +221,14 @@ impl Nes {
         Ok(())
     }
 
-    #[cfg(feature="nsf-player")]
+    #[cfg(feature = "nsf-player")]
     fn nsf_init(&mut self) {
-        #[cfg(feature="nsf-player")]
+        #[cfg(feature = "nsf-player")]
         if let Some(ref nsf_config) = self.nsf_player.nsf_config {
-
             // TODO: handle PAL...
-            self.nsf_player.nsf_step_period = ((nsf_config.ntsc_play_speed as u64 * NTSC_CPU_CLOCK_HZ as u64) / 1_000_000u64) as u64;
+            self.nsf_player.nsf_step_period = ((nsf_config.ntsc_play_speed as u64
+                * NTSC_CPU_CLOCK_HZ as u64)
+                / 1_000_000u64) as u64;
             self.nsf_player.nsf_last_step_cycle = self.cpu.clock;
 
             // "1. Write $00 to all RAM at $0000-$07FF and $6000-$7FFF."
@@ -236,16 +237,16 @@ impl Nes {
             // 2. Initialize the sound registers by writing $00 to $4000-$4013, and $00 then $0F to $4015.
             for i in 0..0x13 {
                 self.system.cpu_write(0x4000 + i, 0x00);
-                self.cpu.clock +=1;
+                self.cpu.clock += 1;
             }
             self.system.cpu_write(0x4015, 0x00);
-            self.cpu.clock +=1;
+            self.cpu.clock += 1;
             self.system.cpu_write(0x4015, 0x0f);
-            self.cpu.clock +=1;
+            self.cpu.clock += 1;
 
             // 3. Initialize the frame counter to 4-step mode ($40 to $4017).
             self.system.cpu_write(0x4017, 0x40);
-            self.cpu.clock +=1;
+            self.cpu.clock += 1;
 
             // 4. If the tune is bank switched, load the bank values from $070-$077 into $5FF8-$5FFF.
             // (handled by Mapper 031)
@@ -260,15 +261,18 @@ impl Nes {
             // 7. Call the music INIT routine.
             let init = nsf_config.init_address;
             self.system.cpu_write(0x5001, (init & 0xff) as u8);
-            self.cpu.clock +=1;
+            self.cpu.clock += 1;
             self.system.cpu_write(0x5002, ((init & 0xff00) >> 8) as u8);
-            self.cpu.clock +=1;
+            self.cpu.clock += 1;
             //self.cpu.add_break(0x5003, false); // break when we hit the infinite loop in the NSF bios
             self.nsf_player.nsf_initialized = false;
             self.nsf_player.nsf_current_track = first_track;
             self.cpu.pc = 0x5000;
 
-            println!("Calling NSF init code: period = {}", self.nsf_player.nsf_step_period);
+            println!(
+                "Calling NSF init code: period = {}",
+                self.nsf_player.nsf_step_period
+            );
         }
     }
 
@@ -284,19 +288,21 @@ impl Nes {
         self.reference_cpu_clock = 0;
         self.reference_timestamp = start_timestamp;
 
-        #[cfg(feature="nsf-player")]
+        #[cfg(feature = "nsf-player")]
         {
             self.nsf_player.restart();
 
             if self.nsf_player.nsf_config.is_some() {
                 self.nsf_init();
             } else {
-                self.cpu.handle_interrupt(&mut self.system, Interrupt::RESET);
+                self.cpu
+                    .handle_interrupt(&mut self.system, Interrupt::RESET);
             }
         }
-        #[cfg(not(feature="nsf-player"))]
+        #[cfg(not(feature = "nsf-player"))]
         {
-            self.cpu.handle_interrupt(&mut self.system, Interrupt::RESET);
+            self.cpu
+                .handle_interrupt(&mut self.system, Interrupt::RESET);
         }
     }
 
@@ -305,7 +311,7 @@ impl Nes {
         self.system.reset();
         self.cpu.reset(&mut self.system);
 
-        #[cfg(feature="nsf-player")]
+        #[cfg(feature = "nsf-player")]
         self.nsf_player.restart();
     }
 
@@ -336,26 +342,28 @@ impl Nes {
 
     /// Read a value from the PPU bus, without side effects
     pub fn peek_ppu_bus(&mut self, addr: u16) -> u8 {
-        self.system.ppu.unbuffered_ppu_bus_peek(&mut self.system.cartridge, addr)
+        self.system
+            .ppu
+            .unbuffered_ppu_bus_peek(&mut self.system.cartridge, addr)
     }
 
     /// Allocate a new framebuffer that is suitable for using as a PPU render target
     ///
     /// To configure the PPU to start rendering to this framebuffer then call [`Ppu:swap_framebuffer`]
     pub fn allocate_framebuffer(&self) -> Framebuffer {
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             self.system.debug.ppu_sim.alloc_framebuffer()
         }
 
-        #[cfg(not(feature="ppu-sim"))]
+        #[cfg(not(feature = "ppu-sim"))]
         {
             self.system.ppu.alloc_framebuffer()
         }
     }
 
     pub fn swap_framebuffer(&mut self, framebuffer: Framebuffer) -> Result<Framebuffer> {
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             if self.ppu_sim_visible {
                 self.system.debug.ppu_sim.swap_framebuffer(framebuffer)
@@ -364,7 +372,7 @@ impl Nes {
             }
         }
 
-        #[cfg(not(feature="ppu-sim"))]
+        #[cfg(not(feature = "ppu-sim"))]
         {
             self.system.ppu.swap_framebuffer(framebuffer)
         }
@@ -377,18 +385,21 @@ impl Nes {
     ///
     /// The `Instruction` referenced in the `TraceState` can be disassembled via [`Instruction::disassemble`]
     /// for display
-    #[cfg(feature="trace")]
-    pub fn add_cpu_instruction_trace_hook(&mut self, func: Box<FnInstructionTraceHook>) -> HookHandle {
+    #[cfg(feature = "trace")]
+    pub fn add_cpu_instruction_trace_hook(
+        &mut self,
+        func: Box<FnInstructionTraceHook>,
+    ) -> HookHandle {
         self.trace_hooks.add_hook(func)
     }
 
     /// Remove a CPU instruction tracing hook
-    #[cfg(feature="trace")]
+    #[cfg(feature = "trace")]
     pub fn remove_cpu_instruction_trace_hook(&mut self, handle: HookHandle) {
         self.trace_hooks.remove_hook(handle);
     }
 
-    #[cfg(feature="trace")]
+    #[cfg(feature = "trace")]
     fn call_cpu_instruction_trace_hooks(&mut self) {
         let trace = &mut self.cpu.trace;
         if trace.last_hook_cycle_count == trace.cpu_clock {
@@ -413,7 +424,8 @@ impl Nes {
         const NANOS_PER_SEC: f64 = 1_000_000_000.0;
 
         let mut delta_clocks = duration.as_secs() * NTSC_CPU_CLOCK_HZ as u64;
-        delta_clocks += ((duration.subsec_nanos() as f64 / NANOS_PER_SEC) * NTSC_CPU_CLOCK_HZ as f64) as u64;
+        delta_clocks +=
+            ((duration.subsec_nanos() as f64 / NANOS_PER_SEC) * NTSC_CPU_CLOCK_HZ as f64) as u64;
 
         delta_clocks
     }
@@ -478,9 +490,9 @@ impl Nes {
     /// needing to borrow `Nes` and it avoids repeatedly checking the [`Nes::model`]
     ///
     /// See: [`Self::cpu_to_ppu_clock`] for more details.
-    pub fn cpu_to_ppu_clock_mapper(&self) -> impl Fn(u64) -> u64{
+    pub fn cpu_to_ppu_clock_mapper(&self) -> impl Fn(u64) -> u64 {
         match self.model {
-            Model::Ntsc => |clk: u64 | clk * 3,
+            Model::Ntsc => |clk: u64| clk * 3,
             Model::Pal => |clk: u64| clk * 3200 / 1000,
         }
     }
@@ -528,9 +540,9 @@ impl Nes {
     /// needing to borrow `Nes` and it avoids repeatedly checking the [`Nes::model`]
     ///
     /// See: [`Self::ppu_to_cpu_clock`] for more details.
-    pub fn ppu_to_cpu_clock_mapper(&self) -> impl Fn(u64) -> u64{
+    pub fn ppu_to_cpu_clock_mapper(&self) -> impl Fn(u64) -> u64 {
         match self.model {
-            Model::Ntsc => |clk: u64 | clk / 3,
+            Model::Ntsc => |clk: u64| clk / 3,
             Model::Pal => |clk: u64| Self::fixed_1000x_ceil(clk * 1000 * 1000 / 3200),
         }
     }
@@ -558,7 +570,7 @@ impl Nes {
         self.system.catch_up_ppu_drift(expected_ppu_clock)
     }
 
-    #[cfg(feature="nsf-player")]
+    #[cfg(feature = "nsf-player")]
     fn nsf_player_step(&mut self) {
         if let Some(ref config) = self.nsf_player.nsf_config {
             println!("Calling NSF play code");
@@ -574,7 +586,7 @@ impl Nes {
         self.nsf_player.nsf_last_step_cycle = self.cpu.clock;
     }
 
-    #[cfg(feature="nsf-player")]
+    #[cfg(feature = "nsf-player")]
     #[inline]
     fn nsf_player_progress(&mut self) {
         if self.nsf_player.nsf_config.is_some() {
@@ -587,7 +599,10 @@ impl Nes {
             }
 
             if self.nsf_player.nsf_initialized {
-                if self.cpu.clock - self.nsf_player.nsf_last_step_cycle > self.nsf_player.nsf_step_period && self.nsf_player.nsf_waiting {
+                if self.cpu.clock - self.nsf_player.nsf_last_step_cycle
+                    > self.nsf_player.nsf_step_period
+                    && self.nsf_player.nsf_waiting
+                {
                     self.nsf_player_step();
                 }
                 //println!("progress = {} / {}", self.nsf_step_progress, self.nsf_step_period);
@@ -595,16 +610,19 @@ impl Nes {
         }
     }
 
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     fn clear_breakpoint_flags(&mut self) {
         self.cpu.debug.breakpoint_hit = false;
         self.system.debug.watch_hit = false;
         self.system.ppu.debug.breakpoint_hit = false;
     }
 
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     fn check_for_breakpoint(&mut self) -> bool {
-        if self.cpu.debug.breakpoint_hit | self.system.debug.watch_hit | self.system.ppu.debug.breakpoint_hit {
+        if self.cpu.debug.breakpoint_hit
+            | self.system.debug.watch_hit
+            | self.system.ppu.debug.breakpoint_hit
+        {
             self.clear_breakpoint_flags();
             true
         } else {
@@ -623,7 +641,9 @@ impl Nes {
         // We treat the CPU as our master clock and the PPU is driven according
         // to the forward progress of the CPU's clock.
         let cpu_clock_target = match target {
-            ProgressTarget::Time(target_timestamp) => self.cpu_clocks_for_time_since_power_cycle(target_timestamp),
+            ProgressTarget::Time(target_timestamp) => {
+                self.cpu_clocks_for_time_since_power_cycle(target_timestamp)
+            }
             ProgressTarget::Clock(clock) => clock,
             ProgressTarget::FrameReady => u64::MAX,
         };
@@ -635,7 +655,7 @@ impl Nes {
             // we will simply resume caching up when `progress()` is re-called later.
             self.catch_up_ppu_drift();
 
-            #[cfg(feature="debugger")]
+            #[cfg(feature = "debugger")]
             if self.check_for_breakpoint() {
                 return ProgressStatus::Breakpoint;
             }
@@ -646,7 +666,7 @@ impl Nes {
                 return ProgressStatus::FrameReady;
             }
 
-            #[cfg(feature="trace")]
+            #[cfg(feature = "trace")]
             {
                 self.cpu.trace.ppu_line = self.ppu_mut().line;
                 self.cpu.trace.ppu_dot = self.ppu_mut().dot;
@@ -654,10 +674,10 @@ impl Nes {
             self.cpu.step_instruction(&mut self.system);
             debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
 
-            #[cfg(feature="nsf-player")]
+            #[cfg(feature = "nsf-player")]
             self.nsf_player_progress();
 
-            #[cfg(feature="trace")]
+            #[cfg(feature = "trace")]
             self.call_cpu_instruction_trace_hooks();
 
             if self.cpu.clock >= cpu_clock_target {
@@ -677,7 +697,7 @@ impl Nes {
 
     /// Steps the CPU (and system) forward by a single instruction
     pub fn step_instruction_in(&mut self) {
-        #[cfg(feature="trace")]
+        #[cfg(feature = "trace")]
         {
             self.cpu.trace.ppu_line = self.ppu_mut().line;
             self.cpu.trace.ppu_dot = self.ppu_mut().dot;
@@ -686,15 +706,15 @@ impl Nes {
         debug_assert_eq!(self.cpu.clock, self.system.apu_clock());
 
         // Ignore break/watch points while single stepping
-        #[cfg(feature="debugger")]
+        #[cfg(feature = "debugger")]
         self.clear_breakpoint_flags();
 
         self.catch_up_ppu_drift();
 
-        #[cfg(feature="nsf-player")]
+        #[cfg(feature = "nsf-player")]
         self.nsf_player_progress();
 
-        #[cfg(feature="trace")]
+        #[cfg(feature = "trace")]
         self.call_cpu_instruction_trace_hooks();
     }
 
@@ -705,11 +725,14 @@ impl Nes {
     ///
     /// NB: It's possible a different breakpoint will be hit and so this
     /// should always be explicitly removed via [`Cpu::remove_break`]
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub fn add_tmp_step_over_breakpoint(&mut self) -> BreakpointHandle {
         let current_instruction = self.cpu.pc_peek_instruction(&mut self.system);
         let break_addr = self.cpu.pc.wrapping_add(current_instruction.len() as u16);
-        self.cpu.add_break(break_addr, Box::new(|_cpu, _addr| { BreakpointCallbackAction::Remove }))
+        self.cpu.add_break(
+            break_addr,
+            Box::new(|_cpu, _addr| BreakpointCallbackAction::Remove),
+        )
     }
 
     /// Creates a temporary breakpoint for stepping out of a function
@@ -719,7 +742,7 @@ impl Nes {
     ///
     /// NB: It's possible a different breakpoint will be hit and so this
     /// should always be explicitly removed via [`Cpu::remove_break`]
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub fn add_tmp_step_out_breakpoint(&mut self) -> Option<BreakpointHandle> {
         let mut out_addr = None;
         for (addr, _) in self.cpu.backtrace(&mut self.system) {
@@ -727,7 +750,10 @@ impl Nes {
             break;
         }
         if let Some(out_addr) = out_addr {
-            Some(self.cpu.add_break(out_addr, Box::new(|_cpu, _addr| { BreakpointCallbackAction::Remove })))
+            Some(self.cpu.add_break(
+                out_addr,
+                Box::new(|_cpu, _addr| BreakpointCallbackAction::Remove),
+            ))
         } else {
             None
         }
@@ -746,14 +772,16 @@ impl Nes {
     }
 
     pub fn debug_sample_nametable(&mut self, x: usize, y: usize) -> [u8; 3] {
-        self.system.ppu.peek_vram_four_screens(x, y, &mut self.system.cartridge)
+        self.system
+            .ppu
+            .peek_vram_four_screens(x, y, &mut self.system.cartridge)
     }
 
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub fn set_ppu_sim_visible(&mut self, sim_visible: bool) {
         self.ppu_sim_visible = sim_visible;
     }
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub fn ppu_sim_visible(&mut self) -> bool {
         self.ppu_sim_visible
     }
@@ -761,7 +789,12 @@ impl Nes {
     pub fn peek_instruction(&mut self, addr: u16) -> (Instruction, FetchedOperand) {
         let opcode = self.system.peek(addr);
         let instruction = Instruction::from(opcode);
-        let operand = self.cpu.peek_operand(&mut self.system, addr.wrapping_add(1), instruction.mode, instruction.oops_handling);
+        let operand = self.cpu.peek_operand(
+            &mut self.system,
+            addr.wrapping_add(1),
+            instruction.mode,
+            instruction.oops_handling,
+        );
         (instruction, operand)
     }
 

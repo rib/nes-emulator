@@ -1,16 +1,16 @@
-#[allow(unused_imports)]
-use log::{debug, warn};
 use anyhow::anyhow;
 use anyhow::Result;
+#[allow(unused_imports)]
+use log::{debug, warn};
 
+use crate::cartridge::{NameTableMirror, TVSystemCompatibility};
 use crate::constants::*;
-use crate::cartridge::{TVSystemCompatibility, NameTableMirror};
 
 #[derive(Debug)]
 pub enum Type {
     NSF,
     INES,
-    Unknown
+    Unknown,
 }
 
 /// iNES file header
@@ -67,7 +67,6 @@ pub struct INesConfig {
 }
 
 impl INesConfig {
-
     /// Returns [`Self::n_prg_rom_pages`] converted into bytes (n_pages * 16K)
     pub fn prg_rom_bytes(&self) -> usize {
         self.n_prg_rom_pages * PAGE_SIZE_16K
@@ -108,19 +107,23 @@ pub struct NsfConfig {
     pub uses_namco163: bool,
     pub uses_sunsoft5b: bool,
     pub uses_vt02plus: bool,
-    pub prg_len: u32
+    pub prg_len: u32,
 }
 
 #[derive(Clone, Debug)]
 pub enum NesBinaryConfig {
     Nsf(NsfConfig),
     INes(INesConfig),
-    None
+    None,
 }
 
 pub fn check_type(binary: &[u8]) -> Type {
-    const INES_HEADER: [u8; 4] = ['N' as u8, 'E' as u8, 'S' as u8, 0x1a /* character break */];
-    const NSF_HEADER: [u8; 5] = ['N' as u8, 'E' as u8, 'S' as u8, 'M' as u8, 0x1a /* character break */];
+    const INES_HEADER: [u8; 4] = [
+        'N' as u8, 'E' as u8, 'S' as u8, 0x1a, /* character break */
+    ];
+    const NSF_HEADER: [u8; 5] = [
+        'N' as u8, 'E' as u8, 'S' as u8, 'M' as u8, 0x1a, /* character break */
+    ];
 
     if binary.len() > NSF_HEADER.len() && binary[0..5] == NSF_HEADER {
         Type::NSF
@@ -144,11 +147,13 @@ fn nsf_string_from_cstr_slice(cstr_slice: &[u8]) -> String {
     let len = cstr_len(cstr_slice);
     let slice = &cstr_slice[0..len];
 
-    match std::str::from_utf8(slice) { Ok(s) => s.to_string(), Err(_err) => format!("Unknown") }
+    match std::str::from_utf8(slice) {
+        Ok(s) => s.to_string(),
+        Err(_err) => format!("Unknown"),
+    }
 }
 
 pub fn parse_nsf_header(nsf: &[u8]) -> Result<NsfConfig> {
-
     debug!("Parsing NSF header...");
 
     if !matches!(check_type(nsf), Type::NSF) {
@@ -164,9 +169,9 @@ pub fn parse_nsf_header(nsf: &[u8]) -> Result<NsfConfig> {
     let load_address = nsf[8] as u16 | (nsf[9] as u16) << 8;
     let init_address = nsf[10] as u16 | (nsf[11] as u16) << 8;
     let play_address = nsf[12] as u16 | (nsf[13] as u16) << 8;
-    let title = nsf_string_from_cstr_slice(&nsf[14..(14+32)]);
-    let artist = nsf_string_from_cstr_slice(&nsf[46..(46+32)]);
-    let copyright = nsf_string_from_cstr_slice(&nsf[78..(78+32)]);
+    let title = nsf_string_from_cstr_slice(&nsf[14..(14 + 32)]);
+    let artist = nsf_string_from_cstr_slice(&nsf[46..(46 + 32)]);
+    let copyright = nsf_string_from_cstr_slice(&nsf[78..(78 + 32)]);
     let ntsc_play_speed = nsf[110] as u16 | (nsf[111] as u16) << 8;
     let pal_play_speed = nsf[120] as u16 | (nsf[121] as u16) << 8;
     let mut banks: [u8; 8] = [0u8; 8];
@@ -185,18 +190,17 @@ pub fn parse_nsf_header(nsf: &[u8]) -> Result<NsfConfig> {
         _ => TVSystemCompatibility::Unknown,
     };
     let uses = nsf[123];
-    let uses_vrc6 =      (uses & 0b0000_0001) != 0;
-    let uses_vrc7 =      (uses & 0b0000_0010) != 0;
-    let uses_fds =       (uses & 0b0000_0100) != 0;
-    let uses_mmc5 =      (uses & 0b0000_1000) != 0;
-    let uses_namco163 =  (uses & 0b0001_0000) != 0;
+    let uses_vrc6 = (uses & 0b0000_0001) != 0;
+    let uses_vrc7 = (uses & 0b0000_0010) != 0;
+    let uses_fds = (uses & 0b0000_0100) != 0;
+    let uses_mmc5 = (uses & 0b0000_1000) != 0;
+    let uses_namco163 = (uses & 0b0001_0000) != 0;
     let uses_sunsoft5b = (uses & 0b0010_0000) != 0;
-    let uses_vt02plus =  (uses & 0b0100_0000) != 0;
+    let uses_vt02plus = (uses & 0b0100_0000) != 0;
     let mut prg_len = nsf[125] as u32 | (nsf[126] as u32) << 8 | (nsf[127] as u32) << 16;
     if prg_len == 0 {
         prg_len = (nsf.len() - 128) as u32;
     }
-
 
     Ok(NsfConfig {
         version,
@@ -265,7 +269,10 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
     };
     debug!("iNes: Mirroring {:?}", nametable_mirror);
     let four_screen_vram = flags6 & 0b1000 != 0;
-    debug!("iNes: Four screen VRAM (Mirroring override): {}", four_screen_vram);
+    debug!(
+        "iNes: Four screen VRAM (Mirroring override): {}",
+        four_screen_vram
+    );
 
     let flags7 = ines[7];
     let _flags8 = ines[8];
@@ -276,7 +283,9 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
         2 => TVSystemCompatibility::Pal,
         1 | 3 => TVSystemCompatibility::Dual,
 
-        _ => { unreachable!() } // Rust compiler should know this is unreachable :/
+        _ => {
+            unreachable!()
+        } // Rust compiler should know this is unreachable :/
     };
     debug!("iNes: TV System {:?}", tv_system);
     // 11~15 unused_padding
@@ -289,7 +298,11 @@ pub fn parse_ines_header(ines: &[u8]) -> Result<INesConfig> {
     let chr_rom_bytes = n_chr_rom_pages * PAGE_SIZE_8K;
     debug!("iNes: {n_chr_rom_pages} CHR ROM pages x 8k = {chr_rom_bytes} bytes");
 
-    let trainer_baseaddr = if has_trainer { Some(header_bytes) } else { None };
+    let trainer_baseaddr = if has_trainer {
+        Some(header_bytes)
+    } else {
+        None
+    };
     let prg_rom_baseaddr = header_bytes + trainer_bytes;
     let chr_rom_baseaddr = header_bytes + trainer_bytes + prg_rom_bytes;
 
@@ -323,6 +336,6 @@ pub fn parse_any_header(binary: &[u8]) -> Result<NesBinaryConfig> {
     match check_type(binary) {
         Type::INES => Ok(NesBinaryConfig::INes(parse_ines_header(binary)?)),
         Type::NSF => Ok(NesBinaryConfig::Nsf(parse_nsf_header(binary)?)),
-        Type::Unknown => Err(anyhow!("Unknown binary type"))
+        Type::Unknown => Err(anyhow!("Unknown binary type")),
     }
 }

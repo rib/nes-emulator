@@ -1,4 +1,3 @@
-
 #[cfg(feature = "unsafe-opt")]
 #[allow(unused_macros)]
 macro_rules! arr_read {

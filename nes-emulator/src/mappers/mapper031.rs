@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
-use log::{trace, debug};
+use log::{debug, trace};
 
-use crate::constants::*;
-use crate::mappers::Mapper;
 use crate::binary::NsfConfig;
 use crate::cartridge::NameTableMirror;
+use crate::constants::*;
+use crate::mappers::Mapper;
 
 use super::mirror_vram_address;
 
@@ -12,8 +12,8 @@ use super::mirror_vram_address;
 pub struct Mapper31 {
     pub vram: [u8; 2048],
     pub prg_rom: Vec<u8>,
-    pub prg_ram: Vec<u8>, // 32k
-    pub chr_ram: Vec<u8>, // 8k
+    pub prg_ram: Vec<u8>,          // 32k
+    pub chr_ram: Vec<u8>,          // 8k
     pub prg_bank_offsets: [u8; 8], // 8 x 4k banks
     pub nsf_bios: Vec<u8>,
 }
@@ -26,7 +26,10 @@ impl Mapper31 {
             (config.load_address - 0x8000) as usize
         };
 
-        println!("NSF padding = {padding:x}, load address = {:x}", config.load_address);
+        println!(
+            "NSF padding = {padding:x}, load address = {:x}",
+            config.load_address
+        );
 
         let padded_prg_rom_len = prg_rom_in.len() + padding;
         // Ensure we have at least 32k to cover 0x8000-0x7fff in the
@@ -54,8 +57,7 @@ impl Mapper31 {
             chr_ram: vec![0u8; 1 * PAGE_SIZE_8K],
             prg_bank_offsets: prg_bank_offsets,
             nsf_bios,
-         }
-
+        }
     }
 }
 
@@ -73,11 +75,13 @@ impl Mapper for Mapper31 {
                 //println!("bios read {offset:x} = {:x}", self.nsf_bios[offset as usize]);
                 self.nsf_bios[offset as usize]
             }
-            0x6000..=0x7fff => { // PRG RAM
+            0x6000..=0x7fff => {
+                // PRG RAM
                 let ram_offset = (addr - 0x6000) as usize;
                 self.prg_ram[ram_offset]
             }
-            0x8000..=0xffff => { // 8 x 4k bank switched rom
+            0x8000..=0xffff => {
+                // 8 x 4k bank switched rom
                 let addr = (addr - 0x8000) as usize;
                 let bank_index = (addr & 0b0111_0000_0000_0000) >> 12;
 
@@ -119,7 +123,9 @@ impl Mapper for Mapper31 {
                 let bank = addr & 0b111;
                 self.prg_bank_offsets[bank as usize] = data;
             }
-            _ => { trace!("unhandled system bus write in cartridge"); }
+            _ => {
+                trace!("unhandled system bus write in cartridge");
+            }
         }
     }
 
@@ -129,13 +135,17 @@ impl Mapper for Mapper31 {
                 let index = addr as usize;
                 arr_read!(self.chr_ram, index)
             }
-            0x2000..=0x3fff => { // VRAM
-                arr_read!(self.vram, mirror_vram_address(addr, NameTableMirror::Vertical))
+            0x2000..=0x3fff => {
+                // VRAM
+                arr_read!(
+                    self.vram,
+                    mirror_vram_address(addr, NameTableMirror::Vertical)
+                )
             }
             _ => {
                 trace!("Unexpected PPU read via mapper, address = {}", addr);
                 0
-             }
+            }
         }
     }
 
@@ -148,9 +158,14 @@ impl Mapper for Mapper31 {
             0x0000..=0x1fff => {
                 let index = addr as usize;
                 arr_write!(self.chr_ram, index, data);
-            },
-            0x2000..=0x3fff => { // VRAM
-                arr_write!(self.vram, mirror_vram_address(addr, NameTableMirror::Vertical), data);
+            }
+            0x2000..=0x3fff => {
+                // VRAM
+                arr_write!(
+                    self.vram,
+                    mirror_vram_address(addr, NameTableMirror::Vertical),
+                    data
+                );
             }
             _ => {
                 trace!("Unexpected PPU write via mapper, address = {}", addr);

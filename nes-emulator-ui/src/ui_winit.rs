@@ -1,19 +1,19 @@
 use anyhow::Result;
 
 use winit::{
-    event_loop::{EventLoopWindowTarget, EventLoop, ControlFlow},
-    event::Event::*
+    event::Event::*,
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
 };
 
 use egui_wgpu::winit::Painter;
 use egui_winit::State;
 //use egui_winit_platform::{Platform, PlatformDescriptor};
 
-use crate::Args;
 use crate::ui;
+use crate::Args;
 
 pub enum Event {
-    RequestRedraw
+    RequestRedraw,
 }
 
 /// Enable egui to request redraws via a custom Winit event...
@@ -23,7 +23,11 @@ struct RepaintSignal(std::sync::Arc<std::sync::Mutex<winit::event_loop::EventLoo
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
 
-fn create_window<T>(event_loop: &EventLoopWindowTarget<T>, state: &mut State, painter: &mut Painter) -> winit::window::Window {
+fn create_window<T>(
+    event_loop: &EventLoopWindowTarget<T>,
+    state: &mut State,
+    painter: &mut Painter,
+) -> winit::window::Window {
     let window = winit::window::WindowBuilder::new()
         .with_decorations(true)
         .with_resizable(true)
@@ -33,8 +37,8 @@ fn create_window<T>(event_loop: &EventLoopWindowTarget<T>, state: &mut State, pa
             width: INITIAL_WIDTH,
             height: INITIAL_HEIGHT,
         })
-            .build(&event_loop)
-            .unwrap();
+        .build(&event_loop)
+        .unwrap();
 
     unsafe { painter.set_window(Some(&window)) };
 
@@ -59,10 +63,15 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
     let ctx = egui::Context::default();
 
     let repaint_signal = RepaintSignal(std::sync::Arc::new(std::sync::Mutex::new(
-        event_loop.create_proxy()
+        event_loop.create_proxy(),
     )));
     ctx.set_request_repaint_callback(move || {
-        repaint_signal.0.lock().unwrap().send_event(Event::RequestRedraw).ok();
+        repaint_signal
+            .0
+            .lock()
+            .unwrap()
+            .send_event(Event::RequestRedraw)
+            .ok();
     });
 
     let mut winit_state = egui_winit::State::new(&event_loop);
@@ -72,10 +81,11 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
         wgpu::DeviceDescriptor {
             label: None,
             features: wgpu::Features::default(),
-            limits: wgpu::Limits::downlevel_webgl2_defaults()
+            limits: wgpu::Limits::downlevel_webgl2_defaults(),
         },
         wgpu::PresentMode::Fifo,
-        1);
+        1,
+    );
 
     let window = Some(create_window(&event_loop, &mut winit_state, &mut painter));
 
@@ -107,27 +117,26 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
     let mut emulator_ui = ui::EmulatorUi::new(&args, &ctx, event_loop.create_proxy())?;
 
     event_loop.run(move |event, _event_loop, control_flow| {
-
         match event {
             RedrawRequested(..) => {
                 if let Some(window) = window.as_ref() {
                     let raw_input = winit_state.take_egui_input(window);
                     emulator_ui.update();
 
-                    let full_output = ctx.run(raw_input, |ctx| {
-                        match emulator_ui.draw(ctx) {
-                            ui::Status::Ok => {}
-                            ui::Status::Quit => {
-                                *control_flow = winit::event_loop::ControlFlow::Exit;
-                            }
+                    let full_output = ctx.run(raw_input, |ctx| match emulator_ui.draw(ctx) {
+                        ui::Status::Ok => {}
+                        ui::Status::Quit => {
+                            *control_flow = winit::event_loop::ControlFlow::Exit;
                         }
                     });
                     winit_state.handle_platform_output(window, &ctx, full_output.platform_output);
 
-                    painter.paint_and_update_textures(winit_state.pixels_per_point(),
+                    painter.paint_and_update_textures(
+                        winit_state.pixels_per_point(),
                         egui::Rgba::default(),
                         &ctx.tessellate(full_output.shapes),
-                        &full_output.textures_delta);
+                        &full_output.textures_delta,
+                    );
 
                     // This seems like some pretty funky API design :/
                     //
@@ -139,21 +148,22 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
                     // doesn't know when we will start waiting - surely they should specify
                     // an optional deadline instant instead.
                     if *control_flow != winit::event_loop::ControlFlow::Exit {
-                        *control_flow = if full_output.repaint_after.is_zero() || emulator_ui.paused == false  {
-                            window.request_redraw();
-                            winit::event_loop::ControlFlow::Poll
-                        } else if let Some(repaint_after_instant) =
-                            std::time::Instant::now().checked_add(full_output.repaint_after)
-                        {
-                            // if repaint_after is something huge and can't be added to Instant,
-                            // we will use `ControlFlow::Wait` instead.
-                            // technically, this might lead to some weird corner cases where the user *WANTS*
-                            // winit to use `WaitUntil(MAX_INSTANT)` explicitly. they can roll their own
-                            // egui backend impl i guess.
-                            winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
-                        } else {
-                            winit::event_loop::ControlFlow::Wait
-                        };
+                        *control_flow =
+                            if full_output.repaint_after.is_zero() || emulator_ui.paused == false {
+                                window.request_redraw();
+                                winit::event_loop::ControlFlow::Poll
+                            } else if let Some(repaint_after_instant) =
+                                std::time::Instant::now().checked_add(full_output.repaint_after)
+                            {
+                                // if repaint_after is something huge and can't be added to Instant,
+                                // we will use `ControlFlow::Wait` instead.
+                                // technically, this might lead to some weird corner cases where the user *WANTS*
+                                // winit to use `WaitUntil(MAX_INSTANT)` explicitly. they can roll their own
+                                // egui backend impl i guess.
+                                winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
+                            } else {
+                                winit::event_loop::ControlFlow::Wait
+                            };
                     }
                 }
             }
@@ -173,10 +183,12 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
                         winit::event::WindowEvent::CloseRequested => {
                             *control_flow = ControlFlow::Exit;
                         }
-                        event => { emulator_ui.handle_window_event(event); }
+                        event => {
+                            emulator_ui.handle_window_event(event);
+                        }
                     }
                 }
-            },
+            }
             _ => (),
         }
     });

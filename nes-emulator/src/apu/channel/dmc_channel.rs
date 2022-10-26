@@ -5,22 +5,29 @@ use crate::system::{DmcDmaRequest, Model};
 
 // Ref: https://www.nesdev.org/wiki/APU_DMC
 // Measured in CPU clock cycles
-const DMC_PERIODS_TABLE_NTSC: [u16; 16] = [ 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106,  84,  72,  54 ];
+const DMC_PERIODS_TABLE_NTSC: [u16; 16] = [
+    428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
+];
 
 #[allow(dead_code)]
-const DMC_PERIODS_TABLE_PAL: [u16; 16] = [ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98,  78,  66,  50 ];
+const DMC_PERIODS_TABLE_PAL: [u16; 16] = [
+    398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118, 98, 78, 66, 50,
+];
 
 /// Newtype so we can impl Default
 #[derive(Clone)]
 pub struct PeriodsTable(&'static [u16; 16]);
 impl Default for PeriodsTable {
-    fn default() -> Self { Self(&DMC_PERIODS_TABLE_NTSC) }
+    fn default() -> Self {
+        Self(&DMC_PERIODS_TABLE_NTSC)
+    }
 }
 impl Index<usize> for PeriodsTable {
     type Output = u16;
-    fn index(&self, index: usize) -> &Self::Output { self.0.index(index) }
+    fn index(&self, index: usize) -> &Self::Output {
+        self.0.index(index)
+    }
 }
-
 
 #[derive(Clone, Default)]
 pub struct DmcChannel {
@@ -54,7 +61,6 @@ pub struct DmcChannel {
 
 impl DmcChannel {
     pub fn new(nes_model: Model) -> Self {
-
         let periods_table = match nes_model {
             Model::Ntsc => PeriodsTable(&DMC_PERIODS_TABLE_NTSC),
             Model::Pal => PeriodsTable(&DMC_PERIODS_TABLE_PAL),
@@ -71,27 +77,25 @@ impl DmcChannel {
             output_bits_remaining: 8,
             timer_period,
             timer,
-            ..Default::default()
+            ..Default::default() /*
+                                 interrupt_enable: false,
+                                 interrupt_flagged: false,
 
-            /*
-            interrupt_enable: false,
-            interrupt_flagged: false,
+                                 dma_in_progress: false,
 
-            dma_in_progress: false,
+                                 loop_flag: false,
 
-            loop_flag: false,
+                                 // DMA reader...
+                                 sample_address: 0,
+                                 sample_bytes_remaining: 0,
 
-            // DMA reader...
-            sample_address: 0,
-            sample_bytes_remaining: 0,
+                                 sample_buffer: None,
 
-            sample_buffer: None,
+                                 output_bits_remaining: 8,
+                                 output_shift: 0,
 
-            output_bits_remaining: 8,
-            output_shift: 0,
-
-            output: 0,
-            */
+                                 output: 0,
+                                 */
         }
     }
 
@@ -100,7 +104,6 @@ impl DmcChannel {
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
-
         //println!("DMC enabled = {enabled}");
 
         // NB: "If the DMC bit is clear, the DMC bytes remaining will be set to 0 and the DMC will silence when it empties."
@@ -147,7 +150,7 @@ impl DmcChannel {
             //  otherwise if the bytes counter becomes zero and the interrupt enabled flag is set,
             //  the interrupt flag is set."
             self.sample_bytes_remaining -= 1;
-            if self.sample_bytes_remaining == 0  {
+            if self.sample_bytes_remaining == 0 {
                 //println!("DMC: reading last sample byte");
                 if self.loop_flag {
                     self.start_sample();
@@ -177,8 +180,7 @@ impl DmcChannel {
         self.dma_in_progress = false;
     }
 
-    fn start_output_cycle(&mut self)
-    {
+    fn start_output_cycle(&mut self) {
         // When an output cycle is started, the counter is loaded with 8 and if the sample
         // buffer is empty, the silence flag is set, otherwise the silence flag is cleared
         // and the sample buffer is emptied into the shift register.
@@ -201,7 +203,6 @@ impl DmcChannel {
         // buffer is empty, the silence flag is set, otherwise the silence flag is cleared
         // and the sample buffer is emptied into the shift register.
 
-
         // On the arrival of a clock from the timer, the following actions occur in order:
 
         //     1. If the silence flag is clear, bit 0 of the shift register is applied to
@@ -214,7 +215,6 @@ impl DmcChannel {
         //     2) The counter is decremented. If it becomes zero, a new cycle is started.
 
         if self.output_silence_flag == false {
-
             let up = self.output_shift & 1 == 1;
             if up == true && self.output < 126 {
                 self.output += 2;
@@ -243,7 +243,7 @@ impl DmcChannel {
             self.step_output();
         } else {
             self.timer -= 2; // The periods in DMC_PERIODS_TABLE_NTSC are for cpu clock cycles (2 x cpu cycles per APU cycle)
-            //println!("DMC: step: dec timer = {}", self.timer);
+                             //println!("DMC: step: dec timer = {}", self.timer);
         }
     }
 
@@ -263,7 +263,8 @@ impl DmcChannel {
                 self.timer_period = self.periods_table[(value & 0xf) as usize];
                 //println!("$4010 write: rate[{}] = {} (timer = {})", (value & 0xf), self.timer_period, self.timer);
             }
-            1 => { // Direct Load
+            1 => {
+                // Direct Load
                 self.output = value & 0b0111_1111; // 7-bit output
             }
             2 => {
@@ -273,7 +274,7 @@ impl DmcChannel {
                 self.pending_sample_bytes_remaining = (value as u16 * 16) + 1;
                 //println!("DMC: $4013 write, set (pending) sample length = {}", self.pending_sample_bytes_remaining);
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
@@ -288,4 +289,3 @@ impl DmcChannel {
         self.sample_bytes_remaining > 0
     }
 }
-

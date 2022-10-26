@@ -1,12 +1,11 @@
-
 #[allow(unused_imports)]
-use log::{error, debug, trace};
+use log::{debug, error, trace};
 
 use anyhow::anyhow;
 use anyhow::Result;
 
 use crate::binary::NesBinaryConfig;
-use crate::binary::{self, NsfConfig, INesConfig};
+use crate::binary::{self, INesConfig, NsfConfig};
 use crate::mappers::*;
 
 pub const fn page_offset(page_no: usize, page_size: usize) -> usize {
@@ -18,7 +17,7 @@ pub enum TVSystemCompatibility {
     Ntsc,
     Pal,
     Dual,
-    Unknown
+    Unknown,
 }
 impl Default for TVSystemCompatibility {
     fn default() -> Self {
@@ -29,15 +28,24 @@ impl Default for TVSystemCompatibility {
 struct NoCartridge;
 impl Mapper for NoCartridge {
     fn reset(&mut self) {}
-    fn clone_mapper(&self) -> Box<dyn Mapper> { Box::new(NoCartridge) }
-    fn system_bus_read(&mut self, _addr: u16) -> (u8, u8) { (0, 0) }
-    fn system_bus_peek(&mut self, _addr: u16) -> (u8, u8) { (0, 0) }
-    fn system_bus_write(&mut self, _addr: u16, _data: u8) { }
-    fn ppu_bus_read(&mut self, _addr: u16) -> u8 { 0 }
-    fn ppu_bus_peek(&mut self, _addr: u16) -> u8 { 0 }
-    fn ppu_bus_write(&mut self, _addr: u16, _data: u8) { }
+    fn clone_mapper(&self) -> Box<dyn Mapper> {
+        Box::new(NoCartridge)
+    }
+    fn system_bus_read(&mut self, _addr: u16) -> (u8, u8) {
+        (0, 0)
+    }
+    fn system_bus_peek(&mut self, _addr: u16) -> (u8, u8) {
+        (0, 0)
+    }
+    fn system_bus_write(&mut self, _addr: u16, _data: u8) {}
+    fn ppu_bus_read(&mut self, _addr: u16) -> u8 {
+        0
+    }
+    fn ppu_bus_peek(&mut self, _addr: u16) -> u8 {
+        0
+    }
+    fn ppu_bus_write(&mut self, _addr: u16, _data: u8) {}
 }
-
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum NameTableMirror {
@@ -63,7 +71,7 @@ impl Clone for Cartridge {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),
-            mapper: self.mapper.clone_mapper()
+            mapper: self.mapper.clone_mapper(),
         }
     }
 }
@@ -74,7 +82,6 @@ impl Default for Cartridge {
 }
 
 impl Cartridge {
-
     pub fn from_nsf_binary(config: &NsfConfig, nsf: &[u8]) -> Result<Cartridge> {
         if !matches!(binary::check_type(nsf), binary::Type::NSF) {
             return Err(anyhow!("Missing NSF file marker"));
@@ -87,7 +94,7 @@ impl Cartridge {
         println!("NSF Config = {config:#?}");
 
         let mapper = Box::new(Mapper31::new(&config, &nsf[128..(prg_len as usize)]));
-        Ok(Cartridge{
+        Ok(Cartridge {
             config: NesBinaryConfig::Nsf(config.clone()),
             mapper,
         })
@@ -111,7 +118,9 @@ impl Cartridge {
             let ines_start = config.prg_rom_baseaddr;
             let ines_end = ines_start + prg_rom_bytes;
             if ines.len() < ines_end {
-                return Err(anyhow!("Inconsistent binary size: couldn't read PRG ROM data"));
+                return Err(anyhow!(
+                    "Inconsistent binary size: couldn't read PRG ROM data"
+                ));
             }
             prg_rom[0..prg_rom_bytes].copy_from_slice(&ines[ines_start..ines_end]);
         }
@@ -122,7 +131,9 @@ impl Cartridge {
             let ines_start = config.chr_rom_baseaddr;
             let ines_end = ines_start + chr_rom_bytes;
             if ines.len() < ines_end {
-                return Err(anyhow!("Inconsistent binary size: couldn't read CHR ROM data"));
+                return Err(anyhow!(
+                    "Inconsistent binary size: couldn't read CHR ROM data"
+                ));
             }
             chr_data[0..chr_rom_bytes].copy_from_slice(&ines[ines_start..ines_end]);
         }
@@ -136,7 +147,10 @@ impl Cartridge {
             7 => Box::new(Mapper7::new(config, prg_rom, chr_data)),
             66 => Box::new(Mapper66::new(config, prg_rom, chr_data)),
             _ => {
-                return Err(anyhow!("Unsupported mapper number {}", config.mapper_number));
+                return Err(anyhow!(
+                    "Unsupported mapper number {}",
+                    config.mapper_number
+                ));
             }
         };
 
@@ -144,7 +158,9 @@ impl Cartridge {
             let ines_start = config.trainer_baseaddr.unwrap();
             let ines_end = ines_start + 512;
             if ines.len() < ines_end {
-                return Err(anyhow!("Inconsistent binary size: couldn't read trainer data"));
+                return Err(anyhow!(
+                    "Inconsistent binary size: couldn't read trainer data"
+                ));
             }
             for i in ines_start..ines_end {
                 mapper.system_bus_write(0x7000 + (i as u16), ines[i]);
@@ -165,9 +181,7 @@ impl Cartridge {
             NesBinaryConfig::Nsf(nsf_config) => {
                 Ok(Cartridge::from_nsf_binary(&nsf_config, binary)?)
             }
-            NesBinaryConfig::None => {
-                Err(anyhow!("Unknown binary format"))?
-            },
+            NesBinaryConfig::None => Err(anyhow!("Unknown binary format"))?,
         }
     }
 
@@ -191,7 +205,7 @@ impl Cartridge {
         match &self.config {
             NesBinaryConfig::INes(ines_config) => ines_config.tv_system,
             NesBinaryConfig::Nsf(nsf_config) => nsf_config.tv_system,
-            NesBinaryConfig::None => TVSystemCompatibility::Ntsc
+            NesBinaryConfig::None => TVSystemCompatibility::Ntsc,
         }
     }
 

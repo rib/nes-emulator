@@ -1,8 +1,6 @@
 const FIXED_LENGTHS_TABLE: [u8; 32] = [
-    10, 254, 20, 2, 40, 4, 80, 6,
-    160, 8, 60, 10, 14, 12, 26, 14,
-    12, 16, 24, 18, 48, 20, 96, 22,
-    192, 24, 72, 26, 16, 28, 32, 30
+    10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
+    192, 24, 72, 26, 16, 28, 32, 30,
 ];
 
 #[derive(Clone, Default)]
@@ -57,12 +55,11 @@ impl LengthCounter {
         }
     }
 
-    pub fn length(&self) ->  u8 {
+    pub fn length(&self) -> u8 {
         self.counter
     }
 
     pub fn step_half_frame(&mut self) {
-
         // blargg apu 2005: 11.len_reload_timing
         // ; Write to length counter reload should be ignored when made during length
         // ; counter clocking and the length counter is not zero.
@@ -104,5 +101,4 @@ impl LengthCounter {
         //    }
         //}
     }
-
 }

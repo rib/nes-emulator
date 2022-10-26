@@ -1,14 +1,13 @@
 #[allow(unused_imports)]
-use log::{error, trace, debug};
+use log::{debug, error, trace};
 
-use crate::constants::*;
-use crate::mappers::Mapper;
 use crate::binary::INesConfig;
 use crate::cartridge::NameTableMirror;
+use crate::constants::*;
+use crate::mappers::Mapper;
 
-use super::mirror_vram_address;
 use super::bank_select_mask;
-
+use super::mirror_vram_address;
 
 /// iNES Mapper 003: AKA CNROM
 ///
@@ -65,9 +64,7 @@ pub struct Mapper3 {
 }
 
 impl Mapper3 {
-
     pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
-
         let prg_rom0 = prg_rom[0..PAGE_SIZE_16K].to_vec();
 
         let prg_rom1 = if prg_rom.len() >= (PAGE_SIZE_16K * 2) {
@@ -78,7 +75,9 @@ impl Mapper3 {
 
         let n_chr_pages = config.n_chr_rom_pages as u8;
         let chr_bank_select_mask = bank_select_mask(n_chr_pages);
-        debug!("Mapper3: CHR Bank Select Mask = {chr_bank_select_mask:08b} ({n_chr_pages} CHR pages)");
+        debug!(
+            "Mapper3: CHR Bank Select Mask = {chr_bank_select_mask:08b} ({n_chr_pages} CHR pages)"
+        );
         Self {
             vram_mirror: config.nametable_mirror,
             vram: [0u8; 2048],
@@ -95,7 +94,7 @@ impl Mapper3 {
     }
 
     fn system_bus_read_direct(&self, addr: u16) -> u8 {
-         match addr {
+        match addr {
             0x8000..=0xbfff => {
                 let off = addr - 0x8000;
                 arr_read!(self.prg_rom0, off as usize)
@@ -104,9 +103,7 @@ impl Mapper3 {
                 let off = addr - 0xc000;
                 arr_read!(self.prg_rom1, off as usize)
             }
-            _ => {
-                return 0
-            }
+            _ => return 0,
         }
     }
 }
@@ -131,7 +128,8 @@ impl Mapper for Mapper3 {
         }
 
         match addr {
-            0x8000..=0xffff => { // CHR Bank Select
+            0x8000..=0xffff => {
+                // CHR Bank Select
                 let page_select = data & self.chr_bank_select_mask;
                 self.chr_bank = PAGE_SIZE_8K * page_select as usize;
             }
@@ -144,10 +142,11 @@ impl Mapper for Mapper3 {
             0x0000..=0x1fff => {
                 arr_read!(self.chr_data, self.chr_bank + addr as usize)
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
             }
-            _ => { 0 }
+            _ => 0,
         }
     }
 
@@ -160,12 +159,15 @@ impl Mapper for Mapper3 {
             //0x0000..=0x1fff => {
             //    arr_write!(self.chr_data, self.chr_bank + addr as usize, data);
             //}
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }
             _ => {}
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
+    fn mirror_mode(&self) -> NameTableMirror {
+        self.vram_mirror
+    }
 }

@@ -1,14 +1,13 @@
 #[allow(unused_imports)]
-use log::{error, trace, debug};
+use log::{debug, error, trace};
 
-use crate::constants::*;
-use crate::mappers::Mapper;
 use crate::binary::INesConfig;
 use crate::cartridge::NameTableMirror;
+use crate::constants::*;
+use crate::mappers::Mapper;
 
-use super::mirror_vram_address;
 use super::bank_select_mask;
-
+use super::mirror_vram_address;
 
 /// iNES Mapper 066: AKA GxROM
 ///
@@ -70,7 +69,7 @@ impl Mapper66 {
         let n_chr_pages = chr_data.len() / PAGE_SIZE_8K;
         debug_assert!(n_chr_pages >= 1);
         debug_assert!(n_chr_pages <= 16); // Supports up to 256k (16 * 8k pages)
-        // TODO: return an Err for this validation!
+                                          // TODO: return an Err for this validation!
 
         // An appropriate iNes config should mean code will never try to access
         // non-existent pages, but just in case we count the number of pages we
@@ -104,15 +103,13 @@ impl Mapper66 {
     }
 
     fn system_bus_read_direct(&self, addr: u16) -> u8 {
-         match addr {
+        match addr {
             0x8000..=0xffff => {
                 let off = addr as usize - 0x8000 + self.prg_bank_offset;
                 //println!("PRG reading @ {off}/{off:x} (bank off = {}/{:x}) (address = {addr:04x})", self.prg_bank_offset, self.prg_bank_offset);
                 arr_read!(self.prg_rom, off)
             }
-            _ => {
-                return 0
-            }
+            _ => return 0,
         }
     }
 }
@@ -136,10 +133,13 @@ impl Mapper for Mapper66 {
         data = data & conflicting_read;
 
         match addr {
-            0x8000..=0xffff => { // Bank Select
-                let prg_page_select = (((data & 0b1111_0000) >> 4) & self.prg_bank_select_mask) % self.n_prg_pages;
+            0x8000..=0xffff => {
+                // Bank Select
+                let prg_page_select =
+                    (((data & 0b1111_0000) >> 4) & self.prg_bank_select_mask) % self.n_prg_pages;
                 self.prg_bank_offset = PAGE_SIZE_32K * (prg_page_select as usize);
-                let chr_page_select = ((data & 0b1111) & self.chr_bank_select_mask) % self.n_chr_pages;
+                let chr_page_select =
+                    ((data & 0b1111) & self.chr_bank_select_mask) % self.n_chr_pages;
                 self.chr_bank_offset = PAGE_SIZE_8K * (chr_page_select as usize);
                 //log::debug!("Mapper066: Bank Select via {addr:4x} {data:08b}, prg page = {prg_page_select}, prg offset = {}/{:x}", self.prg_bank_offset, self.prg_bank_offset);
             }
@@ -153,10 +153,11 @@ impl Mapper for Mapper66 {
                 let off = addr as usize + self.chr_bank_offset;
                 arr_read!(self.chr_data, off)
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
             }
-            _ => { 0 }
+            _ => 0,
         }
     }
 
@@ -171,13 +172,16 @@ impl Mapper for Mapper66 {
                     let off = addr as usize + self.chr_bank_offset;
                     arr_write!(self.chr_data, off, data);
                 }
-            },
-            0x2000..=0x3fff => { // VRAM
+            }
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }
             _ => {}
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
+    fn mirror_mode(&self) -> NameTableMirror {
+        self.vram_mirror
+    }
 }

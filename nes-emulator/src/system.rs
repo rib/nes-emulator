@@ -1,23 +1,23 @@
 use crate::apu::apu::Apu;
 use crate::genie::GameGenieCode;
+use crate::ppu::Ppu;
 use crate::ppu::DOTS_PER_LINE;
 use crate::ppu::N_LINES;
-use crate::ppu::Ppu;
 
-#[cfg(feature="ppu-sim")]
+#[cfg(feature = "ppu-sim")]
 use crate::ppusim::PpuSim;
 use crate::trace::TraceEvent;
 
-use super::constants::*;
 use super::cartridge::*;
+use super::constants::*;
 use super::port::*;
 
 use bitflags::bitflags;
 
 // TODO: replace this BitVec crate with something - it has such
 // horrible ergonomics!
-use bitvec::BitArr;
 use bitvec::bitarr;
+use bitvec::BitArr;
 
 const WRAM_SIZE: usize = 0x0800;
 
@@ -25,7 +25,7 @@ const WRAM_SIZE: usize = 0x0800;
 pub enum Model {
     #[default]
     Ntsc,
-    Pal
+    Pal,
 }
 impl Model {
     pub fn cpu_clock_hz(&self) -> u32 {
@@ -58,7 +58,7 @@ pub struct WatchPoint {
 /// will be passed back
 #[derive(Clone, Copy)]
 pub struct DmcDmaRequest {
-    pub address: u16
+    pub address: u16,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -71,21 +71,21 @@ pub struct IoStatsRecord {
 // State we don't want to capture in a snapshot/clone of the system
 #[derive(Default)]
 pub struct NoCloneDebugState {
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub ppu_sim_as_main: bool,
 
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub ppu_sim: PpuSim,
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub ppu_sim_cartridge: Cartridge,
 
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub watch_points: Vec<WatchPoint>,
-    #[cfg(feature="debugger")]
+    #[cfg(feature = "debugger")]
     pub watch_hit: bool,
 
-    #[cfg(feature="io-stats")]
-    pub io_stats: Vec<IoStatsRecord>
+    #[cfg(feature = "io-stats")]
+    pub io_stats: Vec<IoStatsRecord>,
 }
 impl Clone for NoCloneDebugState {
     fn clone(&self) -> Self {
@@ -122,13 +122,12 @@ pub struct System {
 }
 
 impl System {
-
     pub fn new(model: Model, audio_sample_rate: u32, cartridge: Cartridge) -> Self {
         let ppu = Ppu::new(model);
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         let ppu_sim = PpuSim::new(model);
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         let ppu_sim_cartridge = cartridge.clone();
 
         let apu = Apu::new(model, audio_sample_rate);
@@ -147,22 +146,22 @@ impl System {
             genie_codes_mask: bitarr![1; 0x10000-0x8000],
 
             debug: NoCloneDebugState {
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 ppu_sim_as_main: true,
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 ppu_sim,
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 ppu_sim_cartridge,
 
                 watch_points: vec![],
                 watch_hit: false,
 
-                #[cfg(feature="io-stats")]
+                #[cfg(feature = "io-stats")]
                 io_stats: vec![IoStatsRecord::default(); (u16::MAX as usize) + 1],
-            }
+            },
         };
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         system.warm_up_sync_ppu_sim();
 
         system
@@ -171,7 +170,7 @@ impl System {
     pub(crate) fn insert_cartridge(&mut self, cartridge: Cartridge) {
         self.cartridge = cartridge;
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             self.debug.ppu_sim_cartridge = self.cartridge.clone();
         }
@@ -183,14 +182,14 @@ impl System {
 
         self.ppu.power_cycle();
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             self.debug.ppu_sim = PpuSim::new(self.debug.ppu_sim.nes_model);
         }
 
         self.apu.power_cycle();
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         self.debug.ppu_sim_cartridge.power_cycle();
         self.cartridge.power_cycle();
 
@@ -198,20 +197,20 @@ impl System {
         self.port2.power_cycle();
 
         let ppu = std::mem::take(&mut self.ppu);
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         let ppu_sim_as_main = self.debug.ppu_sim_as_main;
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         let ppu_sim = std::mem::take(&mut self.debug.ppu_sim);
         let apu = std::mem::take(&mut self.apu);
         let cartridge = std::mem::take(&mut self.cartridge);
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         let ppu_sim_cartridge = std::mem::take(&mut self.debug.ppu_sim_cartridge);
         let pad1 = std::mem::take(&mut self.port1);
         let pad2 = std::mem::take(&mut self.port2);
         let genie_codes = std::mem::take(&mut self.genie_codes);
         let genie_codes_mask = std::mem::take(&mut self.genie_codes_mask);
 
-        #[cfg(feature="debugger")]
+        #[cfg(feature = "debugger")]
         let watch_points = std::mem::take(&mut self.debug.watch_points);
 
         *self = Self {
@@ -227,31 +226,30 @@ impl System {
             genie_codes_mask,
 
             debug: NoCloneDebugState {
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 ppu_sim_as_main,
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 ppu_sim,
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 ppu_sim_cartridge,
 
-                #[cfg(feature="debugger")]
+                #[cfg(feature = "debugger")]
                 watch_points,
-                #[cfg(feature="debugger")]
+                #[cfg(feature = "debugger")]
                 watch_hit: false,
 
-                #[cfg(feature="io-stats")]
+                #[cfg(feature = "io-stats")]
                 io_stats: vec![IoStatsRecord::default(); (u16::MAX as usize) + 1],
-            }
+            },
         };
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         self.warm_up_sync_ppu_sim();
-
     }
 
     pub(crate) fn reset(&mut self) {
         self.ppu.reset();
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             // XXX: only some revisions need a reset and it breaks the
             // NTSC PPU SIM to do a reset!
@@ -266,7 +264,7 @@ impl System {
     }
 
     pub fn nmi_line(&self) -> bool {
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             if self.debug.ppu_sim_as_main {
                 self.debug.ppu_sim.nmi_interrupt_raised
@@ -275,14 +273,14 @@ impl System {
             }
         }
 
-        #[cfg(not(feature="ppu-sim"))]
+        #[cfg(not(feature = "ppu-sim"))]
         {
             self.ppu.nmi_interrupt_raised
         }
     }
 
     pub fn take_frame_ready(&mut self) -> bool {
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             let ready = if self.debug.ppu_sim_as_main {
                 self.debug.ppu_sim.frame_ready
@@ -294,7 +292,7 @@ impl System {
             ready
         }
 
-        #[cfg(not(feature="ppu-sim"))]
+        #[cfg(not(feature = "ppu-sim"))]
         {
             let ready = self.ppu.frame_ready;
             self.ppu.frame_ready = false;
@@ -323,7 +321,7 @@ impl System {
 
     #[inline(always)]
     fn check_watch_points(&mut self, addr: u16, ops: WatchOps) {
-        #[cfg(feature="debugger")]
+        #[cfg(feature = "debugger")]
         if self.debug.watch_points.len() > 0 {
             for w in &self.debug.watch_points {
                 if w.address == addr && w.ops.contains(ops) {
@@ -342,15 +340,17 @@ impl System {
     /// into the future)
     fn read(&mut self, addr: u16) -> u8 {
         let (mut value, undefined_bits) = match addr {
-            0x0000..=0x1fff => { // RAM
+            0x0000..=0x1fff => {
+                // RAM
                 //println!("system read {addr:x}");
                 // mirror support
                 let index = usize::from(addr) % self.wram.len();
                 (arr_read!(self.wram, index), 0)
             }
-            0x2000..=0x3fff => { // PPU I/O
+            0x2000..=0x3fff => {
+                // PPU I/O
                 // Send any reads to the simulator for their side effects
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 {
                     self.debug.ppu_sim.system_bus_read_start(addr);
                     // TODO: we also need to step the ppu_sim forward so we can
@@ -364,29 +364,29 @@ impl System {
 
                 self.ppu.system_bus_read(&mut self.cartridge, addr)
             }
-            0x4000..=0x401f => {  // APU I/O
+            0x4000..=0x401f => {
+                // APU I/O
                 let index = usize::from(addr - 0x4000);
                 match index {
-                    0x14 => { // Write-only OAMDMA
+                    0x14 => {
+                        // Write-only OAMDMA
                         (0, 0xff)
                     }
                     0x16 => (self.port1.read(), 0b1110_0000), // pad1
                     0x17 => (self.port2.read(), 0b1110_0000), // pad2
-                    _ => {
-                        self.apu.read(addr)
-                    }
+                    _ => self.apu.read(addr),
                 }
             }
-            _ => { // Cartridge
+            _ => {
+                // Cartridge
                 //println!("calling cartridge read_u8 for {addr:x}");
                 let mut val = self.cartridge.system_bus_read(addr);
 
                 if self.genie_codes.len() > 0 {
                     if let 0x8000..=0xffff = addr {
                         let off = addr - 0x8000;
-                        let genie_hit = unsafe {
-                            *self.genie_codes_mask.get_unchecked(off as usize)
-                        };
+                        let genie_hit =
+                            unsafe { *self.genie_codes_mask.get_unchecked(off as usize) };
 
                         if genie_hit {
                             for code in self.genie_codes.iter() {
@@ -414,7 +414,7 @@ impl System {
 
         // If this is a PPU simulator read then we have to wait until after
         // stepping the PPU before we can access the value
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             if let 0x2000..=0x3fff = addr {
                 let addr = ((addr - 0x2000) % 8) + 0x2000;
@@ -468,7 +468,7 @@ impl System {
     pub fn cpu_read(&mut self, addr: u16) -> u8 {
         self.check_watch_points(addr, WatchOps::READ);
 
-        #[cfg(feature="io-stats")]
+        #[cfg(feature = "io-stats")]
         {
             self.debug.io_stats[addr as usize].reads += 1;
         }
@@ -488,7 +488,7 @@ impl System {
     pub fn dummy_cpu_read(&mut self, addr: u16) {
         self.check_watch_points(addr, WatchOps::DUMMY | WatchOps::READ);
 
-        #[cfg(feature="io-stats")]
+        #[cfg(feature = "io-stats")]
         {
             self.debug.io_stats[addr as usize].reads += 1;
         }
@@ -501,7 +501,7 @@ impl System {
     pub fn cpu_fetch(&mut self, addr: u16) -> u8 {
         self.check_watch_points(addr, WatchOps::EXECUTE);
 
-        #[cfg(feature="io-stats")]
+        #[cfg(feature = "io-stats")]
         {
             self.debug.io_stats[addr as usize].execute += 1;
         }
@@ -514,29 +514,31 @@ impl System {
     /// Use this for debugging purposes to be able to inspect memory and registers
     /// without affecting any state.
     pub fn peek(&mut self, addr: u16) -> u8 {
-
         let (value, undefined_bits) = match addr {
-            0x0000..=0x1fff => { // RAM
+            0x0000..=0x1fff => {
+                // RAM
                 let index = usize::from(addr) % self.wram.len();
                 (arr_read!(self.wram, index), 0)
             }
-            0x2000..=0x3fff => { // PPU I/O
+            0x2000..=0x3fff => {
+                // PPU I/O
                 self.ppu.system_bus_peek(&mut self.cartridge, addr)
             }
-            0x4000..=0x401f => {  // APU I/O
+            0x4000..=0x401f => {
+                // APU I/O
                 let index = usize::from(addr - 0x4000);
                 match index {
-                    0x14 => { // Write-only OAMDMA
+                    0x14 => {
+                        // Write-only OAMDMA
                         (0, 0xff)
                     }
                     0x16 => (self.port1.peek(), 0b1110_0000), // pad1
                     0x17 => (self.port2.peek(), 0b1110_0000), // pad2
-                    _ => {
-                        self.apu.peek(addr)
-                    }
+                    _ => self.apu.peek(addr),
                 }
             }
-            _ => { // Cartridge
+            _ => {
+                // Cartridge
                 self.cartridge.system_bus_peek(addr)
             }
         };
@@ -548,41 +550,51 @@ impl System {
     /// Perform a system bus write from the CPU
     fn write(&mut self, addr: u16, data: u8) {
         match addr {
-            0x0000..=0x1fff => { // RAM
+            0x0000..=0x1fff => {
+                // RAM
                 // mirror
                 let index = usize::from(addr) % self.wram.len();
                 arr_write!(self.wram, index, data);
             }
-            0x2000..=0x3fff => { // PPU
-                #[cfg(feature="ppu-sim")]
+            0x2000..=0x3fff => {
+                // PPU
+                #[cfg(feature = "ppu-sim")]
                 {
                     let sim_registers = self.debug.ppu_sim.debug_read_registers();
                     // Since there is a latency of about 3.5 pixel clocks before OAMADDR is incremented after
                     // an OAMDATA write we check for consistency before doing a register write
                     if sim_registers.MainOAMCounter as u8 != self.ppu.oam_offset {
-                        log::error!("PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.oam_offset, sim_registers.MainOAMCounter);
-                        println!("PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.oam_offset, sim_registers.MainOAMCounter);
+                        log::error!(
+                            "PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}",
+                            self.ppu.oam_offset,
+                            sim_registers.MainOAMCounter
+                        );
+                        println!(
+                            "PPU SIM: OAM offset out of sync: ppu = 0x{:02x}, sim = 0x{:02x}",
+                            self.ppu.oam_offset, sim_registers.MainOAMCounter
+                        );
                     }
                     println!("CPU: write ${addr:04x} = {data:02x}");
                 }
 
                 self.ppu.system_bus_write(&mut self.cartridge, addr, data);
 
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 self.debug.ppu_sim.system_bus_write_start(addr, data);
             }
-            0x4000..=0x401f => {  // APU + I/O
+            0x4000..=0x401f => {
+                // APU + I/O
                 let index = usize::from(addr - 0x4000);
                 match index {
                     0x14 => {
                         // OAMDMA is handled directly within the CPU so nothing left to do here
-                    },
+                    }
                     0x16 => {
                         // This register is split between being an APU register and a controller register
                         self.port1.write_register(data);
                         self.port2.write_register(data);
                         self.apu.write(addr, data);
-                    },
+                    }
                     0x17 => {
                         // This register is split between being an APU register and a controller register
                         self.apu.write(addr, data);
@@ -592,9 +604,10 @@ impl System {
                     }
                 }
             }
-            _ => { // Cartridge
+            _ => {
+                // Cartridge
                 self.cartridge.system_bus_write(addr, data);
-                #[cfg(feature="ppu-sim")]
+                #[cfg(feature = "ppu-sim")]
                 self.debug.ppu_sim_cartridge.system_bus_write(addr, data);
             }
         }
@@ -602,16 +615,32 @@ impl System {
         //println!("Stepping system during CPU write");
         self.step_for_cpu_cycle();
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             let sim_registers = self.debug.ppu_sim.debug_read_registers();
             if sim_registers.CTRL0 as u8 != self.ppu.control1.bits() {
-                log::error!("PPU SIM: Control0 register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control1.bits(), sim_registers.CTRL0);
-                println!("PPU SIM: Control0 register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control1.bits(), sim_registers.CTRL0);
+                log::error!(
+                    "PPU SIM: Control0 register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}",
+                    self.ppu.control1.bits(),
+                    sim_registers.CTRL0
+                );
+                println!(
+                    "PPU SIM: Control0 register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}",
+                    self.ppu.control1.bits(),
+                    sim_registers.CTRL0
+                );
             }
             if sim_registers.CTRL1 as u8 != self.ppu.control2.bits() {
-                log::error!("PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control2.bits(), sim_registers.CTRL1);
-                println!("PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}", self.ppu.control2.bits(), sim_registers.CTRL1);
+                log::error!(
+                    "PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}",
+                    self.ppu.control2.bits(),
+                    sim_registers.CTRL1
+                );
+                println!(
+                    "PPU SIM: Control2 (mask) register out of sync: ppu = 0x{:02x}, sim = 0x{:02x}",
+                    self.ppu.control2.bits(),
+                    sim_registers.CTRL1
+                );
             }
         }
     }
@@ -620,7 +649,7 @@ impl System {
     pub fn cpu_write(&mut self, addr: u16, data: u8) {
         self.check_watch_points(addr, WatchOps::WRITE);
 
-        #[cfg(feature="io-stats")]
+        #[cfg(feature = "io-stats")]
         {
             self.debug.io_stats[addr as usize].writes += 1;
         }
@@ -635,7 +664,7 @@ impl System {
     pub fn dummy_cpu_write(&mut self, addr: u16, data: u8) {
         self.check_watch_points(addr, WatchOps::DUMMY | WatchOps::WRITE);
 
-        #[cfg(feature="io-stats")]
+        #[cfg(feature = "io-stats")]
         {
             self.debug.io_stats[addr as usize].writes += 1;
         }
@@ -643,18 +672,20 @@ impl System {
         self.write(addr, data);
     }
 
-    #[cfg(feature="ppu-sim")]
+    #[cfg(feature = "ppu-sim")]
     pub fn ppu_sim_step(&mut self) {
         let sim_clks = self.debug.ppu_sim.clk_per_pclk() * 2;
         for _ in 0..sim_clks {
-            self.debug.ppu_sim.step_half(&mut self.debug.ppu_sim_cartridge);
+            self.debug
+                .ppu_sim
+                .step_half(&mut self.debug.ppu_sim_cartridge);
         }
     }
 
     //pub fn ppu_step(&mut self) {
     //    self.ppu.step(&mut self.cartridge);
 
-        //self.step_ppu_sim(fb)
+    //self.step_ppu_sim(fb)
     //}
     pub fn ppu_clock(&self) -> u64 {
         self.ppu.clock
@@ -662,7 +693,7 @@ impl System {
 
     /// Returns: number of cycles to pause the CPU (form DMC sample buffer DMA)
     //pub fn apu_step(&mut self) -> Option<DmcDmaRequest> {
-        //self.apu_clock += 1;
+    //self.apu_clock += 1;
     //    self.apu.step()
     //}
     pub fn apu_clock(&self) -> u64 {
@@ -684,7 +715,7 @@ impl System {
         //
         // NB: clocks are post-incremented so if we see dot == 0 then that cycle has
         // not yet actually elapsed.
-        #[cfg(feature="trace-events")]
+        #[cfg(feature = "trace-events")]
         if self.ppu.dot == 0 {
             let new_frame = self.ppu.line == 0;
             let cpu_clk = self.apu.clock; // NB: apu clock == cpu Clock
@@ -693,7 +724,7 @@ impl System {
             //self.cartridge.trace_cpu_clock_line_sync(cpu_clk);
         }
 
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             if let Some(read) = std::mem::take(&mut self.ppu.debug.last_cartridge_read) {
                 self.debug.ppu_sim.expected_reads.push_back(read);
@@ -701,12 +732,18 @@ impl System {
             self.ppu_sim_step();
 
             if self.ppu.dot == 0 && self.ppu.line == 1 {
-                let sim_dot  = self.debug.ppu_sim.h_counter();
+                let sim_dot = self.debug.ppu_sim.h_counter();
                 let sim_line = self.debug.ppu_sim.v_counter();
                 debug_assert_eq!(self.ppu.dot, sim_dot as u16);
                 debug_assert_eq!(self.ppu.line, sim_line as u16);
                 if self.ppu.dot != sim_dot as u16 || self.ppu.line != sim_line as u16 {
-                    log::error!("PPU<->SIM dot clock de-sync: PPU dot={}, line={}, SIM: dot={}, line={}", self.ppu.dot, self.ppu.line, sim_dot, sim_line);
+                    log::error!(
+                        "PPU<->SIM dot clock de-sync: PPU dot={}, line={}, SIM: dot={}, line={}",
+                        self.ppu.dot,
+                        self.ppu.line,
+                        sim_dot,
+                        sim_line
+                    );
                 }
                 //println!("step_ppu: h={}, v={}, SIM: h={}, v={}", self.ppu.dot, self.ppu.line, sim_dot, sim_line);
             }
@@ -762,7 +799,7 @@ impl System {
 
     /// The PPU simulator starts with a spurious line counter
     fn warm_up_sync_ppu_sim(&mut self) {
-        #[cfg(feature="ppu-sim")]
+        #[cfg(feature = "ppu-sim")]
         {
             log::debug!("PPU SIM: warm up, aligning to pixel clock and skipping first frame");
 
@@ -819,17 +856,20 @@ impl System {
         //for i in 0..dots_per_frame {
         //    self.ppu_sim_step();
         //}
-
     }
 
     pub fn add_watch(&mut self, addr: u16, ops: WatchOps) {
-        if let Some(i) = self.debug.watch_points.iter().position(|w| w.address == addr) {
+        if let Some(i) = self
+            .debug
+            .watch_points
+            .iter()
+            .position(|w| w.address == addr)
+        {
             self.debug.watch_points.swap_remove(i);
         }
-        self.debug.watch_points.push(WatchPoint {
-            address: addr,
-            ops
-        })
+        self.debug
+            .watch_points
+            .push(WatchPoint { address: addr, ops })
     }
 
     pub fn game_genie_codes(&self) -> &Vec<GameGenieCode> {
@@ -837,7 +877,6 @@ impl System {
     }
 
     pub fn set_game_genie_codes(&mut self, codes: Vec<GameGenieCode>) {
-
         let codes_str: Vec<String> = codes.iter().map(|c| c.to_string()).collect();
         log::debug!("Set Game Genie Codes: {:?}", codes_str);
 
@@ -855,10 +894,9 @@ impl System {
         }
     }
 
-    #[cfg(feature="trace-events")]
+    #[cfg(feature = "trace-events")]
     #[inline(always)]
     pub fn trace(&mut self, event: TraceEvent) {
         self.ppu.trace(event)
     }
-
 }

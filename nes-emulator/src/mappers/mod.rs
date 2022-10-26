@@ -2,7 +2,9 @@ use crate::cartridge::NameTableMirror;
 
 pub trait Mapper {
     fn reset(&mut self) {}
-    fn power_cycle(&mut self) { self.reset() }
+    fn power_cycle(&mut self) {
+        self.reset()
+    }
     fn clone_mapper(&self) -> Box<dyn Mapper>;
 
     // Returns (value, undefined_bits)
@@ -13,12 +15,16 @@ pub trait Mapper {
     fn ppu_bus_read(&mut self, addr: u16) -> u8;
     fn ppu_bus_peek(&mut self, addr: u16) -> u8;
     fn ppu_bus_write(&mut self, addr: u16, data: u8);
-    fn ppu_bus_nop_io(&mut self, _addr: u16) { }
+    fn ppu_bus_nop_io(&mut self, _addr: u16) {}
 
-    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::Vertical }
+    fn mirror_mode(&self) -> NameTableMirror {
+        NameTableMirror::Vertical
+    }
 
-    fn step_m2_phi2(&mut self, _cpu_clock: u64) { }
-    fn irq(&self) -> bool { false }
+    fn step_m2_phi2(&mut self, _cpu_clock: u64) {}
+    fn irq(&self) -> bool {
+        false
+    }
 }
 
 #[inline]
@@ -40,11 +46,11 @@ pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
     let off = match mode {
         NameTableMirror::Horizontal => {
             match addr {
-                0..=1023 => { addr }, // Top left
-                1024..=2047 => { addr - 1024}, // Top right
-                2048..=3071 => { addr - 2048 + 1024 }, // Bottom left
-                3072..=4095 => { addr - 3072 + 1024 }, // Bottom right
-                _ => unreachable!()
+                0..=1023 => addr,                  // Top left
+                1024..=2047 => addr - 1024,        // Top right
+                2048..=3071 => addr - 2048 + 1024, // Bottom left
+                3072..=4095 => addr - 3072 + 1024, // Bottom right
+                _ => unreachable!(),
             }
         }
         NameTableMirror::Vertical => {
@@ -52,37 +58,35 @@ pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
                 0..=1023 => {
                     //println!("mirroring 0x{save:x} to 'A' (0..1024) = {addr} (NOP)");
                     addr
-                }, // Top left
+                } // Top left
                 1024..=2047 => {
                     //println!("mirroring 0x{save:x} to 'B' (1024..2048) = {addr} (NOP)");
                     addr
-                }, // Top right
+                } // Top right
                 2048..=3071 => {
                     let off = addr - 2048;
                     //println!("mirroring 0x{save:x} to 'A' (0-1024) = {off}");
                     off
-                }, // Bottom left
+                } // Bottom left
                 3072..=4095 => {
                     let off = addr - 3072 + 1024;
                     //println!("mirroring 0x{save:x} to 'B' (1024..2048) = {off}");
                     off
-                }, // Bottom right
-                _ => unreachable!()
+                } // Bottom right
+                _ => unreachable!(),
             }
         }
         NameTableMirror::SingleScreenA => {
             match addr {
-                0..=1023 => { addr }, // Top left
-                1024..=2047 => { addr - 1024 }, // Top right
-                2048..=3071 => { addr - 2048 }, // Bottom left
-                3072..=4095 => { addr - 3072 }, // Bottom right
-                _ => unreachable!()
+                0..=1023 => addr,           // Top left
+                1024..=2047 => addr - 1024, // Top right
+                2048..=3071 => addr - 2048, // Bottom left
+                3072..=4095 => addr - 3072, // Bottom right
+                _ => unreachable!(),
             }
         }
-        NameTableMirror::FourScreen => {
-            addr - 0x2000
-        }
-        _ => panic!("Unknown mirror mode")
+        NameTableMirror::FourScreen => addr - 0x2000,
+        _ => panic!("Unknown mirror mode"),
     };
 
     //println!("Mirrored {save:x} to vram[{off}] ({mode:?}");
@@ -96,7 +100,7 @@ pub fn bank_select_mask(num_rom_pages: u8) -> u8 {
         let max_index = num_rom_pages - 1;
         let l = max_index.leading_zeros();
         let shift = 8 - l;
-        let mask = ((1u16<<shift)-1) as u8;
+        let mask = ((1u16 << shift) - 1) as u8;
         mask
     } else {
         0

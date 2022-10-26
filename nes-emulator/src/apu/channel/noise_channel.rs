@@ -1,13 +1,17 @@
 use std::sync::mpsc::channel;
 
+use super::frame_sequencer::FrameSequencerStatus;
 use crate::apu::channel::length_counter::LengthCounter;
 use crate::apu::channel::volume_envelope::VolumeEnvelope;
-use super::frame_sequencer::FrameSequencerStatus;
 
-const NTSC_TIMER_PERIODS_TABLE: [u16; 16] = [ 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 ];
+const NTSC_TIMER_PERIODS_TABLE: [u16; 16] = [
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
+];
 
 #[allow(dead_code)]
-const PAL_TIMER_PERIODS_TABLE: [u16; 16] = [ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 ];
+const PAL_TIMER_PERIODS_TABLE: [u16; 16] = [
+    4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708, 944, 1890, 3778,
+];
 
 #[derive(Clone, Default)]
 pub struct NoiseChannel {
@@ -31,16 +35,15 @@ impl NoiseChannel {
             shift_register: 1,
             volume_envelope: VolumeEnvelope::new(channel_name.clone()),
             length_counter: LengthCounter::new(channel_name),
-            ..Default::default()
-            /*
+            ..Default::default() /*
 
-            timer_period: 0,
-            timer: 0,
+                                 timer_period: 0,
+                                 timer: 0,
 
-            mode_flag: false,
+                                 mode_flag: false,
 
-            output: 0,
-            */
+                                 output: 0,
+                                 */
         }
     }
 
@@ -53,7 +56,11 @@ impl NoiseChannel {
             self.output = 0;
         } else {
             let low_bit = self.shift_register & 1;
-            self.output = if low_bit == 1 { self.volume_envelope.volume() } else { 0 }
+            self.output = if low_bit == 1 {
+                self.volume_envelope.volume()
+            } else {
+                0
+            }
         }
     }
 
@@ -96,13 +103,15 @@ impl NoiseChannel {
     pub fn write(&mut self, address: u16, value: u8) {
         match address % 4 {
             0 => {
-                self.length_counter.write_halt_flag((value & 0b0010_0000) != 0);
+                self.length_counter
+                    .write_halt_flag((value & 0b0010_0000) != 0);
 
                 let constant_volume = (value & 0b0001_0000) != 0;
                 let envelope_volume = value & 0xf;
-                self.volume_envelope.set_volume(envelope_volume, constant_volume)
+                self.volume_envelope
+                    .set_volume(envelope_volume, constant_volume)
             }
-            1 => { } // Sweep N/A
+            1 => {} // Sweep N/A
             2 => {
                 let period_index = value & 0xf;
                 self.timer_period = NTSC_TIMER_PERIODS_TABLE[period_index as usize];
@@ -115,8 +124,7 @@ impl NoiseChannel {
                 // "The envelope is also restarted"
                 self.volume_envelope.restart();
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
-

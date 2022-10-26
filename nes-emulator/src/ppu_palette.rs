@@ -2,7 +2,7 @@ use crate::color::Color32;
 
 const RGB_PALETTE: [Color32; 64] = [
     Color32::from_rgb(84, 84, 84),
-    Color32::from_rgb(0, 30, 116 ),
+    Color32::from_rgb(0, 30, 116),
     Color32::from_rgb(8, 16, 144),
     Color32::from_rgb(48, 0, 136),
     Color32::from_rgb(68, 0, 100),
@@ -17,9 +17,8 @@ const RGB_PALETTE: [Color32; 64] = [
     Color32::from_rgb(0, 0, 0),
     Color32::from_rgb(0, 0, 0),
     Color32::from_rgb(0, 0, 0),
-
     Color32::from_rgb(152, 150, 152),
-    Color32::from_rgb(8, 76, 196 ),
+    Color32::from_rgb(8, 76, 196),
     Color32::from_rgb(48, 50, 236),
     Color32::from_rgb(92, 30, 228),
     Color32::from_rgb(136, 20, 176),
@@ -34,9 +33,8 @@ const RGB_PALETTE: [Color32; 64] = [
     Color32::from_rgb(0, 0, 0),
     Color32::from_rgb(0, 0, 0),
     Color32::from_rgb(0, 0, 0),
-
     Color32::from_rgb(236, 238, 236),
-    Color32::from_rgb(76, 154, 236 ),
+    Color32::from_rgb(76, 154, 236),
     Color32::from_rgb(120, 124, 236),
     Color32::from_rgb(176, 98, 236),
     Color32::from_rgb(228, 84, 236),
@@ -51,7 +49,6 @@ const RGB_PALETTE: [Color32; 64] = [
     Color32::from_rgb(60, 60, 60),
     Color32::from_rgb(0, 0, 0),
     Color32::from_rgb(0, 0, 0),
-
     Color32::from_rgb(236, 238, 236),
     Color32::from_rgb(168, 204, 236),
     Color32::from_rgb(188, 188, 236),

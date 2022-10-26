@@ -22,7 +22,7 @@ impl TryFrom<u8> for ControllerButton {
             5 => Ok(ControllerButton::Down),
             6 => Ok(ControllerButton::Left),
             7 => Ok(ControllerButton::Right),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -64,7 +64,6 @@ pub struct StandardControllerState {
     // aimed at the APU vs the controller so we don't really know
     // when the controller state has been read - thus we only reset
     // the latches at the start of each frame.
-
     pub poll_mode: bool,
     pub button_presses: u8,
     pub button_press_latches: u8,
@@ -73,18 +72,33 @@ pub struct StandardControllerState {
 
 #[allow(dead_code)]
 fn debug_print_buttons_pressed(buttons: u8) {
-    if buttons & 1 != 0 { println!("> A pressed"); }
-    if buttons & 2 != 0 { println!("> B pressed"); }
-    if buttons & 4 != 0 { println!("> Select pressed"); }
-    if buttons & 8 != 0 { println!("> Start pressed"); }
-    if buttons & 16 != 0 { println!("> Up pressed"); }
-    if buttons & 32 != 0 { println!("> Down pressed"); }
-    if buttons & 64 != 0 { println!("> Left pressed"); }
-    if buttons & 128 != 0 { println!("> Right pressed"); }
+    if buttons & 1 != 0 {
+        println!("> A pressed");
+    }
+    if buttons & 2 != 0 {
+        println!("> B pressed");
+    }
+    if buttons & 4 != 0 {
+        println!("> Select pressed");
+    }
+    if buttons & 8 != 0 {
+        println!("> Start pressed");
+    }
+    if buttons & 16 != 0 {
+        println!("> Up pressed");
+    }
+    if buttons & 32 != 0 {
+        println!("> Down pressed");
+    }
+    if buttons & 64 != 0 {
+        println!("> Left pressed");
+    }
+    if buttons & 128 != 0 {
+        println!("> Right pressed");
+    }
 }
 
 impl ControllerIO for StandardControllerState {
-
     fn power_cycle(&mut self) {
         *self = Default::default();
     }
@@ -176,7 +190,6 @@ impl ControllerIO for StandardControllerState {
     }
 }
 
-
 #[derive(Clone)]
 pub enum Controller {
     StandardController(StandardControllerState),
@@ -194,8 +207,8 @@ impl Default for Port {
                 poll_mode: false,
                 button_presses: 0,
                 button_press_latches: 0,
-                controller_shift: 0
-            })
+                controller_shift: 0,
+            }),
         }
     }
 }
@@ -248,5 +261,4 @@ impl Port {
             Controller::StandardController(state) => state.peek_button(button),
         }
     }
-
 }

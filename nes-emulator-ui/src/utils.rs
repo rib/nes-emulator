@@ -1,4 +1,8 @@
-use std::{path::{Path, PathBuf}, time::Instant, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+    time::Instant,
+};
 
 use anyhow::Result;
 
@@ -11,12 +15,16 @@ pub fn epoch_timestamp() -> u64 {
     }
 }
 
-pub fn create_nes_from_binary(path: impl AsRef<Path>, audio_sample_rate: u32, start_timestamp: Instant) -> Result<Nes> {
+pub fn create_nes_from_binary(
+    path: impl AsRef<Path>,
+    audio_sample_rate: u32,
+    start_timestamp: Instant,
+) -> Result<Nes> {
     let rom = std::fs::read(path)?;
     let cartridge = Cartridge::from_binary(&rom)?;
     let model = match cartridge.tv_system() {
         nes_emulator::cartridge::TVSystemCompatibility::Pal => Model::Pal,
-        _ => Model::Ntsc
+        _ => Model::Ntsc,
     };
     let mut nes = Nes::new(model, audio_sample_rate, start_timestamp);
     nes.insert_cartridge(Some(cartridge))?;
@@ -25,16 +33,20 @@ pub fn create_nes_from_binary(path: impl AsRef<Path>, audio_sample_rate: u32, st
 }
 
 pub fn canonicalize_rom_dirs(rom_dirs: &Vec<String>) -> Vec<PathBuf> {
-    rom_dirs.iter()
+    rom_dirs
+        .iter()
         .map(|s| PathBuf::from_str(s).unwrap())
         .filter_map(|dir| {
-            if !dir.exists() { return None; }
+            if !dir.exists() {
+                return None;
+            }
 
             match dir.canonicalize() {
                 Ok(dir) => Some(dir),
-                Err(_) => None
+                Err(_) => None,
             }
-        }).collect()
+        })
+        .collect()
 }
 
 /// Finds the shortest path for the given rom, relative to the given rom directories

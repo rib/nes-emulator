@@ -1,7 +1,7 @@
+use super::frame_sequencer::FrameSequencerStatus;
 use crate::apu::channel::length_counter::LengthCounter;
 use crate::apu::channel::volume_envelope::VolumeEnvelope;
 use crate::system::Model;
-use super::frame_sequencer::FrameSequencerStatus;
 
 // Ref: https://www.nesdev.com/apu_ref.txt
 // Note: we step through the DUTY_MAP with an _incrementing_ counter, not decrementing
@@ -37,12 +37,15 @@ pub struct SquareChannel {
     volume_envelope: VolumeEnvelope,
     pub length_counter: LengthCounter,
 
-    pub output: u8
+    pub output: u8,
 }
 
 impl SquareChannel {
-    pub fn new(model: Model, debug_channel_name: String, twos_compliment_sweep_negate: bool) -> Self {
-
+    pub fn new(
+        model: Model,
+        debug_channel_name: String,
+        twos_compliment_sweep_negate: bool,
+    ) -> Self {
         Self {
             model,
             debug_channel_name: debug_channel_name.clone(),
@@ -54,7 +57,11 @@ impl SquareChannel {
     }
 
     pub fn power_cycle(&mut self) {
-        *self = Self::new(self.model, self.debug_channel_name.clone(), self.twos_compliment_sweep_negate);
+        *self = Self::new(
+            self.model,
+            self.debug_channel_name.clone(),
+            self.twos_compliment_sweep_negate,
+        );
     }
 
     /// "Two conditions cause the sweep unit to mute the channel:
@@ -90,11 +97,12 @@ impl SquareChannel {
     }
 
     pub fn frequency(&self) -> u32 {
-        self.model.cpu_clock_hz() / (16*(self.timer_period as u32 + 1))
+        self.model.cpu_clock_hz() / (16 * (self.timer_period as u32 + 1))
     }
 
     pub fn set_frequency(&mut self, freq: u32) {
-        self.timer_period = ((self.model.cpu_clock_hz() / (16 * freq) - 1) as u16) & 0b0111_1111_1111;
+        self.timer_period =
+            ((self.model.cpu_clock_hz() / (16 * freq) - 1) as u16) & 0b0111_1111_1111;
     }
 
     pub fn period(&self) -> u16 {
@@ -116,23 +124,21 @@ impl SquareChannel {
     }
 
     fn step_sweep_half_frame(&mut self) {
-
         //println!("square channel: half frame");
 
         // "1. If the divider's counter is zero, the sweep is enabled, and the sweep unit is not
         // muting the channel: The pulse's period is set to the target period."
-        if self.sweep_divider_value == 0 &&  self.sweep_enabled && !self.is_muted() {
-
+        if self.sweep_divider_value == 0 && self.sweep_enabled && !self.is_muted() {
             // "If the shift count is zero, the pulse channel's period is never updated, but
             // muting logic still applies."
             if self.sweep_shift != 0 {
                 //println!("Updating period by sweep: from {}, to {}", self.timer_period, self.sweep_target_period);
                 self.set_period(self.sweep_target_period);
             }
-        }// else {
-        //    println!("didn't update current period: sweep div = {}, sweep_enabled = {}, muted = {}, sweep_shift = {}",
-        //            self.sweep_divider_value, self.sweep_enabled, self.is_muted(), self.sweep_shift);
-        //}
+        } // else {
+          //    println!("didn't update current period: sweep div = {}, sweep_enabled = {}, muted = {}, sweep_shift = {}",
+          //            self.sweep_divider_value, self.sweep_enabled, self.is_muted(), self.sweep_shift);
+          //}
 
         // "2. If the divider's counter is zero or the reload flag is true: The divider counter
         // is set to P and the reload flag is cleared. Otherwise, the divider counter is decremented."
@@ -168,7 +174,6 @@ impl SquareChannel {
 
     // Only stepped for odd CPU clock cycles
     pub fn odd_step(&mut self, sequencer_state: FrameSequencerStatus) {
-
         if sequencer_state.contains(FrameSequencerStatus::QUARTER_FRAME) {
             self.volume_envelope.step_quarter_frame();
         }
@@ -182,7 +187,7 @@ impl SquareChannel {
         if self.timer == 0 {
             //println!("square, odd_step set timer = {}", self.timer_period);
             self.timer = self.timer_period;
-            self.duty_offset  = (self.duty_offset + 1) % 8;
+            self.duty_offset = (self.duty_offset + 1) % 8;
         } else {
             self.timer -= 1;
         }
@@ -208,9 +213,11 @@ impl SquareChannel {
 
                 let constant_volume = (value & 0b0001_0000) != 0;
                 let envelope_volume = value & 0xf;
-                self.volume_envelope.set_volume(envelope_volume, constant_volume)
+                self.volume_envelope
+                    .set_volume(envelope_volume, constant_volume)
             }
-            1 => { // Sweep
+            1 => {
+                // Sweep
                 // Ref: https://www.nesdev.org/wiki/APU_Sweep
                 self.sweep_enabled = (value & 0b1000_0000) != 0;
                 //println!("square set sweep enable = {}", self.sweep_enabled);
@@ -240,8 +247,7 @@ impl SquareChannel {
                 // "The envelope is also restarted"
                 self.volume_envelope.restart();
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
-

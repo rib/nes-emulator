@@ -1,14 +1,13 @@
 #[allow(unused_imports)]
-use log::{error, trace, debug};
+use log::{debug, error, trace};
 
-use crate::constants::*;
-use crate::mappers::Mapper;
 use crate::binary::INesConfig;
 use crate::cartridge::NameTableMirror;
+use crate::constants::*;
+use crate::mappers::Mapper;
 
-use super::mirror_vram_address;
 use super::bank_select_mask;
-
+use super::mirror_vram_address;
 
 /// iNES Mapper 002: AKA UxROM
 ///
@@ -80,12 +79,12 @@ impl Mapper2 {
             bank0_select_mask,
             n_prg_pages,
             bank0_offset: 0,
-            bank1_offset
+            bank1_offset,
         }
     }
 
     fn system_bus_read_direct(&self, addr: u16) -> u8 {
-         match addr {
+        match addr {
             0x8000..=0xbfff => {
                 let off = addr as usize - 0x8000 + self.bank0_offset;
                 arr_read!(self.prg_rom, off)
@@ -94,9 +93,7 @@ impl Mapper2 {
                 let off = addr as usize - 0xc000 + self.bank1_offset;
                 arr_read!(self.prg_rom, off)
             }
-            _ => {
-                return 0
-            }
+            _ => return 0,
         }
     }
 }
@@ -123,7 +120,8 @@ impl Mapper for Mapper2 {
         }
 
         match addr {
-            0x8000..=0xffff => { // PRG Bank Select
+            0x8000..=0xffff => {
+                // PRG Bank Select
                 let page_select = (data & self.bank0_select_mask) % self.n_prg_pages;
                 self.bank0_offset = PAGE_SIZE_16K * (page_select as usize);
             }
@@ -136,10 +134,11 @@ impl Mapper for Mapper2 {
             0x0000..=0x1fff => {
                 arr_read!(self.chr_data, addr as usize)
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
             }
-            _ => { 0 }
+            _ => 0,
         }
     }
 
@@ -152,12 +151,15 @@ impl Mapper for Mapper2 {
             0x0000..=0x1fff => {
                 arr_write!(self.chr_data, addr as usize, data);
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }
             _ => {}
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
+    fn mirror_mode(&self) -> NameTableMirror {
+        self.vram_mirror
+    }
 }

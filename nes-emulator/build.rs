@@ -1,5 +1,5 @@
-#[cfg(feature="ppu-sim")]
-#[cfg(target_os="windows")]
+#[cfg(feature = "ppu-sim")]
+#[cfg(target_os = "windows")]
 fn build_ppu_sim() {
     use std::path::PathBuf;
 
@@ -26,10 +26,8 @@ fn build_ppu_sim() {
         "breaknes/BreaksPPU/PPUSim/sprite_eval.cpp",
         "breaknes/BreaksPPU/PPUSim/video_out.cpp",
         "breaknes/BreaksPPU/PPUSim/vram_ctrl.cpp",
-
-        "breaknes-bindings/ppusim-bindings.cpp"
+        "breaknes-bindings/ppusim-bindings.cpp",
     ];
-
 
     //let cwd = std::env::current_dir().unwrap();
     //println!("current dir = {}", std::env::current_dir().unwrap().display());
@@ -50,7 +48,6 @@ fn build_ppu_sim() {
 
     build.compile("libppusim.a");
 
-
     let bindings = bindgen::Builder::default()
         .derive_debug(true)
         .derive_default(true)
@@ -60,7 +57,9 @@ fn build_ppu_sim() {
         .clang_arg("-Ibreaknes/Common/BaseLogicLib")
         .clang_arg("-Ibreaknes/BreaksPPU/PPUSim")
         .clang_arg("-Ibreaknes-bindings")
-        .clang_arg("-x").clang_arg("c++").clang_arg("-std=c++20")
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++20")
         .clang_arg("-fms-extensions")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
@@ -71,11 +70,11 @@ fn build_ppu_sim() {
         .expect("Unable to generate bindings");
 
     let out_path = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-        bindings
-            .write_to_file(out_path.join("bindings.rs"))
-            .expect("Couldn't write bindings!");
+    bindings
+        .write_to_file(out_path.join("bindings.rs"))
+        .expect("Couldn't write bindings!");
 
-/*
+    /*
     cxx_build::bridge("src/ppusim.rs")
         .include("breaknes/Common/BaseLogicLib")
         .include("breaknes/BreaksPPU/PPUSim")
@@ -91,7 +90,7 @@ fn build_ppu_sim() {
 fn main() {
     // Note: for now PPUSim is only supported on Windows since it depends on
     // various MSVC extensions
-    #[cfg(feature="ppu-sim")]
-    #[cfg(target_os="windows")]
+    #[cfg(feature = "ppu-sim")]
+    #[cfg(target_os = "windows")]
     build_ppu_sim();
 }

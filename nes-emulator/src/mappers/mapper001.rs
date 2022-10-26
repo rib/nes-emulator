@@ -1,16 +1,15 @@
 #[allow(unused_imports)]
-use log::{error, trace, debug};
+use log::{debug, error, trace};
 
-use crate::constants::*;
-use crate::mappers::Mapper;
 use crate::binary::INesConfig;
 use crate::cartridge::NameTableMirror;
+use crate::constants::*;
+use crate::mappers::Mapper;
 
 use super::mirror_vram_address;
 
 #[derive(Debug, Clone, Copy)]
 enum Mapper1PrgMode {
-
     /// 0x8000-0xdfff switchable to two consecutive pages
     Switch32KConsecutive,
 
@@ -18,13 +17,13 @@ enum Mapper1PrgMode {
     Fixed16KFirstSwitch16K,
 
     /// 0x8000 page is switchable, 0xc000 = last page of PRG ROM
-    Switch16KFixed16KLast
+    Switch16KFixed16KLast,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Mapper1ChrMode {
     Switch8K,
-    Switch4KSwitch4K
+    Switch4KSwitch4K,
 }
 
 /// iNes mapper 001, aka MMC1
@@ -92,7 +91,7 @@ impl Mapper1 {
             prg_rom_last_16k_page: config.n_prg_rom_pages - 1,
             prg_ram: vec![0u8; config.n_prg_ram_pages * PAGE_SIZE_16K],
             chr_data,
-            has_chr_ram: config.has_chr_ram
+            has_chr_ram: config.has_chr_ram,
         }
     }
 
@@ -113,39 +112,51 @@ impl Mapper1 {
 
                 // Shift register full; write to internal register...
                 match addr {
-                    0x8000..=0x9fff => { // Control register
+                    0x8000..=0x9fff => {
+                        // Control register
                         self.vram_mirror = match value & 0b00011 {
                             0 => NameTableMirror::SingleScreenA,
                             1 => NameTableMirror::SingleScreenB,
                             2 => NameTableMirror::Vertical,
                             3 => NameTableMirror::Horizontal,
-                            _ => unreachable!()
+                            _ => unreachable!(),
                         };
                         self.prg_bank_mode = match (value & 0b01100) >> 2 {
                             0 | 1 => Mapper1PrgMode::Switch32KConsecutive,
                             2 => Mapper1PrgMode::Fixed16KFirstSwitch16K,
                             3 => Mapper1PrgMode::Switch16KFixed16KLast,
 
-                            _ => { unreachable!() } // Rust compiler should know this is unreachable :/
+                            _ => {
+                                unreachable!()
+                            } // Rust compiler should know this is unreachable :/
                         };
                         self.chr_bank_mode = match (value & 0b10000) >> 4 {
                             0 => Mapper1ChrMode::Switch8K,
                             1 => Mapper1ChrMode::Switch4KSwitch4K,
 
-                            _ => { unreachable!() } // Rust compiler should know this is unreachable :/
+                            _ => {
+                                unreachable!()
+                            } // Rust compiler should know this is unreachable :/
                         };
-                        trace!("Control: mirring = {:#?}, PRG mode = {:?}, CHR mode = {:?}",
-                                self.vram_mirror, self.prg_bank_mode, self.chr_bank_mode);
+                        trace!(
+                            "Control: mirring = {:#?}, PRG mode = {:?}, CHR mode = {:?}",
+                            self.vram_mirror,
+                            self.prg_bank_mode,
+                            self.chr_bank_mode
+                        );
                     }
-                    0xa000..=0xbfff => { // CHR bank 0
+                    0xa000..=0xbfff => {
+                        // CHR bank 0
                         trace!("CHR bank 0 = {}", value);
                         self.chr_bank_0 = value;
                     }
-                    0xc000..=0xdfff => { // CHR bank 1
+                    0xc000..=0xdfff => {
+                        // CHR bank 1
                         trace!("CHR bank 1 = {}", value);
                         self.chr_bank_1 = value;
                     }
-                    0xe000..=0xffff => { // PRG bank
+                    0xe000..=0xffff => {
+                        // PRG bank
                         trace!("PRG bank = {}", value);
 
                         // XXX: 0 = enabled, 1 = disabled!
@@ -200,20 +211,20 @@ impl Mapper for Mapper1 {
 
     fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
         let value = match addr {
-            0x6000..=0x7fff => { // 8 KB PRG RAM bank, (optional)
+            0x6000..=0x7fff => {
+                // 8 KB PRG RAM bank, (optional)
                 let ram_offset = (addr - 0x6000) as usize;
                 self.prg_ram[ram_offset]
             }
-            0x8000..=0xbfff => { // 16 KB PRG ROM bank, either switchable or fixed to the first bank
+            0x8000..=0xbfff => {
+                // 16 KB PRG ROM bank, either switchable or fixed to the first bank
                 let prg_bank_offset = match self.prg_bank_mode {
                     Mapper1PrgMode::Switch32KConsecutive => {
                         // mask out (ignore) bit zero from the bank selector
                         let page_no = (self.prg_bank & !1) as usize;
                         page_no * PAGE_SIZE_16K
                     }
-                    Mapper1PrgMode::Fixed16KFirstSwitch16K => {
-                        0
-                    }
+                    Mapper1PrgMode::Fixed16KFirstSwitch16K => 0,
                     Mapper1PrgMode::Switch16KFixed16KLast => {
                         let page_no = self.prg_bank as usize;
                         page_no * PAGE_SIZE_16K
@@ -222,7 +233,8 @@ impl Mapper for Mapper1 {
                 let bank_offset = (addr - 0x8000) as usize;
                 arr_read!(self.prg_rom, prg_bank_offset + bank_offset)
             }
-            0xc000..=0xffff => { // 16 KB PRG ROM bank, either fixed to the last bank or switchable
+            0xc000..=0xffff => {
+                // 16 KB PRG ROM bank, either fixed to the last bank or switchable
                 let prg_bank_offset = match self.prg_bank_mode {
                     Mapper1PrgMode::Switch32KConsecutive => {
                         // force odd page_no so it follows on from bank 0
@@ -242,12 +254,11 @@ impl Mapper for Mapper1 {
             }
             _ => {
                 error!("MMC1: invalid system bus read");
-                return (0, 0xff)
+                return (0, 0xff);
             }
         };
 
         (value, 0) // no undefined bits
-
     }
 
     fn system_bus_peek(&mut self, addr: u16) -> (u8, u8) {
@@ -260,7 +271,8 @@ impl Mapper for Mapper1 {
                 let ram_offset = (addr - 0x6000) as usize;
                 arr_write!(self.prg_ram, ram_offset, data);
             }
-            0x8000..=0xffff => {// Load register
+            0x8000..=0xffff => {
+                // Load register
                 self.load_register_write(addr, data);
             }
             _ => {
@@ -279,7 +291,8 @@ impl Mapper for Mapper1 {
                 let offset = self.chr_bank_1_data_offset((addr - 0x1000) as usize);
                 arr_read!(self.chr_data, offset)
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_read!(self.vram, mirror_vram_address(addr, self.vram_mirror))
             }
             _ => {
@@ -307,7 +320,8 @@ impl Mapper for Mapper1 {
                     arr_write!(self.chr_data, offset, data)
                 }
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
             }
             _ => {
@@ -316,5 +330,7 @@ impl Mapper for Mapper1 {
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
+    fn mirror_mode(&self) -> NameTableMirror {
+        self.vram_mirror
+    }
 }

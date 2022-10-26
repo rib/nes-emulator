@@ -1,9 +1,24 @@
-use std::{time::{Instant, Duration}, rc::Rc, cell::RefCell, fs::File, io::{Write, BufWriter}, path::{Path, PathBuf}};
+use std::{
+    cell::RefCell,
+    fs::File,
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
-use nes_emulator::{nes::{ProgressTarget, Nes}, framebuffer::FramebufferInfo, system::Model};
+use nes_emulator::{
+    framebuffer::FramebufferInfo,
+    nes::{Nes, ProgressTarget},
+    system::Model,
+};
 
-use crate::{utils, benchmark::BenchmarkState, macros::{MacroPlayer, self}};
+use crate::{
+    benchmark::BenchmarkState,
+    macros::{self, MacroPlayer},
+    utils,
+};
 
 const DUMMY_AUDIO_SAMPLE_RATE: u32 = 48000;
 
@@ -14,7 +29,7 @@ fn progress_nes_emulation(nes: &mut Nes, stats: &mut BenchmarkState) -> bool {
     match nes.progress(ProgressTarget::FrameReady) {
         nes_emulator::nes::ProgressStatus::FrameReady => {
             stats.end_frame();
-        },
+        }
         nes_emulator::nes::ProgressStatus::ReachedTarget => unreachable!(), // Should hit FrameReady first
         nes_emulator::nes::ProgressStatus::Breakpoint => {
             breakpoint = true;
@@ -43,17 +58,29 @@ fn save_check_failed_image(nes: &mut Nes, name: &String, expected_failure: bool)
         let _a = fb_buf[stride * y + x * 4 + 3];
         *pixel = image::Rgb([r, g, b]);
     }
-    let status = if expected_failure { "changed" } else { "failed" };
+    let status = if expected_failure {
+        "changed"
+    } else {
+        "failed"
+    };
     let frame = nes.ppu_mut().frame;
     let line = nes.ppu_mut().line;
     let dot = nes.ppu_mut().dot;
-    let filename = format!("test-{name}-{status}-frame-{}-line-{}-dot-{}.png", frame, line, dot);
+    let filename = format!(
+        "test-{name}-{status}-frame-{}-line-{}-dot-{}.png",
+        frame, line, dot
+    );
 
     log::warn!("{} {}: Saving debug image: {}", name, status, filename);
     imgbuf.save(filename).unwrap();
 }
 
-fn setup_new_nes(rom_path: impl AsRef<Path>, rom_dirs: &Vec<PathBuf>, audio_sample_rate: u32, trace_file: Option<&String>) -> Result<Nes> {
+fn setup_new_nes(
+    rom_path: impl AsRef<Path>,
+    rom_dirs: &Vec<PathBuf>,
+    audio_sample_rate: u32,
+    trace_file: Option<&String>,
+) -> Result<Nes> {
     let rom_path = match utils::find_rom(&rom_path, rom_dirs) {
         Some(rom) => rom,
         None => {
@@ -99,9 +126,15 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
             if let Some(next_macro) = macro_queue.pop() {
                 log::debug!("Starting macro {}", next_macro.name);
 
-                nes = setup_new_nes(&next_macro.rom, &rom_dirs, DUMMY_AUDIO_SAMPLE_RATE, args.trace.as_ref())?;
+                nes = setup_new_nes(
+                    &next_macro.rom,
+                    &rom_dirs,
+                    DUMMY_AUDIO_SAMPLE_RATE,
+                    args.trace.as_ref(),
+                )?;
                 // To handle any CRC32 checks in the macro we register a hook that continuously tracks the CRC32 for every frame
-                let _crc_hook_handle = macros::register_frame_crc_hasher(&mut nes, shared_crc32.clone());
+                let _crc_hook_handle =
+                    macros::register_frame_crc_hasher(&mut nes, shared_crc32.clone());
                 stats = BenchmarkState::new(&nes, Duration::from_secs(3));
 
                 // macros run in headless mode are treated like tests and check failures are considered fatal
@@ -158,7 +191,7 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
 pub fn run_single_rom(args: &crate::Args, rom_dirs: &Vec<PathBuf>) -> Result<()> {
     let rom_path = match &args.rom {
         Some(rom) => utils::find_rom(rom, &rom_dirs),
-        None => None
+        None => None,
     };
     let rom_path = match rom_path {
         Some(path) => path,
@@ -168,7 +201,12 @@ pub fn run_single_rom(args: &crate::Args, rom_dirs: &Vec<PathBuf>) -> Result<()>
         }
     };
 
-    let mut nes = setup_new_nes(rom_path, &rom_dirs, DUMMY_AUDIO_SAMPLE_RATE, args.trace.as_ref())?;
+    let mut nes = setup_new_nes(
+        rom_path,
+        &rom_dirs,
+        DUMMY_AUDIO_SAMPLE_RATE,
+        args.trace.as_ref(),
+    )?;
     let mut stats = BenchmarkState::new(&nes, Duration::from_secs(3));
 
     loop {

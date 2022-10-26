@@ -1,8 +1,12 @@
-
 use std::{cell::RefCell, rc::Rc};
 
-use egui::{TextureHandle, pos2};
-use nes_emulator::{constants::*, nes::Nes, hook::HookHandle, framebuffer::{FramebufferDataRental, Framebuffer, PixelFormat, FramebufferClearMode}};
+use egui::{pos2, TextureHandle};
+use nes_emulator::{
+    constants::*,
+    framebuffer::{Framebuffer, FramebufferClearMode, FramebufferDataRental, PixelFormat},
+    hook::HookHandle,
+    nes::Nes,
+};
 
 use crate::ui::{blank_texture_for_framebuffer, full_framebuffer_image_delta};
 
@@ -24,11 +28,16 @@ pub struct SpritesView {
 
 impl SpritesView {
     pub fn new(ctx: &egui::Context) -> Self {
-        let screen_framebuffer_front = Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
+        let screen_framebuffer_front =
+            Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
         let screen_framebuffer_front = screen_framebuffer_front.rent_data().unwrap();
-        let screen_texture = blank_texture_for_framebuffer(ctx, &screen_framebuffer_front, "sprites_screen_framebuffer");
+        let screen_texture = blank_texture_for_framebuffer(
+            ctx,
+            &screen_framebuffer_front,
+            "sprites_screen_framebuffer",
+        );
 
-        Self  {
+        Self {
             visible: false,
 
             screen_texture,
@@ -52,29 +61,41 @@ impl SpritesView {
             // By giving the closure ownership of the back buffer then this per-pixel hook
             // avoids needing to poke into the Rc<RefCell<>> every pixel and only needs
             // to swap the back buffer into the shared state at the end of the frame
-            let screen_framebuffer_back = Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
+            let screen_framebuffer_back =
+                Framebuffer::new(FRAME_WIDTH, FRAME_HEIGHT, PixelFormat::RGB888);
             let mut screen_framebuffer_back = screen_framebuffer_back.rent_data().unwrap();
             self.mux_hook_handle = Some(nes.ppu_mut().add_mux_hook(Box::new(
                 move |_ppu, _cartridge, state| {
-
                     //println!("screen x = {}, y = {}, enabled = {}", state.screen_x, state.screen_y, state.rendering_enabled);
                     if state.screen_x == 0 && state.screen_y == 0 {
-                        screen_framebuffer_back.clear(FramebufferClearMode::Checkerboard(0x80, 0xa0));
+                        screen_framebuffer_back
+                            .clear(FramebufferClearMode::Checkerboard(0x80, 0xa0));
                     }
                     if state.sprite_pattern != 0 {
                         let color = nes_emulator::ppu_palette::rgb_lut(state.sprite_palette_value);
-                        screen_framebuffer_back.plot(state.screen_x as usize, state.screen_y as usize, color);
+                        screen_framebuffer_back.plot(
+                            state.screen_x as usize,
+                            state.screen_y as usize,
+                            color,
+                        );
                     }
                     if state.screen_x == 255 && state.screen_y == 239 {
-                        std::mem::swap(&mut screen_framebuffer_back, &mut shared.borrow_mut().screen_framebuffer_front);
+                        std::mem::swap(
+                            &mut screen_framebuffer_back,
+                            &mut shared.borrow_mut().screen_framebuffer_front,
+                        );
                         //println!("Finished frame");
                     }
-            })));
+                },
+            )));
 
-            self.dot_hook_handle = Some(nes.ppu_mut().add_dot_hook(240, 0, Box::new(
-                move |_ppu, _cartridge| {
+            self.dot_hook_handle = Some(nes.ppu_mut().add_dot_hook(
+                240,
+                0,
+                Box::new(move |_ppu, _cartridge| {
                     //self.queue_screen_fb_upload = true;
-            })));
+                }),
+            ));
         } else {
             if let Some(handle) = self.mux_hook_handle {
                 nes.ppu_mut().remove_mux_hook(handle);
@@ -110,8 +131,11 @@ impl SpritesView {
     pub fn draw(&mut self, _nes: &mut Nes, ctx: &egui::Context) {
         if self.queue_screen_fb_upload {
             let _hook_state = self.hook_state.borrow();
-            let copy = full_framebuffer_image_delta(&self.hook_state.borrow().screen_framebuffer_front);
-            ctx.tex_manager().write().set(self.screen_texture.id(), copy);
+            let copy =
+                full_framebuffer_image_delta(&self.hook_state.borrow().screen_framebuffer_front);
+            ctx.tex_manager()
+                .write()
+                .set(self.screen_texture.id(), copy);
             self.queue_screen_fb_upload = false;
         }
         egui::Window::new("Sprites")
@@ -119,7 +143,6 @@ impl SpritesView {
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
-
                 let panels_width = ui.fonts().pixels_per_point() * 100.0;
 
                 egui::SidePanel::left("sprites_options_panel")
@@ -134,7 +157,7 @@ impl SpritesView {
                     .show_inside(ui, |_ui| {
                         //ui.label(format!("Scroll X: {}", self.nes.system_ppu().scroll_x()));
                         //ui.label(format!("Scroll Y: {}", self.nes.system_ppu().scroll_y()));
-                });
+                    });
 
                 egui::TopBottomPanel::bottom("sprites_footer").show_inside(ui, |ui| {
                     ui.label(format!("[{}, {}]", self.hover_pos[0], self.hover_pos[1]));
@@ -144,16 +167,24 @@ impl SpritesView {
                 egui::CentralPanel::default()
                     //.frame(frame)
                     .show_inside(ui, |ui| {
+                        let (response, painter) = ui.allocate_painter(
+                            egui::Vec2::new(FRAME_WIDTH as f32, FRAME_HEIGHT as f32),
+                            egui::Sense::hover(),
+                        );
 
-                        let (response, painter) =
-                            ui.allocate_painter(egui::Vec2::new(FRAME_WIDTH as f32, FRAME_HEIGHT as f32), egui::Sense::hover());
-
-                        let _img = egui::Image::new(self.screen_texture.id(), egui::Vec2::new(FRAME_WIDTH as f32, FRAME_HEIGHT as f32));
+                        let _img = egui::Image::new(
+                            self.screen_texture.id(),
+                            egui::Vec2::new(FRAME_WIDTH as f32, FRAME_HEIGHT as f32),
+                        );
                         //let response = ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
-                                        // TODO(emilk): builder pattern for Mesh
+                        // TODO(emilk): builder pattern for Mesh
 
                         let mut mesh = egui::Mesh::with_texture(self.screen_texture.id());
-                        mesh.add_rect_with_uv(response.rect, egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE,);
+                        mesh.add_rect_with_uv(
+                            response.rect,
+                            egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
                         painter.add(egui::Shape::mesh(mesh));
 
                         let img_pos = response.rect.left_top();
@@ -188,8 +219,7 @@ impl SpritesView {
                             egui::Rounding::none(),
                             egui::Stroke::new(2.0, Color32::YELLOW));
                             */
-                });
-
-        });
+                    });
+            });
     }
 }

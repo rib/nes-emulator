@@ -1,4 +1,3 @@
-
 pub mod cpu;
-pub mod instruction;
 mod flags;
+pub mod instruction;

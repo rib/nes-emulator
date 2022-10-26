@@ -1,5 +1,5 @@
-use std::time::{Instant, Duration};
 use nes_emulator::nes::Nes;
+use std::time::{Duration, Instant};
 
 pub struct BenchmarkState {
     nes_cpu_clock_hz: u64,
@@ -48,7 +48,7 @@ impl BenchmarkState {
             profiled_last_fps: 0.0,
             profiled_aggregate_fps: 0.0,
 
-            frame_count: 0
+            frame_count: 0,
         }
     }
 
@@ -91,7 +91,8 @@ impl BenchmarkState {
         let clocks_elapsed = cpu_clock - self.update_start_clock;
         // Try to avoid updating last_clocks_per_second for early exit conditions where we didn't actually do any work
         if elapsed > Duration::from_millis(1) || clocks_elapsed > 2000 {
-            self.profiled_last_clocks_per_second = (clocks_elapsed as f64 / elapsed.as_secs_f64()) as u32;
+            self.profiled_last_clocks_per_second =
+                (clocks_elapsed as f64 / elapsed.as_secs_f64()) as u32;
         }
         let now = Instant::now();
         let stats_update_duration = now - self.last_stats_update_timestamp;

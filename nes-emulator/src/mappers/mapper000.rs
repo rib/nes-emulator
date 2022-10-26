@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
-use log::{error, trace, debug};
+use log::{debug, error, trace};
 
+use crate::binary::INesConfig;
 use crate::cartridge::NameTableMirror;
 use crate::constants::*;
 use crate::mappers::Mapper;
-use crate::binary::INesConfig;
 
 use super::mirror_vram_address;
 
@@ -20,12 +20,22 @@ pub struct Mapper0 {
 }
 
 impl Mapper0 {
-    pub(crate) fn new_full(prg_rom: Vec<u8>, chr_data: Vec<u8>, has_writeable_chr_ram: bool, n_prg_ram_pages: usize, mirror: NameTableMirror) -> Self {
+    pub(crate) fn new_full(
+        prg_rom: Vec<u8>,
+        chr_data: Vec<u8>,
+        has_writeable_chr_ram: bool,
+        n_prg_ram_pages: usize,
+        mirror: NameTableMirror,
+    ) -> Self {
         // We expect the PRG / CHR data to be padded to have a page aligned size
         // when they are loaded
         debug_assert_eq!(prg_rom.len() % PAGE_SIZE_16K, 0);
 
-        let last_prg_page_off = if prg_rom.len() > PAGE_SIZE_16K { PAGE_SIZE_16K } else { 0 };
+        let last_prg_page_off = if prg_rom.len() > PAGE_SIZE_16K {
+            PAGE_SIZE_16K
+        } else {
+            0
+        };
         Self {
             vram_mirror: mirror,
             vram: [0u8; 2048],
@@ -34,11 +44,17 @@ impl Mapper0 {
             has_chr_ram: has_writeable_chr_ram,
             last_prg_page_off,
             chr_data,
-         }
+        }
     }
 
     pub fn new(config: &INesConfig, prg_rom: Vec<u8>, chr_data: Vec<u8>) -> Self {
-        Mapper0::new_full(prg_rom, chr_data, config.has_chr_ram, config.n_prg_ram_pages, config.nametable_mirror)
+        Mapper0::new_full(
+            prg_rom,
+            chr_data,
+            config.has_chr_ram,
+            config.n_prg_ram_pages,
+            config.nametable_mirror,
+        )
     }
 }
 
@@ -49,7 +65,8 @@ impl Mapper for Mapper0 {
 
     fn system_bus_read(&mut self, addr: u16) -> (u8, u8) {
         match addr {
-            0x6000..=0x7fff => { // PRG RAM, 8k window (2k or 4k physical ram for FamilyBasic)
+            0x6000..=0x7fff => {
+                // PRG RAM, 8k window (2k or 4k physical ram for FamilyBasic)
                 if self.prg_ram.len() > 0 {
                     let offset = (addr - 0x6000) as usize % self.prg_ram.len();
                     (arr_read!(self.prg_ram, offset), 0)
@@ -58,11 +75,13 @@ impl Mapper for Mapper0 {
                     (0, 0xff)
                 }
             }
-            0x8000..=0xbfff => { // First 16 KB of ROM
+            0x8000..=0xbfff => {
+                // First 16 KB of ROM
                 let addr = (addr - 0x8000) as usize;
                 (arr_read!(self.prg_rom, addr), 0)
             }
-            0xc000..=0xffff => { // Last 16 KB of ROM (NROM-256) or mirror of $8000-$BFFF (NROM-128)
+            0xc000..=0xffff => {
+                // Last 16 KB of ROM (NROM-256) or mirror of $8000-$BFFF (NROM-128)
                 let addr = (addr - 0xc000) as usize + self.last_prg_page_off;
                 (arr_read!(self.prg_rom, addr), 0)
             }
@@ -83,7 +102,9 @@ impl Mapper for Mapper0 {
                 let ram_offset = (addr - 0x6000) as usize;
                 arr_write!(self.prg_ram, ram_offset, data);
             }
-            _ => { trace!("unhandled system bus write in cartridge"); }
+            _ => {
+                trace!("unhandled system bus write in cartridge");
+            }
         }
     }
 
@@ -92,14 +113,15 @@ impl Mapper for Mapper0 {
             0x0000..=0x1fff => {
                 arr_read!(self.chr_data, addr as usize)
             }
-            0x2000..=0x3fff => { // VRAM
+            0x2000..=0x3fff => {
+                // VRAM
                 let off = mirror_vram_address(addr, self.vram_mirror);
                 arr_read!(self.vram, off)
             }
             _ => {
                 trace!("Unexpected PPU read via mapper, address = {}", addr);
                 0
-             }
+            }
         }
     }
 
@@ -115,8 +137,9 @@ impl Mapper for Mapper0 {
                     //println!("cartridge CHR RAM write 0x{:04x} ({}) = 0x{:02x}", addr, off, data);
                     arr_write!(self.chr_data, off, data);
                 }
-            },
-            0x2000..=0x3fff => { // VRAM
+            }
+            0x2000..=0x3fff => {
+                // VRAM
                 let off = mirror_vram_address(addr, self.vram_mirror);
                 //println!("cartridge vram write 0x{:04x} ({}) = 0x{:02x}", addr, off, data);
                 arr_write!(self.vram, off, data);
@@ -127,13 +150,13 @@ impl Mapper for Mapper0 {
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { self.vram_mirror }
+    fn mirror_mode(&self) -> NameTableMirror {
+        self.vram_mirror
+    }
 }
-
 
 #[test]
 fn test_mapper0_vram_mirroring() {
-
     use crate::cartridge::TVSystemCompatibility;
 
     let cfg = INesConfig {
@@ -151,7 +174,7 @@ fn test_mapper0_vram_mirroring() {
         four_screen_vram: false,
         trainer_baseaddr: None,
         prg_rom_baseaddr: 0,
-        chr_rom_baseaddr: 0
+        chr_rom_baseaddr: 0,
     };
     let prg_rom = vec![0u8; cfg.prg_rom_bytes()];
     let chr_data = vec![0u8; cfg.chr_rom_bytes()];

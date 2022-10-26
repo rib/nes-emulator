@@ -8,7 +8,6 @@
 
 #![allow(clippy::wrong_self_convention)]
 
-
 #[inline(always)]
 pub(crate) fn f32_hash<H: std::hash::Hasher>(state: &mut H, f: f32) {
     if f == 0.0 {
@@ -222,9 +221,9 @@ impl Color32 {
     #[inline(always)]
     pub fn to_yiqf32(&self) -> [f32; 3] {
         // Coefficients from Wikipedia: https://en.wikipedia.org/wiki/YIQ
-        let y = 0.2989 * self.r() as f32 +  0.5870 * self.g() as f32 +  0.1140 * self.b() as f32;
+        let y = 0.2989 * self.r() as f32 + 0.5870 * self.g() as f32 + 0.1140 * self.b() as f32;
         let i = 0.5959 * self.r() as f32 + -0.2746 * self.g() as f32 + -0.3213 * self.b() as f32;
-        let q = 0.2115 * self.r() as f32 + -0.5227 * self.g() as f32 +  0.3112 * self.b() as f32;
+        let q = 0.2115 * self.r() as f32 + -0.5227 * self.g() as f32 + 0.3112 * self.b() as f32;
 
         [y, i, q]
     }
@@ -492,9 +491,9 @@ impl Rgba {
     #[inline(always)]
     pub fn to_yiqf32(&self) -> [f32; 3] {
         // Coefficients from Wikipedia: https://en.wikipedia.org/wiki/YIQ
-        let y = 0.2989 * self.r() as f32 +  0.5870 * self.g() as f32 +  0.1140 * self.b() as f32;
+        let y = 0.2989 * self.r() as f32 + 0.5870 * self.g() as f32 + 0.1140 * self.b() as f32;
         let i = 0.5959 * self.r() as f32 + -0.2746 * self.g() as f32 + -0.3213 * self.b() as f32;
-        let q = 0.2115 * self.r() as f32 + -0.5227 * self.g() as f32 +  0.3112 * self.b() as f32;
+        let q = 0.2115 * self.r() as f32 + -0.5227 * self.g() as f32 + 0.3112 * self.b() as f32;
 
         [y, i, q]
     }

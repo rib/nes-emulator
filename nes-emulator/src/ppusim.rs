@@ -82,7 +82,7 @@ pub enum TriState {
     Zero,
     One,
     Z,
-    X
+    X,
 }
 const TRISTATE_Z_VALUE: u8 = (-1 as i8) as u8;
 const TRISTATE_X_VALUE: u8 = (-2 as i8) as u8;
@@ -94,7 +94,7 @@ impl From<u8> for TriState {
             1 => TriState::One,
             TRISTATE_Z_VALUE => TriState::Z,
             TRISTATE_X_VALUE => TriState::X,
-            _ => panic!("Spurious TriState value of {num}")
+            _ => panic!("Spurious TriState value of {num}"),
         }
     }
 }
@@ -119,8 +119,7 @@ enum InputPad {
     n_RES = ffi::PPUSim_InputPad_n_RES as isize,
 }
 
-enum OutputPad
-{
+enum OutputPad {
     n_INT = ffi::PPUSim_OutputPad_n_INT as isize,
 
     /// Address latch enable. When high then low address bits should be
@@ -131,13 +130,13 @@ enum OutputPad
     n_WR = ffi::PPUSim_OutputPad_n_WR as isize,
 }
 
-struct PpuFfi{
-    pub ptr: *mut ffi::PPUSim_PPU
+struct PpuFfi {
+    pub ptr: *mut ffi::PPUSim_PPU,
 }
 impl Default for PpuFfi {
     fn default() -> Self {
         Self {
-            ptr: std::ptr::null_mut()
+            ptr: std::ptr::null_mut(),
         }
     }
 }
@@ -163,7 +162,6 @@ pub struct PpuSim {
     address_bus_lo_latch_pclk: TriState,
 
     //data_bus_enable: bool,
-
     /// The number of half CLKs to enable the data bus for a read/write
     data_bus_enable_duration: usize,
     data_bus_address: u16,
@@ -183,7 +181,6 @@ pub struct PpuSim {
     // make a single `cartridge.` API call for each read/write by
     // the PPU. The latch updates if the address, n_RE or n_WE state
     // changes
-
     ppu_bus_latch_data: u8,
     //ppu_bus_latch_pclk: u64,
     ppu_bus_latch_address: u16,
@@ -191,7 +188,6 @@ pub struct PpuSim {
     ppu_bus_latch_write_neg: TriState,
 
     //address: [TriState; 14],
-
     pub expected_reads: VecDeque<(u16, u8, u16, u16)>,
 
     ppu: PpuFfi,
@@ -204,9 +200,7 @@ pub struct PpuSim {
     pub prev_nmi_interrupt_raised: bool,
 }
 
-
 impl PpuSim {
-
     /// Allocate a framebuffer that can be used as a PPU render target.
     ///
     /// Returns a new framebuffer that can later be associated with the PPU via [`Self::swap_framebuffer`]
@@ -225,12 +219,13 @@ impl PpuSim {
             self.framebuffer = rental;
             Ok(old)
         } else {
-            Err(anyhow!("Failed to rent access to framebuffer data for rendering"))
+            Err(anyhow!(
+                "Failed to rent access to framebuffer data for rendering"
+            ))
         }
     }
 
     pub fn new(nes_model: Model) -> Self {
-
         debug_assert_eq!(ffi::PPUSim_Revision_Max, 18);
         debug_assert_eq!(ffi::PPUSim_InputPad_Max, 7);
         debug_assert_eq!(ffi::PPUSim_OutputPad_Max, 4);
@@ -244,8 +239,8 @@ impl PpuSim {
         let framebuffer = framebuffer.rent_data().unwrap();
 
         let ppu = unsafe { ffi::ppu_sim_new(revision as i32) };
-        let inputs =  [0u8; ffi::PPUSim_InputPad_Max as usize];
-        let outputs =  [0u8; ffi::PPUSim_OutputPad_Max as usize];
+        let inputs = [0u8; ffi::PPUSim_InputPad_Max as usize];
+        let outputs = [0u8; ffi::PPUSim_OutputPad_Max as usize];
         let wires = ffi::PPUSim_PPU_Interconnects::default();
 
         let mut sim = Self {
@@ -268,7 +263,6 @@ impl PpuSim {
             data_bus_write_value: 0,
             data_bus: 0,
             //address: [TriState::Zero; 14],
-
             pending_reset: false,
             reset_half_clock_count: 0,
 
@@ -309,7 +303,7 @@ impl PpuSim {
     pub fn clk_per_pclk(&self) -> usize {
         match self.revision {
             Revision::RP2C07_0 | Revision::UMC_UA6538 => 5,
-            _ => 4
+            _ => 4,
         }
     }
 
@@ -387,17 +381,22 @@ impl PpuSim {
         self.reset_half_clock_count = 4;
     }
 
-    fn sim_ppu_bus_io(&mut self, address: u16, read_enable_neg: TriState, write_enable_neg: TriState, cartridge: &mut Cartridge) {
-
+    fn sim_ppu_bus_io(
+        &mut self,
+        address: u16,
+        read_enable_neg: TriState,
+        write_enable_neg: TriState,
+        cartridge: &mut Cartridge,
+    ) {
         // Note that it may take multiple PCLKs before the intended self.address_bus_lo value is asserted
         // after the Address Latch Enable goes low, so it's important that we check for the lo value changing
         // here
         //
         // XXX: maybe also compare ppu_bus_latch_pclk to self.pclk()
-        if self.ppu_bus_latch_address == address &&
-            self.ppu_bus_latch_read_neg == read_enable_neg &&
-            self.ppu_bus_latch_write_neg == write_enable_neg &&
-            self.ppu_bus_latch_data == self.address_bus_lo
+        if self.ppu_bus_latch_address == address
+            && self.ppu_bus_latch_read_neg == read_enable_neg
+            && self.ppu_bus_latch_write_neg == write_enable_neg
+            && self.ppu_bus_latch_data == self.address_bus_lo
         {
             return;
         }
@@ -419,18 +418,22 @@ impl PpuSim {
         match (read_enable_neg, write_enable_neg) {
             (_, TriState::Zero) => {
                 let data = self.address_bus_lo;
-                println!("PPU SIM: write 0x{address:04x} = 0x{data:02x}, h={}, v={}", self.h_counter(), self.v_counter());
+                println!(
+                    "PPU SIM: write 0x{address:04x} = 0x{data:02x}, h={}, v={}",
+                    self.h_counter(),
+                    self.v_counter()
+                );
                 match address {
                     0x0000..=0x1fff => cartridge.ppu_bus_write(address, data),
                     0x2000..=0x3fff => cartridge.vram_write(address, data),
-                    _ => panic!("out-of-bounds PPU address {address:04x}")
+                    _ => panic!("out-of-bounds PPU address {address:04x}"),
                 }
             }
             (TriState::Zero, TriState::One) => {
                 let data = match address {
                     0x0000..=0x1fff => cartridge.ppu_bus_read(address),
                     0x2000..=0x3fff => cartridge.vram_read(address),
-                    _ => panic!("out-of-bounds PPU address {address:04x}")
+                    _ => panic!("out-of-bounds PPU address {address:04x}"),
                 };
                 match self.expected_reads.pop_front() {
                     Some((ppu_addr, ppu_val, ppu_dot, ppu_line)) => {
@@ -471,12 +474,42 @@ impl PpuSim {
         let mut _ext: u8 = 0;
 
         self.inputs[InputPad::CLK as usize] = self.clk.into();
-        self.inputs[InputPad::n_RES as usize] = if self.reset_half_clock_count > 0 { TriState::Zero } else { TriState::One }.into();
-        self.inputs[InputPad::RnW as usize] = if self.data_bus_write { TriState::Zero } else { TriState::One }.into();
-        self.inputs[InputPad::RS0 as usize] = if self.data_bus_address & 1 != 0 { TriState::One } else { TriState::Zero }.into();
-        self.inputs[InputPad::RS1 as usize] = if self.data_bus_address & 2 != 0 { TriState::One } else { TriState::Zero }.into();
-        self.inputs[InputPad::RS2 as usize] = if self.data_bus_address & 4 != 0 { TriState::One } else { TriState::Zero }.into();
-        self.inputs[InputPad::n_DBE as usize] = if self.data_bus_enable_duration > 0 { TriState::Zero } else { TriState::One }.into();
+        self.inputs[InputPad::n_RES as usize] = if self.reset_half_clock_count > 0 {
+            TriState::Zero
+        } else {
+            TriState::One
+        }
+        .into();
+        self.inputs[InputPad::RnW as usize] = if self.data_bus_write {
+            TriState::Zero
+        } else {
+            TriState::One
+        }
+        .into();
+        self.inputs[InputPad::RS0 as usize] = if self.data_bus_address & 1 != 0 {
+            TriState::One
+        } else {
+            TriState::Zero
+        }
+        .into();
+        self.inputs[InputPad::RS1 as usize] = if self.data_bus_address & 2 != 0 {
+            TriState::One
+        } else {
+            TriState::Zero
+        }
+        .into();
+        self.inputs[InputPad::RS2 as usize] = if self.data_bus_address & 4 != 0 {
+            TriState::One
+        } else {
+            TriState::Zero
+        }
+        .into();
+        self.inputs[InputPad::n_DBE as usize] = if self.data_bus_enable_duration > 0 {
+            TriState::Zero
+        } else {
+            TriState::One
+        }
+        .into();
 
         if self.data_bus_enable_duration > 0 {
             if self.data_bus_write {
@@ -486,19 +519,28 @@ impl PpuSim {
         }
 
         //if self.data_bus_enable_duration > 0 {
-            //if self.data_bus_write {
-            //    println!("SIM DBE: write 0x{:04x} = 0x{:02x}", self.data_bus_address, self.data_bus);
-            //} else {
-            //    println!("SIM DBE: read 0x{:04x}", self.data_bus_address);
-            //}
+        //if self.data_bus_write {
+        //    println!("SIM DBE: write 0x{:04x} = 0x{:02x}", self.data_bus_address, self.data_bus);
+        //} else {
+        //    println!("SIM DBE: read 0x{:04x}", self.data_bus_address);
+        //}
         //}
 
         let h_cnt = self.h_counter() as usize;
         let v_cnt = self.v_counter() as usize;
         unsafe {
             assert!(!self.ppu.ptr.is_null());
-            let mut vout_raw: ffi::PPUSim_VideoOutSignal = std::mem::zeroed();;
-            ffi::PPUSim_PPU_sim(self.ppu.ptr, self.inputs.as_mut_ptr(), self.outputs.as_mut_ptr(), &mut _ext, &mut self.data_bus, &mut self.address_bus_lo, &mut self.address_bus_hi, &mut vout_raw);
+            let mut vout_raw: ffi::PPUSim_VideoOutSignal = std::mem::zeroed();
+            ffi::PPUSim_PPU_sim(
+                self.ppu.ptr,
+                self.inputs.as_mut_ptr(),
+                self.outputs.as_mut_ptr(),
+                &mut _ext,
+                &mut self.data_bus,
+                &mut self.address_bus_lo,
+                &mut self.address_bus_hi,
+                &mut vout_raw,
+            );
             if v_cnt < 240 && h_cnt < 256 {
                 let mut vout_rgb: ffi::PPUSim_VideoOutSignal = std::mem::zeroed();
                 ffi::PPUSim_PPU_ConvertRAWToRGB(self.ppu.ptr, &mut vout_raw, &mut vout_rgb);
@@ -534,7 +576,11 @@ impl PpuSim {
         }
         self.nmi_interrupt_raised = interrupt_neg == TriState::Zero;
         if self.nmi_interrupt_raised && self.prev_nmi_interrupt_raised == false {
-            println!("SIM NMI raise at line = {}, dot = {}", self.v_counter(), self.h_counter());
+            println!(
+                "SIM NMI raise at line = {}, dot = {}",
+                self.v_counter(),
+                self.h_counter()
+            );
         }
         self.prev_nmi_interrupt_raised = self.nmi_interrupt_raised;
 
@@ -560,13 +606,16 @@ impl PpuSim {
             self.address_bus_lo_latch = self.address_bus_lo;
             self.address_bus_lo_latch_pclk = TriState::from(self.wires.PCLK);
             //println!("SIM: latched bus address lo = 0x{:02x}, h={}, v={}, clk={:?}", self.address_bus_lo, self.h_counter(), self.v_counter(), self.clk);
-        } else /*if TriState::from(self.wires.PCLK) != self.address_bus_lo_latch_pclk*/ {
-            let address = self.address_bus_lo_latch as u16 | (((self.address_bus_hi as u16) & 0b11_1111) << 8);
+        } else
+        /*if TriState::from(self.wires.PCLK) != self.address_bus_lo_latch_pclk*/
+        {
+            let address = self.address_bus_lo_latch as u16
+                | (((self.address_bus_hi as u16) & 0b11_1111) << 8);
             if address_latch_enable != TriState::One {
                 //let registers = self.debug_read_registers();
                 //if address == 0x2400 && write_neg == TriState::Zero {
-                    //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, lo=0x{:02x}, pclk={}, clk={:?}, DBE={}, wires={:?}", self.address_bus_lo, pclk, self.clk, self.data_bus_enable_duration > 0, wires);
-                    //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
+                //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, lo=0x{:02x}, pclk={}, clk={:?}, DBE={}, wires={:?}", self.address_bus_lo, pclk, self.clk, self.data_bus_enable_duration > 0, wires);
+                //println!("SIM IO, /read={read_neg:?}, /write={write_neg:?}, ALE={address_latch_enable:?}, pclk={pclk}, clk={:?}, DBE={}, hi=0x{:02x}, lo_latch=0x{:02x}, lo=0x{:02x}, RB=0x{:02x}", self.clk, self.data_bus_enable_duration > 0, self.address_bus_hi, self.address_bus_lo_latch, self.address_bus_lo, registers.ReadBuffer);
                 //}
                 self.sim_ppu_bus_io(address, read_neg, write_neg, cartridge);
             }
@@ -580,15 +629,22 @@ impl PpuSim {
         //println!("clk = {}, /clk = {}, pclk = {} /pclk = {}, ale = {:?}, /rd = {:?}, /wr = {:?}, /int = {:?}, pclk = {}",
         //         wires.CLK, wires.n_CLK, wires.PCLK, wires.n_PCLK, address_latch_enable, read_neg, write_neg, interrupt_neg, self.pclk());
 
-        self.clk = if self.clk == TriState::Zero { TriState::One } else { TriState::Zero };
-        if h_cnt == 0 && v_cnt == 241 && self.last_frame_pclk != pclk && self.clk == TriState::Zero {
+        self.clk = if self.clk == TriState::Zero {
+            TriState::One
+        } else {
+            TriState::Zero
+        };
+        if h_cnt == 0 && v_cnt == 241 && self.last_frame_pclk != pclk && self.clk == TriState::Zero
+        {
             self.last_frame_pclk = pclk;
-            println!("PPU SIM: Finished frame: regs: {:?}", self.debug_read_registers());
+            println!(
+                "PPU SIM: Finished frame: regs: {:?}",
+                self.debug_read_registers()
+            );
             log::debug!("PPU SIM: Finished frame");
             self.frame_ready = true;
             self.expected_reads.clear();
         }
-
     }
 }
 
@@ -639,7 +695,6 @@ fn ppu_sim_test_cpu_read(ppu: &mut PpuSim, cartridge: &mut Cartridge, address: u
 
 #[test]
 fn ppu_sim_step() {
-
     let mut fb = Framebuffer::new(256, 240, PixelFormat::RGBA8888);
     let mut fb_data = fb.rent_data().unwrap();
     let fb_ptr = fb_data.data.as_mut_ptr();
@@ -652,7 +707,13 @@ fn ppu_sim_step() {
     let chr_ram = vec![0u8; PAGE_SIZE_8K];
     let mut cartridge = Cartridge {
         config: NesBinaryConfig::None,
-        mapper: Box::new(crate::mappers::Mapper0::new_full(prg_rom, chr_ram, true, 1, cartridge::NameTableMirror::Vertical))
+        mapper: Box::new(crate::mappers::Mapper0::new_full(
+            prg_rom,
+            chr_ram,
+            true,
+            1,
+            cartridge::NameTableMirror::Vertical,
+        )),
     };
 
     // nesdev:
@@ -702,5 +763,4 @@ fn ppu_sim_step() {
             }
         }
     }
-
 }

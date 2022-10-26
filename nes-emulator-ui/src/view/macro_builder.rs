@@ -1,10 +1,17 @@
-use std::{path::PathBuf, cell::RefCell, rc::Rc, collections::HashMap, str::FromStr, time::Instant, fs::File, io::Write};
+use std::{
+    cell::RefCell, collections::HashMap, fs::File, io::Write, path::PathBuf, rc::Rc, str::FromStr,
+    time::Instant,
+};
 
-use egui::{Vec2, TextEdit, Layout, Align};
-use egui_extras::{TableBuilder, Size};
-use nes_emulator::{port::ControllerButton, hook::HookHandle, nes::Nes, genie::GameGenieCode};
+use egui::{Align, Layout, TextEdit, Vec2};
+use egui_extras::{Size, TableBuilder};
+use nes_emulator::{genie::GameGenieCode, hook::HookHandle, nes::Nes, port::ControllerButton};
 
-use crate::{macros::{MacroCommand, InputEvent, Macro, MacroWait, MacroPlayer, self}, Args, utils, ui::{EmulatorUi, ViewRequest, ViewRequestSender}};
+use crate::{
+    macros::{self, InputEvent, Macro, MacroCommand, MacroPlayer, MacroWait},
+    ui::{EmulatorUi, ViewRequest, ViewRequestSender},
+    utils, Args,
+};
 
 struct MacroBuilderHookState {
     crc32: u32,
@@ -43,9 +50,15 @@ pub struct MacroBuilderView {
 }
 
 impl MacroBuilderView {
-    pub fn new(_ctx: &egui::Context, args: &Args, rom_dirs: Vec<PathBuf>, default_rom: Option<PathBuf>, view_request_sender: ViewRequestSender, paused: bool) -> Self {
-
-        let mut view = Self  {
+    pub fn new(
+        _ctx: &egui::Context,
+        args: &Args,
+        rom_dirs: Vec<PathBuf>,
+        default_rom: Option<PathBuf>,
+        view_request_sender: ViewRequestSender,
+        paused: bool,
+    ) -> Self {
+        let mut view = Self {
             visible: false,
             view_request_sender,
 
@@ -61,12 +74,14 @@ impl MacroBuilderView {
             recording_pending: false,
             can_append: false,
 
-            last_wait: MacroWait { frame: None, line: None, dot: 0 },
+            last_wait: MacroWait {
+                frame: None,
+                line: None,
+                dot: 0,
+            },
 
             hook_handle: None,
-            hook_state: Rc::new(RefCell::new(MacroBuilderHookState {
-                crc32: 0
-            })),
+            hook_state: Rc::new(RefCell::new(MacroBuilderHookState { crc32: 0 })),
 
             pending_button_input: HashMap::new(),
         };
@@ -109,7 +124,8 @@ impl MacroBuilderView {
                 if state.screen_x == 255 && state.screen_y == 239 {
                     shared.borrow_mut().crc32 = hasher.clone().finalize();
                 }
-        })));
+            },
+        )));
     }
 
     pub fn disconnect_nes(&mut self, nes: &mut Nes) {
@@ -127,16 +143,20 @@ impl MacroBuilderView {
             if success {
                 let current_macro = &mut self.library[self.current_macro];
 
-                let genie_codes: Vec<GameGenieCode> = current_macro.genie_codes.iter().filter_map(|c| {
-                    let code: anyhow::Result<GameGenieCode> = c.as_str().try_into();
-                    match code {
-                        Ok(c) => Some(c),
-                        Err(err) => {
-                            log::error!("Ignoring Game Genie Code {c} - {}", err);
-                            None
+                let genie_codes: Vec<GameGenieCode> = current_macro
+                    .genie_codes
+                    .iter()
+                    .filter_map(|c| {
+                        let code: anyhow::Result<GameGenieCode> = c.as_str().try_into();
+                        match code {
+                            Ok(c) => Some(c),
+                            Err(err) => {
+                                log::error!("Ignoring Game Genie Code {c} - {}", err);
+                                None
+                            }
                         }
-                    }
-                }).collect();
+                    })
+                    .collect();
 
                 log::debug!("Setting game genie codes for recording = {:?}", genie_codes);
                 nes.set_game_genie_codes(genie_codes);
@@ -147,14 +167,10 @@ impl MacroBuilderView {
     }
 
     // TODO: give feedback about progress through the macro playback
-    pub fn started_playback(&mut self, _nes: &mut Nes, _player: &MacroPlayer) {
-
-    }
+    pub fn started_playback(&mut self, _nes: &mut Nes, _player: &MacroPlayer) {}
 
     // TODO: give feedback about progress through the macro playback
-    pub fn playback_update(&mut self, _nes: &mut Nes, _player: &MacroPlayer) {
-
-    }
+    pub fn playback_update(&mut self, _nes: &mut Nes, _player: &MacroPlayer) {}
 
     fn create_new_library(&mut self) {
         self.library = vec![];
@@ -167,7 +183,10 @@ impl MacroBuilderView {
                 self.library = library;
                 self.library_path = Some(path);
             }
-            Err(err) => self.view_request_sender.send(ViewRequest::ShowUserNotice(log::Level::Error, format!("{err:#?}")))
+            Err(err) => self.view_request_sender.send(ViewRequest::ShowUserNotice(
+                log::Level::Error,
+                format!("{err:#?}"),
+            )),
         }
     }
 
@@ -193,21 +212,23 @@ impl MacroBuilderView {
 
     fn save_macros_library(&self, path: &PathBuf) {
         match File::create(path) {
-            Ok(mut fd) => {
-                match serde_json::to_string_pretty(&self.library) {
-                    Ok(js) => {
-                        if let Err(err) = fd.write(&js.as_bytes()) {
-                            self.view_request_sender.send(ViewRequest::ShowUserNotice(log::Level::Error, format!("{}", err)))
-                        }
-                    }
-                    Err(err) => {
-                        log::error!("Failed to serialize test: {err:?}");
+            Ok(mut fd) => match serde_json::to_string_pretty(&self.library) {
+                Ok(js) => {
+                    if let Err(err) = fd.write(&js.as_bytes()) {
+                        self.view_request_sender.send(ViewRequest::ShowUserNotice(
+                            log::Level::Error,
+                            format!("{}", err),
+                        ))
                     }
                 }
-            }
-            Err(err) => {
-                self.view_request_sender.send(ViewRequest::ShowUserNotice(log::Level::Error, format!("{}", err)))
-            }
+                Err(err) => {
+                    log::error!("Failed to serialize test: {err:?}");
+                }
+            },
+            Err(err) => self.view_request_sender.send(ViewRequest::ShowUserNotice(
+                log::Level::Error,
+                format!("{}", err),
+            )),
         }
     }
 
@@ -226,13 +247,17 @@ impl MacroBuilderView {
         }
     }
 
-    pub fn controller_input_hook(&mut self, nes: &mut Nes, button: ControllerButton, pressed: bool) {
+    pub fn controller_input_hook(
+        &mut self,
+        nes: &mut Nes,
+        button: ControllerButton,
+        pressed: bool,
+    ) {
         if self.recording {
             if self.paused {
                 self.pending_button_input.remove(&button);
                 self.pending_button_input.insert(button, pressed);
             } else {
-
                 // Ignore redundant input events for key repeat
                 if nes.system_mut().port1.peek_button(button) != pressed {
                     self.record_input_command(nes, button, pressed);
@@ -243,10 +268,9 @@ impl MacroBuilderView {
 
     pub fn set_visible(&mut self, nes: &mut Nes, visible: bool) {
         self.visible = visible;
-        #[cfg(feature="macro-builder")]
+        #[cfg(feature = "macro-builder")]
         if visible {
             self.power_on_new_nes_hook(nes, None);
-
         } else {
             if let Some(handle) = self.hook_handle {
                 nes.ppu_mut().remove_mux_hook(handle);
@@ -263,7 +287,7 @@ impl MacroBuilderView {
         self.last_wait = MacroWait {
             frame: None,
             line: None,
-            dot: 0
+            dot: 0,
         };
         let current_macro = &mut self.library[self.current_macro];
 
@@ -275,7 +299,8 @@ impl MacroBuilderView {
             debug_assert_eq!(self.can_append, true);
         }
 
-        self.view_request_sender.send(ViewRequest::LoadRom(current_macro.rom.clone()));
+        self.view_request_sender
+            .send(ViewRequest::LoadRom(current_macro.rom.clone()));
         self.recording_pending = true;
     }
 
@@ -289,11 +314,15 @@ impl MacroBuilderView {
         debug_assert!(self.current_macro < self.library.len());
         let test = &mut self.library[self.current_macro];
 
-        log::debug!("controller input: recording = {}, paused = {}", self.recording, self.paused);
+        log::debug!(
+            "controller input: recording = {}, paused = {}",
+            self.recording,
+            self.paused
+        );
         let wait = MacroWait {
             frame: Some(nes.ppu_mut().frame),
             line: Some(nes.ppu_mut().line),
-            dot: nes.ppu_mut().dot
+            dot: nes.ppu_mut().dot,
         };
         if self.last_wait.less_than(&wait) {
             test.commands.push(MacroCommand::WaitForDot(wait));
@@ -302,14 +331,13 @@ impl MacroBuilderView {
         test.commands.push(MacroCommand::Input(InputEvent::Pad {
             i: 0, // input port
             b: button as u8,
-            p: pressed
+            p: pressed,
         }));
     }
 
     // Input changes are buffered while paused so we don't end up recording lots of redundant input changes
     // within a single cycle
     pub fn set_paused(&mut self, paused: bool, nes: &mut Nes) {
-
         self.paused = paused;
 
         if !paused {
@@ -333,7 +361,6 @@ impl MacroBuilderView {
                 for button in BUTTONS {
                     if let Some(pressed) = self.pending_button_input.get(&button) {
                         if nes.system_mut().port1.peek_button(button) != *pressed {
-
                             if *pressed {
                                 nes.system_mut().port1.press_button(button);
                             } else {
@@ -348,7 +375,6 @@ impl MacroBuilderView {
             }
         }
     }
-
 
     pub fn update(&mut self, _nes: &mut Nes) {
         /*
@@ -369,7 +395,6 @@ impl MacroBuilderView {
     }
 
     pub fn draw(&mut self, nes: &mut Nes, ctx: &egui::Context) {
-
         egui::Window::new("Macro Builder")
             .default_width(900.0)
             .resizable(true)

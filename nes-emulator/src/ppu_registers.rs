@@ -52,19 +52,37 @@ bitflags! {
 
 impl Ppu {
     pub fn sprite_height(&self) -> u8 {
-        if self.control1.contains(Control1Flags::SPRITE_HEIGHT_16) { 16 } else { 8 }
+        if self.control1.contains(Control1Flags::SPRITE_HEIGHT_16) {
+            16
+        } else {
+            8
+        }
     }
 
     pub fn bg_pattern_table_addr(&self) -> u16 {
-        if self.control1.contains(Control1Flags::BG_IN_PATTERN_TABLE_1) { 0x1000 } else { 0x0000 }
+        if self.control1.contains(Control1Flags::BG_IN_PATTERN_TABLE_1) {
+            0x1000
+        } else {
+            0x0000
+        }
     }
 
     pub fn sprites8x8_pattern_table_addr(&self) -> u16 {
-        if self.control1.contains(Control1Flags::SPRITES_IN_PATTERN_TABLE_1) { 0x1000 } else { 0x0000 }
+        if self
+            .control1
+            .contains(Control1Flags::SPRITES_IN_PATTERN_TABLE_1)
+        {
+            0x1000
+        } else {
+            0x0000
+        }
     }
 
     pub fn address_increment(&self) -> u16 {
-        if self.control1.contains(Control1Flags::ADDRESS_INC_32) { 32 } else { 1 }
+        if self.control1.contains(Control1Flags::ADDRESS_INC_32) {
+            32
+        } else {
+            1
+        }
     }
-
 }

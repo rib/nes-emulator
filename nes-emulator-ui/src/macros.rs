@@ -1,9 +1,20 @@
-use std::{cell::{Cell, RefCell}, time::{Instant, Duration}, rc::Rc, path::PathBuf};
 use std::collections::HashSet;
+use std::{
+    cell::{Cell, RefCell},
+    path::PathBuf,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
-use nes_emulator::{port::ControllerButton, nes::Nes, hook::HookHandle, ppu::{DotBreakpointHandle, DotBreakpointCallbackAction}, genie::GameGenieCode};
-use serde::{Serialize, Deserialize};
+use nes_emulator::{
+    genie::GameGenieCode,
+    hook::HookHandle,
+    nes::Nes,
+    port::ControllerButton,
+    ppu::{DotBreakpointCallbackAction, DotBreakpointHandle},
+};
+use serde::{Deserialize, Serialize};
 use serde_json;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +40,11 @@ impl MacroWait {
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub enum InputEvent {
-    Pad { i: u8, b: u8, p: bool},
+    Pad {
+        i: u8,
+        b: u8,
+        p: bool,
+    },
 
     /// Zapper input with a more terse struct since there may be lots of position and light-level
     /// updates
@@ -43,8 +58,8 @@ pub enum InputEvent {
         /// Triggered 0 or 1
         t: u8,
         /// Light level
-        l: u8
-    }
+        l: u8,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -75,10 +90,13 @@ pub struct Macro {
     #[serde(default)]
     pub tags: HashSet<String>,
 
-    pub commands: Vec<MacroCommand>
+    pub commands: Vec<MacroCommand>,
 }
 
-pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(path: P, filter: &Vec<String>) -> Result<Vec<Macro>> {
+pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(
+    path: P,
+    filter: &Vec<String>,
+) -> Result<Vec<Macro>> {
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(file);
     let library = serde_json::from_reader(reader)?;
@@ -106,8 +124,8 @@ pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(path: P, filter: 
 pub fn register_frame_crc_hasher(nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) -> HookHandle {
     let mut hasher = crc32fast::Hasher::new();
 
-    nes.ppu_mut().add_mux_hook(Box::new(
-        move |_ppu, _cartridge, state| {
+    nes.ppu_mut()
+        .add_mux_hook(Box::new(move |_ppu, _cartridge, state| {
             if state.screen_x == 0 && state.screen_y == 0 {
                 hasher.reset();
             }
@@ -119,11 +137,14 @@ pub fn register_frame_crc_hasher(nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) 
                 //println!("Frame {}, CRC = {:08x}", ppu.frame, crc);
                 *shared_crc32.borrow_mut() = crc;
             }
-    }))
+        }))
 }
 
 pub fn name_from_rom_path(path: &PathBuf, default_name: String) -> String {
-    let components: Vec<String> = path.iter().map(|c| c.to_string_lossy().to_string()).collect();
+    let components: Vec<String> = path
+        .iter()
+        .map(|c| c.to_string_lossy().to_string())
+        .collect();
 
     if components.len() == 0 {
         return default_name;
@@ -163,16 +184,20 @@ pub struct MacroPlayer {
 }
 impl MacroPlayer {
     pub fn new(recording: Macro, nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) -> Self {
-        let genie_codes: Vec<GameGenieCode> = recording.genie_codes.iter().filter_map(|c| {
-            let code: Result<GameGenieCode> = c.as_str().try_into();
-            match code {
-                Ok(c) => Some(c),
-                Err(err) => {
-                    log::error!("Ignoring Game Genie Code {c} - {}", err);
-                    None
+        let genie_codes: Vec<GameGenieCode> = recording
+            .genie_codes
+            .iter()
+            .filter_map(|c| {
+                let code: Result<GameGenieCode> = c.as_str().try_into();
+                match code {
+                    Ok(c) => Some(c),
+                    Err(err) => {
+                        log::error!("Ignoring Game Genie Code {c} - {}", err);
+                        None
+                    }
                 }
-            }
-        }).collect();
+            })
+            .collect();
 
         nes.set_game_genie_codes(genie_codes.clone());
 
@@ -204,7 +229,10 @@ impl MacroPlayer {
         }
     }
 
-    pub fn set_check_failure_callback(&mut self, callback: Box<dyn FnMut(&mut Nes, &String, &HashSet<String>, String)>) {
+    pub fn set_check_failure_callback(
+        &mut self,
+        callback: Box<dyn FnMut(&mut Nes, &String, &HashSet<String>, String)>,
+    ) {
         self.check_failure_callback = Some(callback);
     }
 
@@ -261,7 +289,6 @@ impl MacroPlayer {
     }
 
     pub fn update(&mut self, nes: &mut Nes) {
-
         if self.wait_breakpoint.is_some() {
             //println!("Macro: Continuing to wait for dot");
             let duration = Instant::now() - self.wait_update_timestamp;
@@ -269,7 +296,9 @@ impl MacroPlayer {
                 let current_frame = nes.ppu_mut().frame;
                 let current_line = nes.ppu_mut().line;
                 let current_dot = nes.ppu_mut().dot;
-                log::debug!("Waiting: frame: {current_frame}, line = {current_line}, dot = {current_dot}");
+                log::debug!(
+                    "Waiting: frame: {current_frame}, line = {current_line}, dot = {current_dot}"
+                );
                 self.wait_update_timestamp = Instant::now();
             }
             return;
@@ -287,10 +316,18 @@ impl MacroPlayer {
                 MacroCommand::WaitForDot(target) => {
                     if self.wait_breakpoint.is_none() {
                         self.wait_breakpoint = Some(nes.ppu_mut().add_dot_breakpoint(
-                            target.frame, target.line, target.dot,
-                            Box::new(|_, _, _, _| { DotBreakpointCallbackAction::Remove })));
+                            target.frame,
+                            target.line,
+                            target.dot,
+                            Box::new(|_, _, _, _| DotBreakpointCallbackAction::Remove),
+                        ));
                         self.wait_update_timestamp = Instant::now();
-                        log::debug!("Macro: Started to wait for frame = {:?}, line = {:?}, dot = {}", &target.frame, &target.line, target.dot);
+                        log::debug!(
+                            "Macro: Started to wait for frame = {:?}, line = {:?}, dot = {}",
+                            &target.frame,
+                            &target.line,
+                            target.dot
+                        );
                         break;
                     }
                 }
@@ -299,7 +336,11 @@ impl MacroPlayer {
                     match event {
                         InputEvent::Pad { i, b, p } => {
                             let port_index = i;
-                            let port = if port_index == 0 { &mut nes.system_mut().port1 } else { &mut nes.system_mut().port2 };
+                            let port = if port_index == 0 {
+                                &mut nes.system_mut().port1
+                            } else {
+                                &mut nes.system_mut().port2
+                            };
                             match ControllerButton::try_from(b) {
                                 Ok(button) => {
                                     let pressed = p;
@@ -313,13 +354,13 @@ impl MacroPlayer {
                                     log::error!("Unknown input button ID = {b} in macro");
                                 }
                             }
-                        },
+                        }
                         InputEvent::Zap { .. } => {
                             log::error!("Unsupported Zapper input");
-                        },
+                        }
                     }
                     self.next();
-                },
+                }
                 MacroCommand::CheckFrameCRC32(crc) => {
                     //println!("Macro: checking for framebuffer CRC32 = {crc:08x}");
                     let current_crc = *self.shared_crc32.borrow();
@@ -336,5 +377,4 @@ impl MacroPlayer {
             }
         }
     }
-
 }
