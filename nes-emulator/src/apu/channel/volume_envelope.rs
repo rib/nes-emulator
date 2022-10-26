@@ -1,5 +1,6 @@
 #[derive(Clone, Default)]
 pub struct VolumeEnvelope {
+    #[allow(dead_code)] // just for Debug
     debug_channel_name: String,
 
     start_flag: bool,
@@ -18,14 +19,7 @@ impl VolumeEnvelope {
     pub fn new(debug_channel_name: String) -> Self {
         Self {
             debug_channel_name,
-            ..Default::default() /*
-                                 start_flag: false,
-                                 loop_flag: false,
-                                 divider_reload_value: 0,
-                                 divider_counter: 0,
-                                 use_constant_volume: false,
-                                 decay_level: 0,
-                                 */
+            ..Default::default()
         }
     }
 

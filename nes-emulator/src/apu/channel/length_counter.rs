@@ -3,8 +3,9 @@ const FIXED_LENGTHS_TABLE: [u8; 32] = [
     192, 24, 72, 26, 16, 28, 32, 30,
 ];
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct LengthCounter {
+    #[allow(dead_code)] // just for Debug
     debug_channel_name: String,
     enabled: bool,
     counter: u8,

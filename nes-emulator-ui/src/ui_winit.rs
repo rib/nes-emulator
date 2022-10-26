@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use winit::{
     event::Event::*,
-    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+    event_loop::{ControlFlow, EventLoopWindowTarget, EventLoopBuilder},
 };
 
 use egui_wgpu::winit::Painter;
@@ -58,7 +58,7 @@ fn create_window<T>(
 }
 
 pub fn ui_winit_main(args: Args) -> Result<()> {
-    let event_loop: winit::event_loop::EventLoop<Event> = EventLoop::with_user_event();
+    let event_loop: winit::event_loop::EventLoop<Event> = EventLoopBuilder::with_user_event().build();
 
     let ctx = egui::Context::default();
 

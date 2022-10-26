@@ -1,7 +1,7 @@
 use super::channel::dmc_channel::DmcChannel;
 use super::channel::noise_channel::NoiseChannel;
 use super::channel::triangle_channel::TriangleChannel;
-use crate::apu::channel::frame_sequencer::{FrameSequencer, FrameSequencerStatus};
+use crate::apu::channel::frame_sequencer::FrameSequencer;
 use crate::apu::channel::square_channel::SquareChannel;
 use crate::apu::mixer::Mixer;
 use crate::constants::CPU_START_CYCLE;

@@ -1,6 +1,5 @@
 use std::{
     cell::RefCell, collections::HashMap, fs::File, io::Write, path::PathBuf, rc::Rc, str::FromStr,
-    time::Instant,
 };
 
 use egui::{Align, Layout, TextEdit, Vec2};

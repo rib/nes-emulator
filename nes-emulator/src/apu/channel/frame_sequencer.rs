@@ -56,16 +56,7 @@ impl FrameSequencer {
             interrupt_enable: true,
             clock,
 
-            ..Default::default() /*
-                                 clock: 0,
-                                 queue_clock_reset: false,
-                                 mode: FrameSequencerMode::FourStep,
-                                 interrupt_enable: true,
-                                 interrupt_flagged: false,
-                                 pending_register_write: None,
-                                 pending_register_write_delay: None,
-                                 */
-                                 //pending_4017_write_clock: false,
+            ..Default::default()
         }
     }
 
@@ -121,6 +112,7 @@ impl FrameSequencer {
             self.pending_register_write_delay = 1;
         }
 
+        /*
         {
             let is_apu_clock = self.clock % 2 == 1;
             let apply_target = if is_apu_clock {
@@ -128,8 +120,9 @@ impl FrameSequencer {
             } else {
                 self.clock + 4
             };
-            //println!("Queue pending 4017 write: clock = {}, expect write apply @ {}", self.clock, apply_target);
+            println!("Queue pending 4017 write: clock = {}, expect write apply @ {}", self.clock, apply_target);
         }
+        */
 
         self.interrupt_enable = (value & 0b0100_0000) == 0;
         // "Interrupt inhibit flag. If set, the frame interrupt flag is cleared, otherwise it is unaffected"

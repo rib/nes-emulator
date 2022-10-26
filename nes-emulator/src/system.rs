@@ -1,8 +1,6 @@
 use crate::apu::apu::Apu;
 use crate::genie::GameGenieCode;
 use crate::ppu::Ppu;
-use crate::ppu::DOTS_PER_LINE;
-use crate::ppu::N_LINES;
 
 #[cfg(feature = "ppu-sim")]
 use crate::ppusim::PpuSim;
@@ -132,6 +130,7 @@ impl System {
 
         let apu = Apu::new(model, audio_sample_rate);
 
+        #[allow(unused_mut)]
         let mut system = Self {
             ppu,
             apu,
@@ -339,7 +338,7 @@ impl System {
     /// their clocks synchronized (we know this won't push their clock
     /// into the future)
     fn read(&mut self, addr: u16) -> u8 {
-        let (mut value, undefined_bits) = match addr {
+        let (value, undefined_bits) = match addr {
             0x0000..=0x1fff => {
                 // RAM
                 //println!("system read {addr:x}");
@@ -415,7 +414,7 @@ impl System {
         // If this is a PPU simulator read then we have to wait until after
         // stepping the PPU before we can access the value
         #[cfg(feature = "ppu-sim")]
-        {
+        let value = {
             if let 0x2000..=0x3fff = addr {
                 let addr = ((addr - 0x2000) % 8) + 0x2000;
                 let valid_bits = !undefined_bits;
@@ -447,10 +446,14 @@ impl System {
                 }
 
                 if self.debug.ppu_sim_as_main {
-                    value = sim_value;
+                    sim_value
+                } else {
+                    value
                 }
+            } else {
+                value
             }
-        }
+        };
 
         let value = self.apply_open_bus_bits_mut(value, undefined_bits);
         //if addr == 0x4016 {
@@ -798,6 +801,7 @@ impl System {
     }
 
     /// The PPU simulator starts with a spurious line counter
+    #[cfg(feature = "ppu-sim")]
     fn warm_up_sync_ppu_sim(&mut self) {
         #[cfg(feature = "ppu-sim")]
         {
@@ -814,7 +818,7 @@ impl System {
             let sim = &mut self.debug.ppu_sim;
             for _ in 0..sim_dot_clks {
                 sim.step_half(&mut self.debug.ppu_sim_cartridge);
-                let wires = sim.debug_read_wires();
+                //let wires = sim.debug_read_wires();
                 //println!("clk = {}, pclk = {}, pclk = {}, dot = {}, line = {}",
                 //         wires.CLK, wires.PCLK, sim.pclk(), sim.h_counter(), sim.v_counter());
 

@@ -1,5 +1,3 @@
-use std::sync::mpsc::channel;
-
 use super::frame_sequencer::FrameSequencerStatus;
 use crate::apu::channel::length_counter::LengthCounter;
 use crate::apu::channel::volume_envelope::VolumeEnvelope;
@@ -35,15 +33,7 @@ impl NoiseChannel {
             shift_register: 1,
             volume_envelope: VolumeEnvelope::new(channel_name.clone()),
             length_counter: LengthCounter::new(channel_name),
-            ..Default::default() /*
-
-                                 timer_period: 0,
-                                 timer: 0,
-
-                                 mode_flag: false,
-
-                                 output: 0,
-                                 */
+            ..Default::default()
         }
     }
 

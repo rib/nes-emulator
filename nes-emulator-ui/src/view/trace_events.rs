@@ -709,23 +709,23 @@ impl TraceEventsView {
 
     fn draw_dot_view(
         &mut self,
-        nes: &mut Nes,
-        ui: &mut Ui,
+        _nes: &mut Nes,
+        _ui: &mut Ui,
         painter: &Painter,
         dot_view: &DotView,
-        line: u16,
-        dot: u16,
+        _line: u16,
+        _dot: u16,
         rect: Rect,
     ) {
-        let mut highlight = false;
+        let mut _highlight = false;
         if dot_view.system_bus_io.is_some() {
-            highlight = true;
+            _highlight = true;
         }
         if self.show_dma_io
             && (dot_view.flags.contains(DotViewFlags::DMA_READ)
                 || dot_view.flags.contains(DotViewFlags::DMA_WRITE))
         {
-            highlight = true;
+            _highlight = true;
         }
 
         if self.show_nmi_interrupts
@@ -734,7 +734,7 @@ impl TraceEventsView {
                 || dot_view.flags.contains(DotViewFlags::NMI_DETECT_PHI1)
                 || dot_view.flags.contains(DotViewFlags::NMI_POLL))
         {
-            highlight = true;
+            _highlight = true;
         }
 
         if self.show_irq_interrupts
@@ -744,13 +744,13 @@ impl TraceEventsView {
                 || dot_view.flags.contains(DotViewFlags::IRQ_DETECT_PHI1)
                 || dot_view.flags.contains(DotViewFlags::IRQ_POLL))
         {
-            highlight = true;
+            _highlight = true;
         }
         {
-            let pad_x = rect.width() / 5.0f32;
-            let pad_y = rect.height() / 5.0f32;
-            let inset =
-                Rect::from_min_max(rect.min + vec2(pad_x, pad_y), rect.max - vec2(pad_x, pad_y));
+            //let pad_x = rect.width() / 5.0f32;
+            //let pad_y = rect.height() / 5.0f32;
+            //let inset =
+            //    Rect::from_min_max(rect.min + vec2(pad_x, pad_y), rect.max - vec2(pad_x, pad_y));
             //painter.add(egui::Shape::Rect(epaint::RectShape::filled(inset, epaint::Rounding::none(), egui::Color32::LIGHT_GREEN)));
         }
         /*
@@ -823,7 +823,7 @@ impl TraceEventsView {
         //let _nes_px_to_allocation = 1.0 / allocation_to_nes_px;
 
         let screen_width = (FRAME_WIDTH as f32 / TRACE_EVENTS_DOT_WIDTH as f32) * allocation_width;
-        let screen_height =
+        let _screen_height =
             (FRAME_HEIGHT as f32 / TRACE_EVENTS_DOT_HEIGHT as f32) * allocation_height;
 
         let px_width = alloc_scale_x;
@@ -834,7 +834,7 @@ impl TraceEventsView {
         let mut mesh = egui::Mesh::with_texture(self.screen_texture.id());
 
         let current_ppu_line = nes.ppu_mut().line;
-        let next_ppu_dot = nes.ppu_mut().dot;
+        let _next_ppu_dot = nes.ppu_mut().dot;
 
         // Draw each scanline of the framebuffer with a gap for room to show debug/event labels
         for line in 0..262 {
@@ -1136,7 +1136,7 @@ impl TraceEventsView {
         }
     }
 
-    pub fn draw_left_sidebar(&mut self, nes: &mut Nes, ui: &mut Ui) {
+    pub fn draw_left_sidebar(&mut self, _nes: &mut Nes, ui: &mut Ui) {
         // show_irq_interrupts: bool,
         // show_nmi_interrupts: bool,
         // show_dma_io: bool,
@@ -1167,7 +1167,7 @@ impl TraceEventsView {
         //}
     }
 
-    pub fn draw_right_sidebar(&mut self, nes: &mut Nes, ui: &mut Ui) {}
+    pub fn draw_right_sidebar(&mut self, _nes: &mut Nes, _ui: &mut Ui) {}
 
     pub fn draw(&mut self, nes: &mut Nes, ctx: &egui::Context) {
         if self.queue_screen_fb_upload {

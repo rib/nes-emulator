@@ -1,7 +1,5 @@
-use std::fmt::Debug;
-
 use egui::vec2;
-use egui_extras::{Size, StripBuilder, TableBuilder};
+use egui_extras::{Size, StripBuilder};
 use nes_emulator::nes::Nes;
 
 use crate::ui::{ViewRequest, ViewRequestSender};
@@ -25,11 +23,11 @@ impl DebuggerView {
         }
     }
 
-    pub fn set_paused(&mut self, paused: bool, nes: &mut Nes) {
+    pub fn set_paused(&mut self, paused: bool, _nes: &mut Nes) {
         self.paused = paused;
     }
 
-    pub fn draw_disassembly(&mut self, nes: &mut Nes, ctx: &egui::Context) {}
+    pub fn draw_disassembly(&mut self, _nes: &mut Nes, _ctx: &egui::Context) {}
     pub fn draw(&mut self, nes: &mut Nes, ctx: &egui::Context) {
         egui::Window::new("Debugger")
             .default_size(vec2(1024.0, 1024.0))
@@ -84,7 +82,7 @@ impl DebuggerView {
                                         });
 
                                         // State views
-                                        strip.cell(|ui| {
+                                        strip.cell(|_ui| {
                                             //ui.group(|ui| {
                                             //ui.vertical(|ui| {
 
@@ -145,7 +143,7 @@ impl DebuggerView {
                                                     egui::ScrollArea::vertical().show(ui, |ui| {
                                                         ui.set_min_size(ui.available_size());
                                                         //ui.set_min_width(ui.available_width());
-                                                        for (addr, tag) in nes.backtrace() {
+                                                        for (addr, _tag) in nes.backtrace() {
                                                             ui.label(format!("{addr:04x}"));
                                                         }
                                                     });
