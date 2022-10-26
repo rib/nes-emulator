@@ -92,16 +92,16 @@ impl fmt::Display for TraceState {
 
 bitflags! {
     pub struct Flags: u8 {
-        const CARRY         = 0b00000001;
-        const ZERO          = 0b00000010;
-        const INTERRUPT     = 0b00000100;
-        const DECIMAL       = 0b00001000;
-        const BREAK_LOW     = 0b00010000; // pushed to stack by PHP, BRK
-        const BREAK_HIGH    = 0b00100000; // pushed to stack by PHP, BRK, /IRQ /NMI
-        const OVERFLOW      = 0b01000000;
-        const NEGATIVE      = 0b10000000;
+        const CARRY         = 0b0000_0001;
+        const ZERO          = 0b0000_0010;
+        const INTERRUPT     = 0b0000_0100;
+        const DECIMAL       = 0b0000_1000;
+        const BREAK_LOW     = 0b0001_0000; // pushed to stack by PHP, BRK
+        const BREAK_HIGH    = 0b0010_0000; // pushed to stack by PHP, BRK, /IRQ /NMI
+        const OVERFLOW      = 0b0100_0000;
+        const NEGATIVE      = 0b1000_0000;
 
-        const REAL          = 0b11001111; // BREAK bits are only pushed to stack
+        const REAL          = 0b1100_1111; // BREAK bits are only pushed to stack
         const NONE          = 0x0;
     }
 }
