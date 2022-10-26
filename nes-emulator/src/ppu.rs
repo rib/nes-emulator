@@ -176,7 +176,7 @@ pub struct MuxHookState {
     pub fine_x_scroll: u8,
 
     /// The palette value for the pixel, based on hue and brightness:
-    /// ```
+    /// ```text
     /// 76543210
     /// ||||||||
     /// ||||++++- Hue (phase, determines NTSC/PAL chroma)
@@ -187,7 +187,7 @@ pub struct MuxHookState {
     pub palette_value: u8,
 
     /// The currently BGR emphasis bits from the Control2 register
-    /// ```
+    /// ```text
     /// .....BGR
     ///      |||
     ///      ||+-- Red
@@ -327,7 +327,7 @@ pub struct Ppu {
     ///
     /// The layout of the (15bit) shared temp register when used
     /// for rendering / scrolling:
-    /// ```
+    /// ```text
     /// yyy NN YYYYY XXXXX
     /// ||| || ||||| +++++-- coarse X scroll
     /// ||| || +++++-------- coarse Y scroll
@@ -340,7 +340,7 @@ pub struct Ppu {
     ///
     /// The layout of the (15bit) shared temp register when used
     /// for rendering / scrolling:
-    /// ```
+    /// ```text
     /// yyy NN YYYYY XXXXX
     /// ||| || ||||| +++++-- coarse X scroll
     /// ||| || +++++-------- coarse Y scroll
@@ -386,7 +386,7 @@ pub struct Ppu {
     /// A composed scanline of sprite pixels to be combined with the background, with priority rules
     ///
     /// Each 8-bit sprite pixel contains:
-    /// ```
+    /// ```text
     /// .. Z P LL TT
     ///    | | || ++--- pattern (0..=1)
     ///    | | ++------ palette (2..=3)
