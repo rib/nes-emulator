@@ -996,13 +996,77 @@
       },
       {
         "WaitForDot": {
-          "frame": 559,
-          "line": 56,
-          "dot": 280
+          "frame": 392,
+          "line": 173,
+          "dot": 138
         }
       },
       {
-        "CheckFrameCRC32": 1439582275
+        "Input": {
+          "Pad": {
+            "i": 0,
+            "b": 5,
+            "p": true
+          }
+        }
+      },
+      {
+        "WaitForDot": {
+          "frame": 397,
+          "line": 67,
+          "dot": 123
+        }
+      },
+      {
+        "Input": {
+          "Pad": {
+            "i": 0,
+            "b": 5,
+            "p": false
+          }
+        }
+      },
+      {
+        "WaitForDot": {
+          "frame": 687,
+          "line": 249,
+          "dot": 260
+        }
+      },
+      {
+        "Input": {
+          "Pad": {
+            "i": 0,
+            "b": 4,
+            "p": true
+          }
+        }
+      },
+      {
+        "WaitForDot": {
+          "frame": 692,
+          "line": 257,
+          "dot": 255
+        }
+      },
+      {
+        "Input": {
+          "Pad": {
+            "i": 0,
+            "b": 4,
+            "p": false
+          }
+        }
+      },
+      {
+        "WaitForDot": {
+          "frame": 739,
+          "line": 3,
+          "dot": 206
+        }
+      },
+      {
+        "CheckFrameCRC32": 3869467819
       }
     ]
   },
@@ -2121,6 +2185,565 @@
           "frame": 62,
           "line": 68,
           "dot": 96
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "apu_test:1-len_ctr",
+    "rom": "apu_test\\rom_singles\\1-len_ctr.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 64,
+          "line": 64,
+          "dot": 4
+        }
+      },
+      {
+        "CheckFrameCRC32": 2940231755
+      }
+    ]
+  },
+  {
+    "name": "apu_test:2-len_table",
+    "rom": "apu_test\\rom_singles\\2-len_table.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": []
+  },
+  {
+    "name": "apu_test:3-irq_flag",
+    "rom": "apu_test\\rom_singles\\3-irq_flag.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 58,
+          "line": 64,
+          "dot": 187
+        }
+      },
+      {
+        "CheckFrameCRC32": 2171200531
+      }
+    ]
+  },
+  {
+    "name": "apu_test:4-jitter",
+    "rom": "apu_test\\rom_singles\\4-jitter.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 40,
+          "line": 77,
+          "dot": 6
+        }
+      },
+      {
+        "CheckFrameCRC32": 2119656008
+      }
+    ]
+  },
+  {
+    "name": "apu_test:5-len_timing",
+    "rom": "apu_test\\rom_singles\\5-len_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 144,
+          "line": 97,
+          "dot": 27
+        }
+      },
+      {
+        "CheckFrameCRC32": 1788888215
+      }
+    ]
+  },
+  {
+    "name": "apu_test:6-irq_flag_timing",
+    "rom": "apu_test\\rom_singles\\6-irq_flag_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 50,
+          "line": 80,
+          "dot": 239
+        }
+      },
+      {
+        "CheckFrameCRC32": 3314356561
+      }
+    ]
+  },
+  {
+    "name": "apu_test:7-dmc_basics",
+    "rom": "apu_test\\rom_singles\\7-dmc_basics.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "test_failure",
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 65,
+          "line": 76,
+          "dot": 150
+        }
+      },
+      {
+        "CheckFrameCRC32": 3698548884
+      }
+    ]
+  },
+  {
+    "name": "apu_test:8-dmc_rates",
+    "rom": "apu_test\\rom_singles\\8-dmc_rates.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu",
+      "test_failure"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 80,
+          "line": 81,
+          "dot": 30
+        }
+      },
+      {
+        "CheckFrameCRC32": 113598331
+      }
+    ]
+  },
+  {
+    "name": "apu_reset:4015_cleared",
+    "rom": "apu_reset\\4015_cleared.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 51,
+          "line": 87,
+          "dot": 23
+        }
+      },
+      "Reset",
+      {
+        "WaitForDot": {
+          "frame": 87,
+          "line": 178,
+          "dot": 165
+        }
+      },
+      {
+        "CheckFrameCRC32": 658470969
+      }
+    ]
+  },
+  {
+    "name": "apu_reset:4017_timing",
+    "rom": "apu_reset\\4017_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "test_failure",
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 59,
+          "line": 95,
+          "dot": 40
+        }
+      },
+      "Reset",
+      {
+        "WaitForDot": {
+          "frame": 160,
+          "line": 117,
+          "dot": 4
+        }
+      },
+      {
+        "CheckFrameCRC32": 1011906882
+      }
+    ]
+  },
+  {
+    "name": "apu_reset:4017_written",
+    "rom": "apu_reset\\4017_written.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu",
+      "test_failure"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 60,
+          "line": 86,
+          "dot": 277
+        }
+      },
+      "Reset",
+      {
+        "WaitForDot": {
+          "frame": 134,
+          "line": 112,
+          "dot": 120
+        }
+      },
+      {
+        "CheckFrameCRC32": 2392776784
+      }
+    ]
+  },
+  {
+    "name": "apu_reset:irq_flag_cleared",
+    "rom": "apu_reset\\irq_flag_cleared.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 55,
+          "line": 99,
+          "dot": 335
+        }
+      },
+      "Reset",
+      {
+        "WaitForDot": {
+          "frame": 160,
+          "line": 63,
+          "dot": 64
+        }
+      },
+      {
+        "CheckFrameCRC32": 2345173294
+      }
+    ]
+  },
+  {
+    "name": "apu_reset:len_ctrs_enabled",
+    "rom": "apu_reset\\len_ctrs_enabled.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 77,
+          "line": 80,
+          "dot": 231
+        }
+      },
+      "Reset",
+      {
+        "WaitForDot": {
+          "frame": 130,
+          "line": 78,
+          "dot": 300
+        }
+      },
+      {
+        "CheckFrameCRC32": 3934431762
+      }
+    ]
+  },
+  {
+    "name": "apu_reset:works_immediately",
+    "rom": "apu_reset\\works_immediately.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu",
+      "test_failure"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 93,
+          "line": 109,
+          "dot": 226
+        }
+      },
+      {
+        "CheckFrameCRC32": 36246456
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:01.len_ctr",
+    "rom": "blargg_apu_2005.07.30\\01.len_ctr.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 63,
+          "line": 88,
+          "dot": 44
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:02.len_table",
+    "rom": "blargg_apu_2005.07.30\\02.len_table.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 45,
+          "line": 94,
+          "dot": 315
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:03.irq_flag",
+    "rom": "blargg_apu_2005.07.30\\03.irq_flag.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 42,
+          "line": 82,
+          "dot": 167
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:04.clock_jitter",
+    "rom": "blargg_apu_2005.07.30\\04.clock_jitter.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 72,
+          "line": 113,
+          "dot": 93
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:05.len_timing_mode0",
+    "rom": "blargg_apu_2005.07.30\\05.len_timing_mode0.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 57,
+          "line": 65,
+          "dot": 37
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:06.len_timing_mode1",
+    "rom": "blargg_apu_2005.07.30\\06.len_timing_mode1.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 61,
+          "line": 129,
+          "dot": 5
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:07.irq_flag_timing",
+    "rom": "blargg_apu_2005.07.30\\07.irq_flag_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 53,
+          "line": 84,
+          "dot": 61
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:08.irq_timing",
+    "rom": "blargg_apu_2005.07.30\\08.irq_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 49,
+          "line": 87,
+          "dot": 278
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:09.reset_timing",
+    "rom": "blargg_apu_2005.07.30\\09.reset_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 51,
+          "line": 60,
+          "dot": 302
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:10.len_halt_timing",
+    "rom": "blargg_apu_2005.07.30\\10.len_halt_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 46,
+          "line": 102,
+          "dot": 157
+        }
+      },
+      {
+        "CheckFrameCRC32": 463251011
+      }
+    ]
+  },
+  {
+    "name": "blargg_apu_2005.07.30:11.len_reload_timing",
+    "rom": "blargg_apu_2005.07.30\\11.len_reload_timing.nes",
+    "notes": "",
+    "genie_codes": [],
+    "tags": [
+      "apu"
+    ],
+    "commands": [
+      {
+        "WaitForDot": {
+          "frame": 47,
+          "line": 106,
+          "dot": 102
         }
       },
       {
