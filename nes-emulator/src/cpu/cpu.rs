@@ -800,7 +800,7 @@ impl Cpu {
             self.nmi_raised = true;
             //println!("Phase 1 raised NMI interrupt")
         }
-        //println!("Phase 1 raised NMI interrupt = {}", self.nmi_detected);
+        //println!("Phase 1 raised NMI interrupt = {}", self.nmi_raised);
         self.irq_raised = self.pending_irq_detected;
         //println!("phase 1 irq_raised = {}", self.irq_raised);
     }
