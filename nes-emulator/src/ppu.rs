@@ -683,11 +683,11 @@ impl Ppu {
     }
 
     // TODO: decay the latch value over time
-    //pub fn finish_read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
-    //    let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
-    //    self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
-    //    read
-    //}
+    pub fn finish_read_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
+        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
+        self.io_latch_value = (self.io_latch_value & undefined_bits) | (value & !undefined_bits);
+        read
+    }
 
     pub fn finish_peek_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
         let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
@@ -782,9 +782,10 @@ impl Ppu {
     }
 
     pub fn system_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> (u8, u8) {
-        self.read_without_openbus(cartridge, addr)
-        //let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
-        //let value = self.finish_read_with_latch(value, undefined_bits);
+        //self.read_without_openbus(cartridge, addr)
+        let (value, undefined_bits) = self.read_without_openbus(cartridge, addr);
+        let value = self.finish_read_with_latch(value, undefined_bits);
+        (value, 0)
         //println!("ppu read 0x{addr:04x} = 0x{value:02x}");
         //value
     }
@@ -806,16 +807,15 @@ impl Ppu {
             _ => (0, 0xff)
         };
 
-        //self.finish_peek_with_latch(value, undefined_bits)
-
-        (value, undefined_bits)
+        let value = self.finish_peek_with_latch(value, undefined_bits);
+        (value, 0)
     }
 
     pub fn system_bus_write(&mut self, cartridge: &mut Cartridge, addr: u16, data: u8) {
         //println!("CPU->PPU write 0x{:04x} = 0x{:02x}", addr, data);
         // mirror
         let addr = ((addr - 0x2000) % 8) + 0x2000;
-        //self.io_latch_value = data;
+        self.io_latch_value = data;
         match addr {
             0x2000 => { // Control 1
                 self.control1 = Control1Flags::from_bits_truncate(data);
