@@ -132,7 +132,7 @@ impl Mapper for Mapper7 {
                 arr_read!(self.chr_data, addr as usize)
             }
             0x2000..=0x3fff => { // VRAM
-                arr_read!(self.vram, mirror_vram_address(addr, NameTableMirror::SingleScreen))
+                arr_read!(self.vram, mirror_vram_address(addr, NameTableMirror::SingleScreenA))
             }
             _ => { 0 }
         }
@@ -148,11 +148,11 @@ impl Mapper for Mapper7 {
                 arr_write!(self.chr_data, addr as usize, data);
             }
             0x2000..=0x3fff => { // VRAM
-                arr_write!(self.vram, mirror_vram_address(addr, NameTableMirror::SingleScreen), data);
+                arr_write!(self.vram, mirror_vram_address(addr, NameTableMirror::SingleScreenA), data);
             }
             _ => {}
         }
     }
 
-    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::SingleScreen }
+    fn mirror_mode(&self) -> NameTableMirror { NameTableMirror::SingleScreenA }
 }

@@ -70,7 +70,7 @@ pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
                 _ => unreachable!()
             }
         }
-        NameTableMirror::SingleScreen => {
+        NameTableMirror::SingleScreenA => {
             match addr {
                 0..=1023 => { addr }, // Top left
                 1024..=2047 => { addr - 1024 }, // Top right

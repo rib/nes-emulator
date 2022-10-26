@@ -54,10 +54,15 @@ impl VRam {
                     1
                 }
             }
-            NameTableMirror::SingleScreen => {
+            NameTableMirror::SingleScreenA => {
                 // [A, A]
                 // [A, A]
                 0
+            }
+            NameTableMirror::SingleScreenB => {
+                // [B, B]
+                // [B, B]
+                1
             }
             NameTableMirror::FourScreen => {
                 // [A, B]

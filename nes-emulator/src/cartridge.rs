@@ -44,7 +44,8 @@ pub enum NameTableMirror {
     Unknown,
     Horizontal,
     Vertical,
-    SingleScreen,
+    SingleScreenA,
+    SingleScreenB,
     FourScreen,
 }
 

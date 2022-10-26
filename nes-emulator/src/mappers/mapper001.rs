@@ -55,9 +55,6 @@ pub struct Mapper1 {
     shift_register: u8,
     shift_register_pos: u8,
 
-    // Control register
-    mirroring: u8,
-
     prg_bank_mode: Mapper1PrgMode,
     chr_bank_mode: Mapper1ChrMode,
 
@@ -84,7 +81,6 @@ impl Mapper1 {
 
             prg_bank_mode: Mapper1PrgMode::Switch16KFixed16KLast,
             chr_bank_mode: Mapper1ChrMode::Switch8K,
-            mirroring: 0,
 
             chr_bank_0: 0,
             chr_bank_1: 0,
@@ -118,7 +114,13 @@ impl Mapper1 {
                 // Shift register full; write to internal register...
                 match addr {
                     0x8000..=0x9fff => { // Control register
-                        self.mirroring = value & 0b00011;
+                        self.vram_mirror = match value & 0b00011 {
+                            0 => NameTableMirror::SingleScreenA,
+                            1 => NameTableMirror::SingleScreenB,
+                            2 => NameTableMirror::Vertical,
+                            3 => NameTableMirror::Horizontal,
+                            _ => unreachable!()
+                        };
                         self.prg_bank_mode = match (value & 0b01100) >> 2 {
                             0 | 1 => Mapper1PrgMode::Switch32KConsecutive,
                             2 => Mapper1PrgMode::Fixed16KFirstSwitch16K,
@@ -132,8 +134,8 @@ impl Mapper1 {
 
                             _ => { unreachable!() } // Rust compiler should know this is unreachable :/
                         };
-                        trace!("Control: mirring = {}, PRG mode = {:?}, CHR mode = {:?}",
-                                self.mirroring, self.prg_bank_mode, self.chr_bank_mode);
+                        trace!("Control: mirring = {:#?}, PRG mode = {:?}, CHR mode = {:?}",
+                                self.vram_mirror, self.prg_bank_mode, self.chr_bank_mode);
                     }
                     0xa000..=0xbfff => { // CHR bank 0
                         trace!("CHR bank 0 = {}", value);
