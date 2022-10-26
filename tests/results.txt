@@ -1,0 +1,81 @@
+PASSED: instr_test-v5:01-basics
+PASSED: instr_test-v5:02-implied.nes
+PASSED: instr_test-v5:03-immediate
+PASSED: instr_test-v5:04-zero_page
+PASSED: instr_test-v5:05-zp_xy
+PASSED: instr_test-v5:06-absolute
+PASSED: instr_test-v5:07-abs_xy
+PASSED: instr_test-v5:08-ind_x
+PASSED: instr_test-v5:09-ind_y
+PASSED: instr_test-v5:10-branches
+PASSED: instr_test-v5:11-stack
+PASSED: instr_test-v5:12-jmp_jsr
+PASSED: instr_test-v5:13-rts
+PASSED: instr_test-v5:14-rti
+PASSED: instr_test-v5:15-brk
+PASSED: instr_test-v5:16-special
+PASSED: cpu_reset:ram_after_reset.
+PASSED: cpu_reset:registers
+PASSED: instr_timing:1-instr_timing
+PASSED: instr_timing:2-branch_timing
+PASSED: cpu_dummy_reads
+PASSED: cpu_dummy_writes:cpu_dummy_writes_oam
+PASSED: cpu_exec_space:test_cpu_exec_space_apu
+PASSED: cpu_exec_space:test_cpu_exec_space_ppuio
+PASSED: ppu_open_bus
+FAILED (as expected): ppu_read_buffer:test_ppu_read_buffer
+FAILED (as expected): ppu_vbl_nmi
+FAILED: read_joy3:count_errors
+FAILED: read_joy3:count_errors_fast
+PASSED: read_joy3:test_buttons
+FAILED: read_joy3:thorough_test
+FAILED (as expected): scrolltest:scroll
+PASSED: sprite_hit_tests_2005.10.05:01.basics
+PASSED: sprite_hit_tests_2005.10.05:02.alignment
+PASSED: sprite_hit_tests_2005.10.05:03.corners
+PASSED: sprite_hit_tests_2005.10.05:04.flip
+PASSED: sprite_hit_tests_2005.10.05:05.left_clip
+PASSED: sprite_hit_tests_2005.10.05:06.right_edge
+PASSED: sprite_hit_tests_2005.10.05:07.screen_bottom
+PASSED: sprite_hit_tests_2005.10.05:08.double_height
+PASSED: sprite_hit_tests_2005.10.05:09.timing_basics
+PASSED: sprite_hit_tests_2005.10.05:10.timing_order
+PASSED: sprite_hit_tests_2005.10.05:11.edge_timing
+PASSED: sprite_overflow_tests:1.Basics
+PASSED: sprite_overflow_tests:2.Details
+PASSED: sprite_overflow_tests:3.Timing
+PASSED: sprite_overflow_tests:4.Obscure
+PASSED: sprite_overflow_tests:5.Emulator
+UNKNOWN (didn't hit expected failure): sprdma_and_dmc_dma
+UNKNOWN (didn't hit expected failure): sprdma_and_dmc_dma:sprdma_and_dmc_dma_512
+PASSED: branch_timing_tests:1.Branch_Basics
+PASSED: branch_timing_tests:2.Backward_Branch
+PASSED: branch_timing_tests:3.Forward_Branch
+PASSED: oam_read
+PASSED: oam_stress
+PASSED: mmc3_test_2:1-clocking
+PASSED: mmc3_test_2:2-details
+PASSED: mmc3_test_2:3-A12_clocking
+FAILED (as expected): mmc3_test_2:4-scanline_timing
+PASSED: mmc3_test_2:5-MMC3
+FAILED (as expected): mmc3_test_2:6-MMC3_alt
+PASSED: nes_instr_test:01-implied
+PASSED: nes_instr_test:02-immediate
+PASSED: nes_instr_test:03-zero_page
+PASSED: nes_instr_test:04-zp_xy
+PASSED: nes_instr_test:05-absolute
+PASSED: nes_instr_test:06-abs_xy
+PASSED: nes_instr_test:07-ind_x
+PASSED: nes_instr_test:08-ind_y
+PASSED: nes_instr_test:09-branches
+PASSED: nes_instr_test:10-stack
+PASSED: nes_instr_test:11-special
+PASSED: cpu_interrupts_v2:1-cli_latency
+PASSED: cpu_interrupts_v2:2-nmi_and_brk
+FAILED (as expected): cpu_interrupts_v2:3-nmi_and_irq
+FAILED (as expected): cpu_interrupts_v2:4-irq_and_dma
+FAILED (as expected): cpu_interrupts_v2:5-branch_delays_irq
+PASSED: instr_misc:01-abs_x_wrap
+PASSED: instr_misc:02-branch_wrap
+PASSED: instr_misc:03-dummy_reads
+PASSED: instr_misc:04-dummy_reads_apu
