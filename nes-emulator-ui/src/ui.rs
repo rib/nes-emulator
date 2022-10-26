@@ -242,6 +242,7 @@ pub struct EmulatorUi {
     nes: Nes,
     loaded_rom: Option<PathBuf>,
 
+    tracing: bool,
     trace_writer: Option<Rc<RefCell<BufWriter<File>>>>,
 
     pub paused: bool,
@@ -377,6 +378,7 @@ impl EmulatorUi {
             crc_hook_handle: None,
             shared_crc32: Rc::new(RefCell::new(0)),
 
+            tracing: false,
             trace_writer: None,
 
             paused,
@@ -418,19 +420,11 @@ impl EmulatorUi {
         };
 
         if let Some(trace) = &args.trace {
-            if trace == "-" {
-                emulator.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
-                    println!("{trace_state}");
-                }));
-            } else {
+            emulator.tracing = true;
+            if trace != "-" {
                 let f = File::create(trace)?;
                 let writer = Rc::new(RefCell::new(BufWriter::new(f)));
                 emulator.trace_writer = Some(writer.clone());
-                emulator.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
-                    if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
-                        log::error!("Failed to write to CPU trace: {err}");
-                    }
-                }));
             }
         }
 
@@ -442,6 +436,21 @@ impl EmulatorUi {
 
     fn power_on_new_nes(&mut self) {
         self.stats = BenchmarkState::new(&self.nes, Duration::from_secs(BENCHMARK_STATS_PERIOD_SECS as u64));
+
+        if self.tracing {
+            if let Some(writer) = &self.trace_writer {
+                let writer = writer.clone();
+                self.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                    if let Err(err) = writeln!(*writer.borrow_mut(), "{trace_state}") {
+                        log::error!("Failed to write to CPU trace: {err}");
+                    }
+                }));
+            } else {
+                self.nes.add_cpu_instruction_trace_hook(Box::new(move |_nes, trace_state| {
+                    println!("{trace_state}");
+                }));
+            }
+        }
 
         let start_timestamp = std::time::Instant::now();
         self.nes.power_cycle(start_timestamp);
