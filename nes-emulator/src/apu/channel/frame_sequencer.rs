@@ -34,18 +34,29 @@ pub struct FrameSequencer {
     pub mode: FrameSequencerMode,
     pub interrupt_enable: bool,
 
-    pending_register_write: Option<u8>,
+    last_register_write: u8,
+    pending_register_write: bool,
     pending_register_write_delay: u8,
 
     pub interrupt_flagged: bool,
 }
 
 impl FrameSequencer {
-    pub fn new() -> Self {
+    pub fn new(start_apu_clock: u64) -> Self {
+        // blargg apu 2005: 09.reset_timing:
+        // ; After reset or power-up, APU acts as if $4017 were written with
+        // ; $00 from 9 to 12 clocks before first instruction begins.
+        //
+        // These values work to pass the reset_timing test - not sure why
+        // >=9 didn't work
+        //
+        // NB: make sure polarity matches start_apu_clock
+        let clock = if start_apu_clock % 2 == 0 { 6 } else { 7 };
         Self {
             interrupt_enable: true,
-            ..Default::default()
+            clock,
 
+            ..Default::default()
 
             /*
             clock: 0,
@@ -61,8 +72,16 @@ impl FrameSequencer {
         }
     }
 
-    pub fn power_cycle(&mut self) {
-        *self = Self::new();
+    pub fn power_cycle(&mut self, start_apu_clock: u64) {
+        *self = Self::new(start_apu_clock);
+    }
+
+    pub fn reset(&mut self) {
+        self.clear_irq();
+
+        // apu_reset:4017_written
+        // "At reset, $4017 should should be rewritten with last value written"
+        self.write_register(self.last_register_write);
     }
 
     // "The sequencer is clocked on every other CPU cycle, so 2 CPU cycles = 1 APU cycle"
@@ -88,7 +107,8 @@ impl FrameSequencer {
 
         // "If the write occurs during an APU cycle, the effects occur 3 CPU cycles after the $4017 write cycle,
         // and if the write occurs between APU cycles, the effects occurs 4 CPU cycles after the write cycle."
-        self.pending_register_write = Some(value);
+        self.pending_register_write = true;
+        self.last_register_write = value;
 
         // "Writing to $4017 resets the frame counter and the quarter/half frame triggers happen simultaneously,
         // but only on "odd" cycles (and only after the first "even" cycle after the write occurs) - thus, it happens
@@ -100,18 +120,18 @@ impl FrameSequencer {
         // of the 5-step sequence; with bit 7 clear, only the sequence is reset without clocking any of its units."
 
         if self.is_apu_cycle() {
-            //println!("Setting $4017 write delay = 3 cycles: apu_clock = {apu_clock}, self.clock = {}", self.clock);
+            //println!("Setting $4017 write delay = 3 cycles: apu_clock = {}, self.clock = {}", self.clock, self.is_apu_cycle());
             self.pending_register_write_delay = 2;
         } else {
-            //println!("Setting $4017 write delay = 4 cycles: apu_clock = {apu_clock}, self.clock = {}", self.clock);
-            self.pending_register_write_delay = 3;
+            //println!("Setting $4017 write delay = 2 cycles: apu_clock = {}, self.clock = {}", self.clock, self.is_apu_cycle());
+            self.pending_register_write_delay = 1;
         }
 
-        //{
-        //    let is_apu_clock = self.clock % 2 == 1;
-        //    let apply_target = if is_apu_clock { self.clock + 3 } else { self.clock + 4 };
-        //    println!("Queue pending 4017 write: clock = {}, expect write apply @ {}", self.clock, apply_target);
-        //}
+        {
+            let is_apu_clock = self.clock % 2 == 1;
+            let apply_target = if is_apu_clock { self.clock + 3 } else { self.clock + 4 };
+            //println!("Queue pending 4017 write: clock = {}, expect write apply @ {}", self.clock, apply_target);
+        }
 
         self.interrupt_enable = (value & 0b0100_0000) == 0;
         // "Interrupt inhibit flag. If set, the frame interrupt flag is cleared, otherwise it is unaffected"
@@ -193,15 +213,15 @@ impl FrameSequencer {
                 }
             }
         };
-        if status != FrameSequencerStatus::default() {
-            //println!("Frame Sequencer Status = {:?}, clock = {}", status, self.clock);
-        }
+        //if status != FrameSequencerStatus::default() {
+        //    println!("Frame Sequencer Status = {:?}, clock = {}", status, self.clock);
+        //}
         //println!("SEQ: seq clock = {}, clock = {}, status = {:?}, mode = {:?}", self.clock, apu_clock,  status, self.mode);
 
-        if let Some(value) = self.pending_register_write {
+        if self.pending_register_write {
             //println!("Pending $4017 write: clock = {}", self.clock);
             if self.pending_register_write_delay == 0 {
-                self.mode = if value & 0b1000_0000 == 0 {
+                self.mode = if self.last_register_write & 0b1000_0000 == 0 {
                     //println!("Applying $4017 write, four step: clock = {}", self.clock);
                     FrameSequencerMode::FourStep
                 } else {
@@ -212,7 +232,7 @@ impl FrameSequencer {
                     FrameSequencerMode::FiveStep
                 };
 
-                self.pending_register_write = None;
+                self.pending_register_write = false;
 
                 // Note: Half/QuarterFrame clocks happen on odd, APU clocks but we
                 // must only ever reset the clock to zero on an even clock cycle

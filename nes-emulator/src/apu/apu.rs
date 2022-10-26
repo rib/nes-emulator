@@ -48,13 +48,14 @@ impl Apu {
     pub fn new(nes_model: Model, sample_rate: u32) -> Self {
         let cpu_clock_hz = nes_model.cpu_clock_hz();
         let output_step = (cpu_clock_hz / sample_rate) as u16;
+        let clock = CPU_START_CYCLE;
         Apu {
-            clock: CPU_START_CYCLE,
+            clock,
             sample_rate,
             output_step,
-            frame_sequencer: FrameSequencer::new(),
-            square_channel1: SquareChannel::new(nes_model, false),
-            square_channel2: SquareChannel::new(nes_model, true /* two's compliment sweep negate */),
+            frame_sequencer: FrameSequencer::new(clock),
+            square_channel1: SquareChannel::new(nes_model, "Square 1".to_string(), false),
+            square_channel2: SquareChannel::new(nes_model, "Square 2".to_string(), true /* two's compliment sweep negate */),
             triangle_channel: TriangleChannel::new(nes_model),
             noise_channel: NoiseChannel::new(),
             dmc_channel: DmcChannel::new(nes_model),
@@ -71,7 +72,7 @@ impl Apu {
     pub fn power_cycle(&mut self) {
         self.clock = CPU_START_CYCLE;
         self.sample_buffer.clear();
-        self.frame_sequencer.power_cycle();
+        self.frame_sequencer.power_cycle(self.clock);
         self.square_channel1.power_cycle();
         self.square_channel2.power_cycle();
         self.triangle_channel.power_cycle();
@@ -94,7 +95,7 @@ impl Apu {
         // "Power-up and reset have the effect of writing $00, silencing all channels."
         self.write(0x4015, 0);
 
-        self.frame_sequencer.clear_irq();
+        self.frame_sequencer.reset();
         self.dmc_channel.clear_interrupt();
     }
 
@@ -131,6 +132,7 @@ impl Apu {
 
         let frame_sequencer_output = self.frame_sequencer.step(self.clock, &mut self.debug.trace_events_current);
         if !frame_sequencer_output.is_empty() {
+            //println!("frame sequencer output = {:?}, clock = {}", frame_sequencer_output, self.clock);
             debug_assert!(self.clock % 2 == 1);
         }
 
@@ -140,15 +142,26 @@ impl Apu {
         self.triangle_channel.step(frame_sequencer_output);
 
         if self.clock % 2 == 1 {
-            //println!("apu cycle: {apu_clock}");
+            //println!("apu cycle: {}", self.clock);
             // "this timer is updated every APU cycle (i.e., every second CPU cycle)"
             self.square_channel1.odd_step(frame_sequencer_output);
             self.square_channel2.odd_step(frame_sequencer_output);
 
             self.noise_channel.odd_step(frame_sequencer_output);
 
-            self.dmc_channel.odd_step(frame_sequencer_output)
+            self.dmc_channel.odd_step(frame_sequencer_output);
         }
+
+        // blargg apu 2005: 10.len_halt_timing
+        // ; Changes to length counter halt occur after clocking length, not before.
+        //
+        // blargg apu 2005: 11.len_reload_timing
+        // ; Write to length counter reload should be ignored when made during length
+        // ; counter clocking and the length counter is not zero.
+        self.square_channel1.length_counter.finish_apu_clock_step();
+        self.square_channel2.length_counter.finish_apu_clock_step();
+        self.triangle_channel.length_counter.finish_apu_clock_step();
+        self.noise_channel.length_counter.finish_apu_clock_step();
 
         while self.output_timer >= self.output_step {
             let output = self.mixer.mix(

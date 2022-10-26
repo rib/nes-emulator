@@ -1,3 +1,5 @@
+use std::sync::mpsc::channel;
+
 use crate::apu::channel::length_counter::LengthCounter;
 use crate::apu::channel::volume_envelope::VolumeEnvelope;
 use super::frame_sequencer::FrameSequencerStatus;
@@ -23,11 +25,12 @@ pub struct NoiseChannel {
 
 impl NoiseChannel {
     pub fn new() -> Self {
+        let channel_name = "Noise".to_string();
         Self {
             // "On power-up, the shift register is loaded with the value 1"
             shift_register: 1,
-            volume_envelope: VolumeEnvelope::new(),
-            length_counter: LengthCounter::new(),
+            volume_envelope: VolumeEnvelope::new(channel_name.clone()),
+            length_counter: LengthCounter::new(channel_name),
             ..Default::default()
             /*
 
@@ -93,7 +96,7 @@ impl NoiseChannel {
     pub fn write(&mut self, address: u16, value: u8) {
         match address % 4 {
             0 => {
-                self.length_counter.set_halt((value & 0b0010_0000) != 0);
+                self.length_counter.write_halt_flag((value & 0b0010_0000) != 0);
 
                 let constant_volume = (value & 0b0001_0000) != 0;
                 let envelope_volume = value & 0xf;

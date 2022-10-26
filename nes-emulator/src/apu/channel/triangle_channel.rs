@@ -20,9 +20,10 @@ pub struct TriangleChannel {
 
 impl TriangleChannel {
     pub fn new(model: Model) -> Self {
+        let channel_name = "Triangle".to_string();
         Self {
             model,
-            length_counter: LengthCounter::new(),
+            length_counter: LengthCounter::new(channel_name),
             ..Default::default()
             /*
 
@@ -97,7 +98,7 @@ impl TriangleChannel {
     pub fn write(&mut self, address: u16, value: u8) {
         match address % 4 {
             0 => {
-                self.length_counter.set_halt((value & 0b0010_0000) != 0);
+                self.length_counter.write_halt_flag((value & 0b0010_0000) != 0);
             }
             1 => { } // Sweep N/A
             2 => {

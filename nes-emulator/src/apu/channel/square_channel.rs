@@ -15,6 +15,7 @@ const DUTY_MAP: [[u8; 8]; 4] = [
 #[derive(Clone, Default)]
 pub struct SquareChannel {
     model: Model,
+    debug_channel_name: String,
 
     // We don't currently encapsulate the sweep state since it interacts
     // with the channel state
@@ -40,19 +41,20 @@ pub struct SquareChannel {
 }
 
 impl SquareChannel {
-    pub fn new(model: Model, twos_compliment_sweep_negate: bool) -> Self {
+    pub fn new(model: Model, debug_channel_name: String, twos_compliment_sweep_negate: bool) -> Self {
 
         Self {
             model,
+            debug_channel_name: debug_channel_name.clone(),
             twos_compliment_sweep_negate,
-            volume_envelope: VolumeEnvelope::new(),
-            length_counter: LengthCounter::new(),
+            volume_envelope: VolumeEnvelope::new(debug_channel_name.clone()),
+            length_counter: LengthCounter::new(debug_channel_name),
             ..Default::default()
         }
     }
 
     pub fn power_cycle(&mut self) {
-        *self = Self::new(self.model, self.twos_compliment_sweep_negate);
+        *self = Self::new(self.model, self.debug_channel_name.clone(), self.twos_compliment_sweep_negate);
     }
 
     /// "Two conditions cause the sweep unit to mute the channel:
@@ -201,7 +203,7 @@ impl SquareChannel {
 
                 let len_halt = (value & 0b0010_0000) != 0;
 
-                self.length_counter.set_halt(len_halt);
+                self.length_counter.write_halt_flag(len_halt);
                 self.volume_envelope.set_loop_flag(len_halt); // Dual-purpose flag
 
                 let constant_volume = (value & 0b0001_0000) != 0;
@@ -224,9 +226,9 @@ impl SquareChannel {
                 self.set_period((self.timer_period & 0b0000_0111_0000_0000) | (value as u16));
             }
             3 => {
-                //println!("$4003 write: value = {value:x} / {value:08b}");
+                //println!("{}: $4003 write: value = {value:x} / {value:08b}", self.debug_channel_name);
                 self.length_counter.set_length(value >> 3);
-                //println!("length counter = {}", self.length_counter.length());
+                //println!("{}: length counter = {}", self.debug_channel_name, self.length_counter.length());
 
                 let timer_high = ((value as u16) & 0b111) << 8;
                 self.set_period((self.timer_period & 0xff) | timer_high);

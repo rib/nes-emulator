@@ -1,6 +1,8 @@
 
 #[derive(Clone, Default)]
 pub struct VolumeEnvelope {
+    debug_channel_name: String,
+
     start_flag: bool,
     loop_flag: bool,
 
@@ -14,8 +16,9 @@ pub struct VolumeEnvelope {
 }
 
 impl VolumeEnvelope {
-    pub fn new() -> Self {
+    pub fn new(debug_channel_name: String) -> Self {
         Self {
+            debug_channel_name,
             ..Default::default()
 
             /*
