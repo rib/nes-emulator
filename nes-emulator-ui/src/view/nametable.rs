@@ -27,12 +27,11 @@ impl NametablesView {
                 pixels: vec![egui::Color32::default(); fb_width * fb_height],
             };
             let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture(
+            ctx.load_texture(
                 "nametables_framebuffer",
                 blank,
                 egui::TextureFilter::Nearest,
-            );
-            tex
+            )
         };
 
         Self {
@@ -56,7 +55,7 @@ impl NametablesView {
             for x in 0..self.fb_width {
                 let pix = nes.debug_sample_nametable(x, y);
                 let pos = y * stride + x * bpp;
-                self.framebuffer[pos + 0] = pix[0];
+                self.framebuffer[pos] = pix[0];
                 self.framebuffer[pos + 1] = pix[1];
                 self.framebuffer[pos + 2] = pix[2];
             }

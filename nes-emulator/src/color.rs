@@ -230,7 +230,7 @@ impl Color32 {
 
     /// Multiply with 0.5 to make color half as opaque.
     pub fn linear_multiply(self, factor: f32) -> Color32 {
-        debug_assert!(0.0 <= factor && factor <= 1.0);
+        debug_assert!((0.0..=1.0).contains(&factor));
         // As an unfortunate side-effect of using premultiplied alpha
         // we need a somewhat expensive conversion to linear space and back.
         Rgba::from(self).multiply(factor).into()
@@ -362,22 +362,22 @@ impl Rgba {
     }
 
     pub fn from_luminance_alpha(l: f32, a: f32) -> Self {
-        debug_assert!(0.0 <= l && l <= 1.0);
-        debug_assert!(0.0 <= a && a <= 1.0);
+        debug_assert!((0.0..=1.0).contains(&l));
+        debug_assert!((0.0..=1.0).contains(&a));
         Self([l * a, l * a, l * a, a])
     }
 
     /// Transparent black
     #[inline(always)]
     pub fn from_black_alpha(a: f32) -> Self {
-        debug_assert!(0.0 <= a && a <= 1.0);
+        debug_assert!((0.0..=1.0).contains(&a));
         Self([0.0, 0.0, 0.0, a])
     }
 
     /// Transparent white
     #[inline(always)]
     pub fn from_white_alpha(a: f32) -> Self {
-        debug_assert!(0.0 <= a && a <= 1.0);
+        debug_assert!((0.0..=1.0).contains(&a));
         Self([a, a, a, a])
     }
 
@@ -625,7 +625,7 @@ fn fast_round(r: f32) -> u8 {
 pub fn test_srgba_conversion() {
     for b in 0..=255 {
         let l = linear_f32_from_gamma_u8(b);
-        assert!(0.0 <= l && l <= 1.0);
+        assert!((0.0..=1.0).contains(&l));
         assert_eq!(gamma_u8_from_linear_f32(l), b);
     }
 }

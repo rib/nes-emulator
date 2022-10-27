@@ -1,4 +1,4 @@
-use crate::apu::apu::Apu;
+use crate::apu::core::Apu;
 use crate::genie::GameGenieCode;
 use crate::ppu::Ppu;
 
@@ -305,7 +305,7 @@ impl System {
 
     /// Apply the open bus bits and update the open bus value for future reads
     fn apply_open_bus_bits_mut(&mut self, mut value: u8, undefined_bits: u8) -> u8 {
-        value = value & !undefined_bits;
+        value &= !undefined_bits;
         value |= self.open_bus_value & undefined_bits;
         self.open_bus_value = value;
         value
@@ -313,7 +313,7 @@ impl System {
 
     /// Apply the open bus bits without additional side effects (for peeking)
     fn apply_open_bus_bits(&self, mut value: u8, undefined_bits: u8) -> u8 {
-        value = value & !undefined_bits;
+        value &= !undefined_bits;
         value |= self.open_bus_value & undefined_bits;
         value
     }
@@ -321,7 +321,7 @@ impl System {
     #[inline(always)]
     fn check_watch_points(&mut self, addr: u16, ops: WatchOps) {
         #[cfg(feature = "debugger")]
-        if self.debug.watch_points.len() > 0 {
+        if !self.debug.watch_points.is_empty() {
             for w in &self.debug.watch_points {
                 if w.address == addr && w.ops.contains(ops) {
                     self.debug.watch_hit = true;
@@ -381,7 +381,7 @@ impl System {
                 //println!("calling cartridge read_u8 for {addr:x}");
                 let mut val = self.cartridge.system_bus_read(addr);
 
-                if self.genie_codes.len() > 0 {
+                if !self.genie_codes.is_empty() {
                     if let 0x8000..=0xffff = addr {
                         let off = addr - 0x8000;
                         let genie_hit =
@@ -455,11 +455,11 @@ impl System {
             }
         };
 
-        let value = self.apply_open_bus_bits_mut(value, undefined_bits);
+        self.apply_open_bus_bits_mut(value, undefined_bits)
         //if addr == 0x4016 {
         //    println!("Read $4016 as {value:02x} / {value:08b}");
         //}
-        value
+        //value
     }
 
     /// Perform a system bus read from the CPU, reading non-instruction data
@@ -476,9 +476,9 @@ impl System {
             self.debug.io_stats[addr as usize].reads += 1;
         }
 
-        let val = self.read(addr);
+        self.read(addr)
         //println!("CPU read @ 0x{:04x} = 0x{:02x}", addr, val);
-        val
+        //val
     }
 
     /// Handle various superfluous reads that the CPU does
@@ -546,8 +546,7 @@ impl System {
             }
         };
 
-        let value = self.apply_open_bus_bits(value, undefined_bits);
-        value
+        self.apply_open_bus_bits(value, undefined_bits)
     }
 
     /// Perform a system bus write from the CPU

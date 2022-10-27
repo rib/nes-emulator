@@ -177,7 +177,7 @@ impl MacroBuilderView {
     }
 
     fn open_macros_library(&mut self, path: PathBuf) {
-        match macros::read_macro_library_from_file(&path, &vec!["all".to_string()]) {
+        match macros::read_macro_library_from_file(&path, &["all".to_string()]) {
             Ok(library) => {
                 self.library = library;
                 self.library_path = Some(path);
@@ -213,7 +213,7 @@ impl MacroBuilderView {
         match File::create(path) {
             Ok(mut fd) => match serde_json::to_string_pretty(&self.library) {
                 Ok(js) => {
-                    if let Err(err) = fd.write(&js.as_bytes()) {
+                    if let Err(err) = fd.write(js.as_bytes()) {
                         self.view_request_sender.send(ViewRequest::ShowUserNotice(
                             log::Level::Error,
                             format!("{}", err),
@@ -268,6 +268,7 @@ impl MacroBuilderView {
     pub fn set_visible(&mut self, nes: &mut Nes, visible: bool) {
         self.visible = visible;
         #[cfg(feature = "macro-builder")]
+        #[allow(clippy::collapsible_else_if)]
         if visible {
             self.power_on_new_nes_hook(nes, None);
         } else {
@@ -281,7 +282,7 @@ impl MacroBuilderView {
     fn start_recording(&mut self, _nes: &mut Nes, clear_first: bool) {
         log::debug!("start_recording");
 
-        debug_assert_eq!(self.recording, false);
+        debug_assert!(!self.recording);
 
         self.last_wait = MacroWait {
             frame: None,
@@ -295,7 +296,7 @@ impl MacroBuilderView {
         if clear_first {
             current_macro.commands.clear();
         } else {
-            debug_assert_eq!(self.can_append, true);
+            debug_assert!(self.can_append);
         }
 
         self.view_request_sender
@@ -304,7 +305,7 @@ impl MacroBuilderView {
     }
 
     fn stop_recording(&mut self) {
-        debug_assert_eq!(self.recording, true);
+        debug_assert!(self.recording);
         self.recording = false;
         self.can_append = true;
     }
@@ -354,24 +355,22 @@ impl MacroBuilderView {
             ControllerButton::Right,
         ];
 
-        if self.recording {
-            if !paused {
-                log::debug!("Flushing pending recording input");
-                for button in BUTTONS {
-                    if let Some(pressed) = self.pending_button_input.get(&button) {
-                        if nes.system_mut().port1.peek_button(button) != *pressed {
-                            if *pressed {
-                                nes.system_mut().port1.press_button(button);
-                            } else {
-                                nes.system_mut().port1.release_button(button);
-                            }
-
-                            self.record_input_command(nes, button, *pressed);
+        if self.recording && !paused {
+            log::debug!("Flushing pending recording input");
+            for button in BUTTONS {
+                if let Some(pressed) = self.pending_button_input.get(&button) {
+                    if nes.system_mut().port1.peek_button(button) != *pressed {
+                        if *pressed {
+                            nes.system_mut().port1.press_button(button);
+                        } else {
+                            nes.system_mut().port1.release_button(button);
                         }
+
+                        self.record_input_command(nes, button, *pressed);
                     }
                 }
-                self.pending_button_input.clear();
             }
+            self.pending_button_input.clear();
         }
     }
 
@@ -420,7 +419,7 @@ impl MacroBuilderView {
                                         self.save();
                                     }
                                 });
-                                ui.add_enabled_ui(self.library.len() > 0, |ui| {
+                                ui.add_enabled_ui(!self.library.is_empty(), |ui| {
                                     if ui.button("Save As...").clicked() {
                                         ui.close_menu();
                                         self.save_macros_library_dialog();
@@ -515,7 +514,7 @@ impl MacroBuilderView {
                                     }
                                 }
 
-                                if self.library.len() > 0 {
+                                if !self.library.is_empty() {
                                     let current_macro = self.current_macro;
                                     egui::ComboBox::from_id_source("macro_name_drop_down")
                                         .width(250.0)
@@ -693,8 +692,9 @@ impl MacroBuilderView {
                 egui::TopBottomPanel::top("macro_header").frame(egui::Frame::none()).show_inside(ui, |ui| {
                     if self.current_macro < self.library.len() {
                         ui.horizontal(|ui| {
+                            #[allow(clippy::collapsible_if)]
                             if !self.recording {
-                                if self.library[self.current_macro].commands.len() > 0 {
+                                if !self.library[self.current_macro].commands.is_empty() {
                                     if ui.button("Play").clicked() {
                                         self.view_request_sender.send(ViewRequest::RunMacro(self.library[self.current_macro].clone()));
                                     }
@@ -717,10 +717,8 @@ impl MacroBuilderView {
                                         self.current_macro = 0;
                                     }
                                 }
-                            } else {
-                                if ui.button("Stop").clicked() {
-                                    self.stop_recording();
-                                }
+                            } else if ui.button("Stop").clicked() {
+                                self.stop_recording();
                             }
                         });
                     }

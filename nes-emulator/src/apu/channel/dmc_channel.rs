@@ -174,7 +174,7 @@ impl DmcChannel {
     /// After we request a DMC DMA we will get a `completed_dma` callback after 2-4 clock cycles
     /// with the read sample `value`
     pub fn completed_dma(&mut self, _address: u16, value: u8) {
-        debug_assert_eq!(self.dma_in_progress, true);
+        debug_assert!(self.dma_in_progress);
 
         self.sample_buffer = Some(value);
         self.dma_in_progress = false;
@@ -214,11 +214,11 @@ impl DmcChannel {
 
         //     2) The counter is decremented. If it becomes zero, a new cycle is started.
 
-        if self.output_silence_flag == false {
+        if !self.output_silence_flag {
             let up = self.output_shift & 1 == 1;
-            if up == true && self.output < 126 {
+            if up && self.output < 126 {
                 self.output += 2;
-            } else if up == false && self.output > 1 {
+            } else if !up && self.output > 1 {
                 self.output -= 2;
             }
         }

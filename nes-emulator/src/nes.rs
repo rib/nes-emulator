@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use crate::apu::apu::Apu;
+use crate::apu::core::Apu;
 //use crate::binary;
 use crate::binary::NesBinaryConfig;
 use crate::cpu::instruction::FetchedOperand;
@@ -11,7 +11,7 @@ use crate::cpu::instruction::Instruction;
 //use crate::cartridge;
 use crate::cartridge::*;
 use crate::constants::*;
-use crate::cpu::cpu::*;
+use crate::cpu::core::*;
 use crate::framebuffer::*;
 use crate::genie::GameGenieCode;
 #[cfg(feature = "trace")]
@@ -408,7 +408,7 @@ impl Nes {
         trace.last_hook_cycle_count = trace.cpu_clock;
 
         let trace = self.cpu.trace.clone();
-        if self.trace_hooks.hooks.len() != 0 {
+        if !self.trace_hooks.hooks.is_empty() {
             let mut hooks = std::mem::take(&mut self.trace_hooks);
             for hook in hooks.hooks.iter_mut() {
                 (hook.func)(self, &trace);
@@ -598,6 +598,7 @@ impl Nes {
                 }
             }
 
+            #[allow(clippy::collapsible_if)]
             if self.nsf_player.nsf_initialized {
                 if self.cpu.clock - self.nsf_player.nsf_last_step_cycle
                     > self.nsf_player.nsf_step_period
@@ -744,11 +745,11 @@ impl Nes {
     /// should always be explicitly removed via [`Cpu::remove_break`]
     #[cfg(feature = "debugger")]
     pub fn add_tmp_step_out_breakpoint(&mut self) -> Option<BreakpointHandle> {
-        let mut out_addr = None;
-        for (addr, _) in self.cpu.backtrace(&mut self.system) {
-            out_addr = Some(addr);
-            break;
-        }
+        let out_addr = self
+            .cpu
+            .backtrace(&mut self.system)
+            .next()
+            .map(|frame| frame.0);
         if let Some(out_addr) = out_addr {
             Some(self.cpu.add_break(
                 out_addr,

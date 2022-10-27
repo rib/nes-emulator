@@ -35,7 +35,7 @@ use ring_channel::{ring_channel, RingReceiver, RingSender, TryRecvError};
 use nes_emulator::framebuffer::*;
 use nes_emulator::genie::GameGenieCode;
 use nes_emulator::{
-    cpu::cpu::BreakpointHandle, hook::HookHandle, nes::*, port::ControllerButton, system::Model,
+    cpu::core::BreakpointHandle, hook::HookHandle, nes::*, port::ControllerButton, system::Model,
 };
 
 use crate::{
@@ -92,7 +92,7 @@ impl ViewRequestSender {
 
 fn load_nes(
     path: Option<impl AsRef<Path>>,
-    rom_dirs: &Vec<PathBuf>,
+    rom_dirs: &[PathBuf],
     audio_sample_rate: u32,
     start_timestamp: Instant,
     notices: &mut VecDeque<Notice>,
@@ -412,8 +412,7 @@ impl EmulatorUi {
                 pixels: vec![Color32::default(); fb_width * fb_height],
             };
             let blank = ImageData::Color(blank);
-            let tex = ctx.load_texture("framebuffer", blank, egui::TextureFilter::Nearest);
-            tex
+            ctx.load_texture("framebuffer", blank, egui::TextureFilter::Nearest)
         };
 
         let macro_queue = if let Some(library) = &args.macros {
@@ -509,7 +508,7 @@ impl EmulatorUi {
             if trace != "-" {
                 let f = File::create(trace)?;
                 let writer = Rc::new(RefCell::new(BufWriter::new(f)));
-                emulator.trace_writer = Some(writer.clone());
+                emulator.trace_writer = Some(writer);
             }
         }
 
@@ -571,7 +570,7 @@ impl EmulatorUi {
     pub fn open_binary(&mut self, path: impl AsRef<Path>) {
         self.disconnect_nes();
         let (nes, loaded_rom) = load_nes(
-            Some(path.as_ref().clone()),
+            Some(path),
             &self.rom_dirs,
             self.audio_sample_rate,
             Instant::now(),
@@ -635,7 +634,7 @@ impl EmulatorUi {
     }
 
     pub fn draw_notices_header(&mut self, ui: &mut Ui) {
-        while self.notices.len() > 0 {
+        while !self.notices.is_empty() {
             let ts = self.notices.front().unwrap().timestamp;
             if Instant::now() - ts > Duration::from_secs(NOTICE_TIMEOUT_SECS as u64) {
                 self.notices.pop_front();
@@ -644,7 +643,7 @@ impl EmulatorUi {
             }
         }
 
-        if self.notices.len() > 0 {
+        if !self.notices.is_empty() {
             for notice in self.notices.iter() {
                 let mut rt = RichText::new(notice.text.clone()).strong();
                 let (fg, bg) = match notice.level {
@@ -659,49 +658,46 @@ impl EmulatorUi {
     }
 
     pub fn update(&mut self) {
-        match self.view_requests_rx.try_recv() {
-            Ok(req) => {
-                println!("Got view request: {req:?}");
-                match req {
-                    ViewRequest::ShowUserNotice(level, text) => {
+        if let Ok(req) = self.view_requests_rx.try_recv() {
+            println!("Got view request: {req:?}");
+            match req {
+                ViewRequest::ShowUserNotice(level, text) => {
+                    self.notices.push_back(Notice {
+                        level,
+                        text,
+                        timestamp: Instant::now(),
+                    });
+                }
+                ViewRequest::RunMacro(recording) => {
+                    self.macro_queue.clear();
+                    self.macro_queue.push(recording);
+                }
+                ViewRequest::LoadRom(path) => {
+                    if let Some(rom) = utils::find_rom(path, &self.rom_dirs) {
+                        self.open_binary(rom);
+                        self.set_paused(false);
+
+                        // TODO: have a generic way of notifying all views
+                        #[cfg(feature = "macro-builder")]
+                        self.macro_builder_view
+                            .load_rom_request_finished(&mut self.nes, true);
+                    } else {
                         self.notices.push_back(Notice {
-                            level,
-                            text,
+                            level: log::Level::Error,
+                            text: "Failed to find ROM for macro".to_string(),
                             timestamp: Instant::now(),
                         });
-                    }
-                    ViewRequest::RunMacro(recording) => {
-                        self.macro_queue.clear();
-                        self.macro_queue.push(recording);
-                    }
-                    ViewRequest::LoadRom(path) => {
-                        if let Some(rom) = utils::find_rom(path, &self.rom_dirs) {
-                            self.open_binary(rom);
-                            self.set_paused(false);
 
-                            // TODO: have a generic way of notifying all views
-                            #[cfg(feature = "macro-builder")]
-                            self.macro_builder_view
-                                .load_rom_request_finished(&mut self.nes, true);
-                        } else {
-                            self.notices.push_back(Notice {
-                                level: log::Level::Error,
-                                text: "Failed to find ROM for macro".to_string(),
-                                timestamp: Instant::now(),
-                            });
-
-                            // TODO: have a generic way of notifying all views
-                            #[cfg(feature = "macro-builder")]
-                            self.macro_builder_view
-                                .load_rom_request_finished(&mut self.nes, false);
-                        }
+                        // TODO: have a generic way of notifying all views
+                        #[cfg(feature = "macro-builder")]
+                        self.macro_builder_view
+                            .load_rom_request_finished(&mut self.nes, false);
                     }
-                    ViewRequest::InstructionStepIn => self.step_instruction_in(),
-                    ViewRequest::InstructionStepOut => self.step_instruction_out(),
-                    ViewRequest::InstructionStepOver => self.step_instruction_over(),
                 }
+                ViewRequest::InstructionStepIn => self.step_instruction_in(),
+                ViewRequest::InstructionStepOut => self.step_instruction_out(),
+                ViewRequest::InstructionStepOver => self.step_instruction_over(),
             }
-            Err(_) => {}
         }
 
         if self.macro_player.is_none() {
@@ -745,7 +741,7 @@ impl EmulatorUi {
             }
         }
 
-        if self.paused == false {
+        if !self.paused {
             let update_limit = Duration::from_micros(1_000_000 / 30); // We want to render at at-least 30fps even if emulation is running slow
 
             let update_start = Instant::now();
@@ -856,9 +852,10 @@ impl EmulatorUi {
 
                 #[cfg(feature = "macro-builder")]
                 self.macro_builder_view
-                    .playback_update(&mut self.nes, &macro_player);
+                    .playback_update(&mut self.nes, macro_player);
 
                 if !macro_player.playing() {
+                    #[allow(clippy::collapsible_else_if)]
                     if macro_player.all_checks_passed() {
                         if macro_player.checks_for_failure() {
                             log::warn!("FAILED (as expected): {}", macro_player.name());
@@ -946,11 +943,7 @@ impl EmulatorUi {
                 ui.menu_button("Nes", |ui| {
                     egui::Grid::new("some_unique_id").show(ui, |ui| {
                         if ui
-                            .button(if self.paused == false {
-                                "Pause"
-                            } else {
-                                "Resume"
-                            })
+                            .button(if !self.paused { "Pause" } else { "Resume" })
                             .clicked()
                         {
                             ui.close_menu();
@@ -1096,7 +1089,7 @@ impl EmulatorUi {
             self.trace_events_view.set_paused(paused, &mut self.nes);
         }
 
-        if paused == false {
+        if !paused {
             // Stop the emulator from trying to catch up for lost time
             self.nes.set_progress_time(Instant::now());
         }

@@ -26,6 +26,7 @@ impl Mixer {
         *self = Self::new();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn mix(
         &self,
         square1_channel: u8,

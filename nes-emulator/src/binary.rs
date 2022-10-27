@@ -118,12 +118,8 @@ pub enum NesBinaryConfig {
 }
 
 pub fn check_type(binary: &[u8]) -> Type {
-    const INES_HEADER: [u8; 4] = [
-        'N' as u8, 'E' as u8, 'S' as u8, 0x1a, /* character break */
-    ];
-    const NSF_HEADER: [u8; 5] = [
-        'N' as u8, 'E' as u8, 'S' as u8, 'M' as u8, 0x1a, /* character break */
-    ];
+    const INES_HEADER: [u8; 4] = [b'N', b'E', b'S', 0x1a /* character break */];
+    const NSF_HEADER: [u8; 5] = [b'N', b'E', b'S', b'M', 0x1a /* character break */];
 
     if binary.len() > NSF_HEADER.len() && binary[0..5] == NSF_HEADER {
         Type::NSF
@@ -135,12 +131,12 @@ pub fn check_type(binary: &[u8]) -> Type {
 }
 
 fn cstr_len(cstr_slice: &[u8]) -> usize {
-    for i in 0..cstr_slice.len() {
-        if cstr_slice[i] == 0 {
+    for (i, c) in cstr_slice.iter().enumerate() {
+        if *c == 0 {
             return i;
         }
     }
-    return 0;
+    0
 }
 
 fn nsf_string_from_cstr_slice(cstr_slice: &[u8]) -> String {
@@ -149,7 +145,7 @@ fn nsf_string_from_cstr_slice(cstr_slice: &[u8]) -> String {
 
     match std::str::from_utf8(slice) {
         Ok(s) => s.to_string(),
-        Err(_err) => format!("Unknown"),
+        Err(_err) => "Unknown".to_string(),
     }
 }
 

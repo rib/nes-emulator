@@ -28,14 +28,17 @@ enum Mapper1ChrMode {
 
 /// iNes mapper 001, aka MMC1
 ///
-/// PRG ROM capacity	256K (512K)
-/// PRG ROM window	16K + 16K fixed or 32K
-/// PRG RAM capacity	32K
-/// PRG RAM window	8K
-/// CHR capacity	128K
-/// CHR window	4K + 4K or 8K
-/// Nametable mirroring	H, V, or 1, switchable
-/// Bus conflicts	No
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | PRG ROM capacity    | 256K (512Ki)           |
+/// | PRG ROM window      | 16K + 16K fixed or 32K |
+/// | PRG RAM capacity    | 32K |
+/// | PRG RAM window      | 8K |
+/// | CHR capacity        | 128K |
+/// | CHR window          | 4K + 4K or 8K |
+/// | Nametable mirroring | H, V, or 1, switchable
+/// | Bus conflicts       | No |
 ///
 /// # Banks
 ///

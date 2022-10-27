@@ -94,7 +94,7 @@ impl fmt::Display for TraceState {
         let a = self.saved_a;
         let x = self.saved_x;
         let y = self.saved_y;
-        let sp = self.saved_sp & 0xff;
+        let sp = self.saved_sp;
         let p = self.saved_p.to_flags_string();
         let cpu_cycles = self.cpu_clock;
         let scanline = self.ppu_line;
@@ -440,7 +440,7 @@ impl Cpu {
 
     /// Handles OAM and DMC DMA requests with pedantic handling of cycle stealing
     fn run_dma_unit(&mut self, system: &mut System, dummy_addr: u16) {
-        debug_assert_eq!(self.input_ready, false); // Make sure we aren't recursing somehow
+        debug_assert!(!self.input_ready); // Make sure we aren't recursing somehow
 
         //println!("Start running DMA unit on clock = {}", self.clock);
 
@@ -450,11 +450,7 @@ impl Cpu {
         // will actually be coalesced (since the controller hardware
         // isn't aware of the cpu clock then back-to-back reads just look like
         // long reads)
-        let dummy_read_coalesce = if dummy_addr == 0x4016 || dummy_addr == 0x4017 {
-            true
-        } else {
-            false
-        };
+        let dummy_read_coalesce = dummy_addr == 0x4016 || dummy_addr == 0x4017;
 
         // To coalesce dummy reads we track the last read address, and this will
         // also be cleared to zero on writes
@@ -501,7 +497,7 @@ impl Cpu {
             match (oam_dma_state, dmc_dma_state) {
                 (OamDmaState::None, DmcDmaState::None) => unreachable!(), // We'll exit loop in this case
                 (OamDmaState::None, DmcDmaState::Stall) => {
-                    if dummy_read_coalesce == false || last_read_addr != dummy_addr {
+                    if !dummy_read_coalesce || last_read_addr != dummy_addr {
                         //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
                         let _discard = self.dma_read(system, dummy_addr); // will call .step_for_cpu_cycle()
                         last_read_addr = dummy_addr;
@@ -515,7 +511,7 @@ impl Cpu {
                     // DMC DMA reads take priority over OAM DMA reads
                     if self.clock % 2 == 1 {
                         // DMC and OAM DMA only read on even cycles
-                        if dummy_read_coalesce == false || last_read_addr != dummy_addr {
+                        if !dummy_read_coalesce || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
                             let _discard = self.dma_read(system, dummy_addr); // will call .step_for_cpu_cycle()
                             last_read_addr = dummy_addr;
@@ -534,7 +530,7 @@ impl Cpu {
                 | (OamDmaState::Read, DmcDmaState::Stall) => {
                     if self.clock % 2 == 1 {
                         // OAM DMA only reads on even cycles
-                        if dummy_read_coalesce == false || last_read_addr != dummy_addr {
+                        if !dummy_read_coalesce || last_read_addr != dummy_addr {
                             //println!("Stepping system for dummy read during DMA, clock = {}", self.clock);
                             let _discard = self.dma_read(system, dummy_addr); // will call .step_for_cpu_cycle()
                             last_read_addr = dummy_addr;
@@ -610,13 +606,13 @@ impl Cpu {
 
         //println!("Finished DMA @ clock = {}", self.clock);
 
-        debug_assert_eq!(self.input_ready, true); // Shouldn't be possible to queue more DMAs yet
+        debug_assert!(self.input_ready); // Shouldn't be possible to queue more DMAs yet
 
         // Repeat the original read and continue the current instruction...
-        let data = self.read_system_bus(system, addr);
-
+        self.read_system_bus(system, addr)
+        //let data = self.read_system_bus(system, addr);
         //println!("Finished original read that was halted @ clock = {}", self.clock);
-        data
+        //data
     }
 
     #[inline(always)]
@@ -1059,7 +1055,7 @@ impl Cpu {
     /// Checks interrupt lines during φ2/phi2 (second half) of a cycle to detect NMI edges or level IRQ inputs
     fn step_interrupt_detector_phi2(&mut self, system: &mut System) {
         let nmi_level = system.nmi_line();
-        if nmi_level == true && self.last_nmi_level == false {
+        if nmi_level && !self.last_nmi_level {
             // Note this will then stay set until "the NMI has been handled"
             self.pending_nmi_detected = true;
             //println!("Phase 2 detected NMI interrupt")
@@ -1134,7 +1130,7 @@ impl Cpu {
     #[cfg(feature = "debugger")]
     pub fn backtrace<'a>(&'a self, system: &'a mut System) -> Backtrace<'a> {
         Backtrace {
-            cpu: &self,
+            cpu: self,
             system,
             start_sp: self.sp,
             sp: self.sp,

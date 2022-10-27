@@ -11,17 +11,20 @@ use super::mirror_vram_address;
 
 /// iNES Mapper 007: aka AxROM
 ///
-/// PRG ROM capacity	256K
-/// PRG ROM window	32K
-/// PRG RAM capacity	None
-/// PRG RAM window	n/a
-/// CHR capacity	8K
-/// CHR window	n/a
-/// Nametable mirroring	1 page switchable
-/// Bus conflicts	AMROM/AOROM only
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | PRG ROM capacity | 256K |
+/// | PRG ROM window | 32K |
+/// | PRG RAM capacity | None |
+/// | PRG RAM window | n/a |
+/// | CHR capacity | 8K |
+/// | CHR window | n/a |
+/// | Nametable mirroring | 1 page switchable |
+/// | Bus conflicts | AMROM/AOROM only |
 ///
 /// # Banks
-/// CPU $8000-$FFFF: 32 KB switchable PRG ROM bank
+/// - CPU $8000-$FFFF: 32 KB switchable PRG ROM bank
 ///
 /// # Nesdev
 /// https://www.nesdev.org/wiki/AxROM
@@ -87,7 +90,7 @@ impl Mapper7 {
                 let off = addr as usize - 0x8000 + self.prg_bank;
                 arr_read!(self.prg_rom, off as usize)
             }
-            _ => return 0,
+            _ => 0,
         }
     }
 }
@@ -108,22 +111,19 @@ impl Mapper for Mapper7 {
     fn system_bus_write(&mut self, addr: u16, mut data: u8) {
         if self.has_bus_conflicts {
             let conflicting_read = self.system_bus_read_direct(addr);
-            data = data & conflicting_read;
+            data &= conflicting_read;
         }
 
-        match addr {
-            0x8000..=0xffff => {
-                // PRG Bank Select
-                let page_select = (data & 0b1111 & self.prg_bank_select_mask) % self.n_prg_pages;
-                self.prg_bank = PAGE_SIZE_32K * page_select as usize;
+        if let 0x8000..=0xffff = addr {
+            // PRG Bank Select
+            let page_select = (data & 0b1111 & self.prg_bank_select_mask) % self.n_prg_pages;
+            self.prg_bank = PAGE_SIZE_32K * page_select as usize;
 
-                self.single_screen_offset = if data & 0b1_0000 == 0 {
-                    0
-                } else {
-                    PAGE_SIZE_1K
-                };
-            }
-            _ => {}
+            self.single_screen_offset = if data & 0b1_0000 == 0 {
+                0
+            } else {
+                PAGE_SIZE_1K
+            };
         }
     }
 

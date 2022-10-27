@@ -121,7 +121,8 @@ impl TryFrom<&str> for GameGenieCode {
         match nibbles.len() {
             6 => {
                 // _333 4555 1222 3444
-                let address = 0x8000u16 + ((u16::from(nibbles[3]) & 7) << 12)
+                let address = 0x8000u16
+                    | ((u16::from(nibbles[3]) & 7) << 12)
                     | ((u16::from(nibbles[5]) & 7) << 8)
                     | ((u16::from(nibbles[4]) & 8) << 8)
                     | ((u16::from(nibbles[2]) & 7) << 4)
@@ -143,7 +144,8 @@ impl TryFrom<&str> for GameGenieCode {
             }
             8 => {
                 // _333 4555 1222 3444
-                let address = 0x8000u16 + ((u16::from(nibbles[3]) & 7) << 12)
+                let address = 0x8000u16
+                    | ((u16::from(nibbles[3]) & 7) << 12)
                     | ((u16::from(nibbles[5]) & 7) << 8)
                     | ((u16::from(nibbles[4]) & 8) << 8)
                     | ((u16::from(nibbles[2]) & 7) << 4)

@@ -1,4 +1,4 @@
-use super::cpu::*;
+use super::core::*;
 
 impl Cpu {
     #[inline]

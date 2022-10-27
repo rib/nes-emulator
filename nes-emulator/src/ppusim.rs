@@ -84,8 +84,8 @@ pub enum TriState {
     Z,
     X,
 }
-const TRISTATE_Z_VALUE: u8 = (-1 as i8) as u8;
-const TRISTATE_X_VALUE: u8 = (-2 as i8) as u8;
+const TRISTATE_Z_VALUE: u8 = -1_i8 as u8;
+const TRISTATE_X_VALUE: u8 = -2_i8 as u8;
 
 impl From<u8> for TriState {
     fn from(num: u8) -> Self {
@@ -98,9 +98,9 @@ impl From<u8> for TriState {
         }
     }
 }
-impl Into<u8> for TriState {
-    fn into(self) -> u8 {
-        match self {
+impl From<TriState> for u8 {
+    fn from(state: TriState) -> Self {
+        match state {
             TriState::Zero => 0,
             TriState::One => 1,
             TriState::Z => TRISTATE_Z_VALUE,
@@ -109,6 +109,7 @@ impl Into<u8> for TriState {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 enum InputPad {
     RnW = ffi::PPUSim_InputPad_RnW as isize,
     RS0 = ffi::PPUSim_InputPad_RS0 as isize,
@@ -119,6 +120,7 @@ enum InputPad {
     n_RES = ffi::PPUSim_InputPad_n_RES as isize,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 enum OutputPad {
     n_INT = ffi::PPUSim_OutputPad_n_INT as isize,
 
@@ -437,6 +439,7 @@ impl PpuSim {
                 };
                 match self.expected_reads.pop_front() {
                     Some((ppu_addr, ppu_val, ppu_dot, ppu_line)) => {
+                        #[allow(clippy::collapsible_else_if)]
                         if ppu_addr == address && ppu_val == data {
                             println!("Matching PPU SIM: read 0x{address:04x} = 0x{data:02x}, ppu/sim dot {}/{}, line {}/{}", ppu_dot, self.h_counter(), ppu_line, self.v_counter());
                         } else {
@@ -549,10 +552,10 @@ impl PpuSim {
 
                 let fb = self.framebuffer.data.as_mut_ptr();
                 let fb_off = v_cnt * FRAMEBUFFER_STRIDE + (h_cnt * FRAMEBUFFER_BPP);
-                debug_assert!(fb_off < FRAMEBUFFER_STRIDE * 240 as usize);
+                debug_assert!(fb_off < FRAMEBUFFER_STRIDE * 240_usize);
                 let fb_off = fb_off as isize;
                 unsafe {
-                    *fb.offset(fb_off + 0) = vout_rgb.RGB.RED;
+                    *fb.offset(fb_off) = vout_rgb.RGB.RED;
                     *fb.offset(fb_off + 1) = vout_rgb.RGB.GREEN;
                     *fb.offset(fb_off + 2) = vout_rgb.RGB.BLUE;
                     *fb.offset(fb_off + 3) = 0xff;
@@ -575,7 +578,7 @@ impl PpuSim {
             interrupt_neg = TriState::One;
         }
         self.nmi_interrupt_raised = interrupt_neg == TriState::Zero;
-        if self.nmi_interrupt_raised && self.prev_nmi_interrupt_raised == false {
+        if self.nmi_interrupt_raised && !self.prev_nmi_interrupt_raised {
             println!(
                 "SIM NMI raise at line = {}, dot = {}",
                 self.v_counter(),
@@ -752,7 +755,7 @@ fn ppu_sim_step() {
                 for i in 0..(clk_per_pclk * 2) {
                     ppu.step_half(&mut cartridge);
                 }
-                if ppu.nmi_interrupt_raised && nmi_prev == false {
+                if ppu.nmi_interrupt_raised && !nmi_prev {
                     println!("SIM Frame {i}, NMI raised at line = {line}, dot = {dot}");
                 }
                 nmi_prev = ppu.nmi_interrupt_raised;

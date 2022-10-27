@@ -11,30 +11,36 @@ use super::mirror_vram_address;
 
 /// iNES Mapper 003: AKA CNROM
 ///
-/// PRG ROM size: 16 KiB or 32 KiB
-/// PRG ROM bank size: Not bankswitched
-/// PRG RAM: None
-/// CHR capacity: Up to 2048 KiB ROM
-/// CHR bank size: 8 KiB
-/// Nametable mirroring: Fixed vertical or horizontal mirroring
-/// Subject to bus conflicts: Yes (CNROM), but not all compatible boards have bus conflicts.
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | PRG ROM size | 16 KiB or 32 KiB |
+/// | PRG ROM bank size | Not bank switched |
+/// | PRG RAM | None |
+/// | CHR capacity | Up to 2048 KiB ROM |
+/// | CHR bank size | 8 KiB |
+/// | Nametable mirroring | Fixed vertical or horizontal mirroring |
+/// | Subject to bus conflicts | Yes (CNROM), but not all compatible boards have bus conflicts. |
 ///
-/// Example Games:
+/// # Example Games:
 /// * Solomon's Key
 /// * Arkanoid
 /// * Arkista's Ring
 /// * Bump 'n' Jump
 /// * Cybernoid
 ///
-/// "For 16 KB PRG ROM testing, Joust (NES) makes a worthwhile test subject."
+/// # Details
 ///
-/// "Many CNROM games such as Milon's Secret Castle store data tables in
+/// _nesdev:_
+/// > "For 16 KB PRG ROM testing, Joust (NES) makes a worthwhile test subject."
+///
+/// > "Many CNROM games such as Milon's Secret Castle store data tables in
 /// otherwise unused portions of CHR ROM and access them through PPUDATA ($2007)
 /// reads. If an emulator can show the title screen of the NROM game Super Mario
 /// Bros., but CNROM games don't work, the emulator's PPUDATA readback is likely
 /// failing to consider CHR ROM bankswitching."
 ///
-/// "The game Cybernoid seems to behave very strangely. It uses unprepared
+/// > "The game Cybernoid seems to behave very strangely. It uses unprepared
 /// system RAM, and it actually relies on bus conflicts (AND written value with
 /// value read from address)! This bug manifests by CHR corruptions when the
 /// player changes the audio from sound effects to music playback."
@@ -103,7 +109,7 @@ impl Mapper3 {
                 let off = addr - 0xc000;
                 arr_read!(self.prg_rom1, off as usize)
             }
-            _ => return 0,
+            _ => 0,
         }
     }
 }
@@ -124,16 +130,13 @@ impl Mapper for Mapper3 {
     fn system_bus_write(&mut self, addr: u16, mut data: u8) {
         if self.has_bus_conflicts {
             let conflicting_read = self.system_bus_read_direct(addr);
-            data = data & conflicting_read;
+            data &= conflicting_read;
         }
 
-        match addr {
-            0x8000..=0xffff => {
-                // CHR Bank Select
-                let page_select = data & self.chr_bank_select_mask;
-                self.chr_bank = PAGE_SIZE_8K * page_select as usize;
-            }
-            _ => {}
+        if let 0x8000..=0xffff = addr {
+            // CHR Bank Select
+            let page_select = data & self.chr_bank_select_mask;
+            self.chr_bank = PAGE_SIZE_8K * page_select as usize;
         }
     }
 
@@ -155,15 +158,8 @@ impl Mapper for Mapper3 {
     }
 
     fn ppu_bus_write(&mut self, addr: u16, data: u8) {
-        match addr {
-            //0x0000..=0x1fff => {
-            //    arr_write!(self.chr_data, self.chr_bank + addr as usize, data);
-            //}
-            0x2000..=0x3fff => {
-                // VRAM
-                arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
-            }
-            _ => {}
+        if let 0x2000..=0x3fff = addr {
+            arr_write!(self.vram, mirror_vram_address(addr, self.vram_mirror), data);
         }
     }
 

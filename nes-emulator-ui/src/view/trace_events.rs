@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
 use egui::{epaint, pos2, vec2, Painter, Rect, TextureHandle, Ui};
 use nes_emulator::{
@@ -317,6 +317,7 @@ impl TraceEventsView {
                     }
                     0x17 => {
                         // READ = controller port 2, WRITE = APU
+                        #[allow(clippy::collapsible_else_if)]
                         if read {
                             if self.show_port_register_io {
                                 return true;
@@ -344,6 +345,7 @@ impl TraceEventsView {
     ///
     /// Returns: (next_line, modified-scanline, modified-next-scanline)
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     fn process_main_events_line<F: Fn(u64) -> u64, C: Fn(usize) -> bool>(
         &mut self,
         nes: &mut Nes,
@@ -353,8 +355,8 @@ impl TraceEventsView {
         ppu_to_cpu_mapper: F,
         line_start_index: usize, // in-out
         line_start_cpu_clk: u64,
-        scanline_view: &mut Vec<DotView>,
-        next_scanline_view: &mut Vec<DotView>,
+        scanline_view: &mut [DotView],
+        next_scanline_view: &mut [DotView],
     ) -> (Option<(u64, u16, usize)>, bool, bool) {
         let mut found_next_line = None;
         let mut modified_scanline = false;
@@ -484,7 +486,8 @@ impl TraceEventsView {
                 | TraceEvent::CpuDmaRead { clk_lower, .. }
                 | TraceEvent::CpuDmaWrite { clk_lower, .. }
                 | TraceEvent::CpuInterruptStatus { clk_lower, .. } => {
-                    let mut full_clk = line_start_cpu_clk & 0xffffffff_ffffff00 | *clk_lower as u64;
+                    let mut full_clk =
+                        line_start_cpu_clk & 0xffff_ffff_ffff_ff00 | *clk_lower as u64;
                     if full_clk < line_start_cpu_clk {
                         // check if there was an overflow in the lower 8 bits
                         full_clk += 256
@@ -576,6 +579,7 @@ impl TraceEventsView {
 
     /// Returns: (found-next-line, modified-scanline, modified-next-scanline)
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     fn process_secondary_apu_events_line<C: Fn(usize) -> bool>(
         &mut self,
         nes: &mut Nes,
@@ -585,8 +589,8 @@ impl TraceEventsView {
         show_current_events: bool,
         line_start_index: usize,
         line_start_cpu_clk: u64,
-        scanline_view: &mut Vec<DotView>,
-        next_scanline_view: &mut Vec<DotView>,
+        scanline_view: &mut [DotView],
+        next_scanline_view: &mut [DotView],
     ) -> (Option<(u64, usize)>, bool, bool) {
         let mut found_next_line = None;
         let mut modified_scanline = false;
@@ -617,7 +621,8 @@ impl TraceEventsView {
                 TraceEvent::ApuFrameSeqFrame { clk_lower, .. }
                 | TraceEvent::ApuMixerOut { clk_lower, .. }
                 | TraceEvent::ApuIrqRaised { clk_lower, .. } => {
-                    let mut full_clk = line_start_cpu_clk & 0xffffffff_ffffff00 | *clk_lower as u64;
+                    let mut full_clk =
+                        line_start_cpu_clk & 0xffff_ffff_ffff_ff00 | *clk_lower as u64;
                     if full_clk < line_start_cpu_clk {
                         // check if there was an overflow in the lower 8 bits
                         full_clk += 256
@@ -707,6 +712,7 @@ impl TraceEventsView {
         (found_next_line, modified_scanline, modified_next_scanline)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_dot_view(
         &mut self,
         _nes: &mut Nes,
@@ -861,18 +867,18 @@ impl TraceEventsView {
                 let uv_rect =
                     egui::Rect::from_min_max(pos2(0.0, uv_line_top), pos2(1.0, uv_line_bottom));
 
-                if line < current_ppu_line {
-                    mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::WHITE);
-                } else if line == current_ppu_line {
-                    mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::WHITE);
-                } else {
-                    mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::LIGHT_GRAY);
+                match line.cmp(&current_ppu_line) {
+                    Ordering::Less => mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::WHITE),
+                    Ordering::Equal => mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::WHITE),
+                    Ordering::Greater => {
+                        mesh.add_rect_with_uv(rect, uv_rect, egui::Color32::LIGHT_GRAY)
+                    }
                 }
             }
         }
         painter.add(egui::Shape::mesh(mesh));
 
-        let show_current_events = if self.paused { true } else { false };
+        let show_current_events = self.paused;
 
         // Returns true if the dot isn't within the horizontal span of the viewport
         let dot_horizontal_cull = |dot: usize| -> bool {
@@ -984,12 +990,7 @@ impl TraceEventsView {
             // immediately since we still have to find the next line start even if we
             // aren't rendering this line
             let cull_line =
-                if line_y_gap_max < viewport_rect.min.y || line_y_gap_min > viewport_rect.max.y {
-                    //println!("Culling line {current_line} line");
-                    true
-                } else {
-                    false
-                };
+                line_y_gap_max < viewport_rect.min.y || line_y_gap_min > viewport_rect.max.y;
 
             // Temporarily pluck the scanline_view and next_scanline_view vectors out of self
             // so we can access self state while also updating view state
@@ -1075,7 +1076,7 @@ impl TraceEventsView {
                 //
                 // NB: The current scanline_view may contain overflow state from the previous line still so may not
                 // be clear even though the process_ methods shouldn't have updated it.
-                debug_assert_eq!(next_scanline_view_is_clear, true);
+                debug_assert!(next_scanline_view_is_clear);
 
                 // HACK: disabled culling
                 //continue; // Skip the rendering

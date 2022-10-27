@@ -93,7 +93,7 @@ impl Cartridge {
 
         println!("NSF Config = {config:#?}");
 
-        let mapper = Box::new(Mapper31::new(&config, &nsf[128..(prg_len as usize)]));
+        let mapper = Box::new(Mapper31::new(config, &nsf[128..(prg_len as usize)]));
         Ok(Cartridge {
             config: NesBinaryConfig::Nsf(config.clone()),
             mapper,
@@ -162,6 +162,7 @@ impl Cartridge {
                     "Inconsistent binary size: couldn't read trainer data"
                 ));
             }
+            #[allow(clippy::needless_range_loop)] // clippy suggestion is ridiculous!
             for i in ines_start..ines_end {
                 mapper.system_bus_write(0x7000 + (i as u16), ines[i]);
             }
@@ -240,12 +241,13 @@ impl Cartridge {
     /// I/O
     pub fn vram_read(&mut self, addr: u16) -> u8 {
         //println!("VRAM: read {addr:04x}");
-        let val = self.mapper.ppu_bus_read(addr);
+        self.mapper.ppu_bus_read(addr)
 
+        //let val = self.mapper.ppu_bus_read(addr);
         //if addr < 0x2400 {
         //    println!("read {val} from {addr}");
         //}
-        val
+        //val
     }
 
     /// An alias for [`Self::ppu_bus_peek`]
@@ -254,12 +256,13 @@ impl Cartridge {
     /// debugging / tracing that will want to easily differentiate VRAM
     /// I/O
     pub fn vram_peek(&mut self, addr: u16) -> u8 {
-        let val = self.mapper.ppu_bus_peek(addr);
+        self.mapper.ppu_bus_peek(addr)
 
+        //let val = self.mapper.ppu_bus_peek(addr);
         //if addr < 0x2400 {
         //    println!("read {val} from {addr}");
         //}
-        val
+        //val
     }
 
     /// An alias for [`Self::ppu_bus_write`]

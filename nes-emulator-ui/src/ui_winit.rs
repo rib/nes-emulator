@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use winit::{
     event::Event::*,
-    event_loop::{ControlFlow, EventLoopWindowTarget, EventLoopBuilder},
+    event_loop::{ControlFlow, EventLoopBuilder, EventLoopWindowTarget},
 };
 
 use egui_wgpu::winit::Painter;
@@ -37,7 +37,7 @@ fn create_window<T>(
             width: INITIAL_WIDTH,
             height: INITIAL_HEIGHT,
         })
-        .build(&event_loop)
+        .build(event_loop)
         .unwrap();
 
     unsafe { painter.set_window(Some(&window)) };
@@ -58,7 +58,8 @@ fn create_window<T>(
 }
 
 pub fn ui_winit_main(args: Args) -> Result<()> {
-    let event_loop: winit::event_loop::EventLoop<Event> = EventLoopBuilder::with_user_event().build();
+    let event_loop: winit::event_loop::EventLoop<Event> =
+        EventLoopBuilder::with_user_event().build();
 
     let ctx = egui::Context::default();
 
@@ -149,7 +150,7 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
                     // an optional deadline instant instead.
                     if *control_flow != winit::event_loop::ControlFlow::Exit {
                         *control_flow =
-                            if full_output.repaint_after.is_zero() || emulator_ui.paused == false {
+                            if full_output.repaint_after.is_zero() || !emulator_ui.paused {
                                 window.request_redraw();
                                 winit::event_loop::ControlFlow::Poll
                             } else if let Some(repaint_after_instant) =
@@ -175,7 +176,7 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
             //UserEvent(ref user_event) => {
             //}
             WindowEvent { event, .. } => {
-                if winit_state.on_event(&ctx, &event) == false {
+                if !winit_state.on_event(&ctx, &event) {
                     match event {
                         winit::event::WindowEvent::Resized(size) => {
                             painter.on_window_resized(size.width, size.height);

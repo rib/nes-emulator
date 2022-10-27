@@ -11,13 +11,16 @@ use super::mirror_vram_address;
 
 /// iNES Mapper 002: AKA UxROM
 ///
-/// PRG ROM capacity	256K/4096K
-/// PRG ROM window	16K + 16K fixed
-/// PRG RAM capacity	None
-/// CHR capacity	8K
-/// CHR window	n/a
-/// Nametable mirroring	Fixed H or V, controlled by solder pads
-/// Bus conflicts	Yes/No (original UxROM HW had conflicts but emulators should assume no conflicts for this mapper)
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | PRG ROM capacity | 256K/4096K |
+/// | PRG ROM window | 16K + 16K fixed |
+/// | PRG RAM capacity | None |
+/// | CHR capacity | 8K |
+/// | CHR window | n/a |
+/// | Nametable mirroring | Fixed H or V, controlled by solder pads |
+/// | Bus conflicts | Yes/No (original UxROM HW had conflicts but emulators should assume no conflicts for this mapper) |
 ///
 /// # Example games:
 /// * Mega Man
@@ -93,7 +96,7 @@ impl Mapper2 {
                 let off = addr as usize - 0xc000 + self.bank1_offset;
                 arr_read!(self.prg_rom, off)
             }
-            _ => return 0,
+            _ => 0,
         }
     }
 }
@@ -116,16 +119,13 @@ impl Mapper for Mapper2 {
     fn system_bus_write(&mut self, addr: u16, mut data: u8) {
         if self.has_bus_conflicts {
             let conflicting_read = self.system_bus_read_direct(addr);
-            data = data & conflicting_read;
+            data &= conflicting_read;
         }
 
-        match addr {
-            0x8000..=0xffff => {
-                // PRG Bank Select
-                let page_select = (data & self.bank0_select_mask) % self.n_prg_pages;
-                self.bank0_offset = PAGE_SIZE_16K * (page_select as usize);
-            }
-            _ => {}
+        if let 0x8000..=0xffff = addr {
+            // PRG Bank Select
+            let page_select = (data & self.bank0_select_mask) % self.n_prg_pages;
+            self.bank0_offset = PAGE_SIZE_16K * (page_select as usize);
         }
     }
 

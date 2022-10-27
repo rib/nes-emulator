@@ -122,7 +122,7 @@ impl BenchmarkState {
     pub fn end_frame(&mut self) {
         let now = Instant::now();
         let frame_duration = now - self.last_frame_time;
-        self.profiled_last_fps = (1.0 as f64 / frame_duration.as_secs_f64()) as f32;
+        self.profiled_last_fps = (1.0f64 / frame_duration.as_secs_f64()) as f32;
         self.last_frame_time = now;
         self.frame_count += 1;
     }

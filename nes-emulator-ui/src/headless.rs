@@ -23,7 +23,7 @@ use crate::{
 const DUMMY_AUDIO_SAMPLE_RATE: u32 = 48000;
 
 fn progress_nes_emulation(nes: &mut Nes, stats: &mut BenchmarkState) -> bool {
-    stats.start_update(&nes, Instant::now());
+    stats.start_update(nes, Instant::now());
 
     let mut breakpoint = false;
     match nes.progress(ProgressTarget::FrameReady) {
@@ -36,7 +36,7 @@ fn progress_nes_emulation(nes: &mut Nes, stats: &mut BenchmarkState) -> bool {
         }
     }
 
-    stats.end_update(&nes);
+    stats.end_update(nes);
 
     breakpoint
 }
@@ -77,7 +77,7 @@ fn save_check_failed_image(nes: &mut Nes, name: &String, expected_failure: bool)
 
 fn setup_new_nes(
     rom_path: impl AsRef<Path>,
-    rom_dirs: &Vec<PathBuf>,
+    rom_dirs: &[PathBuf],
     audio_sample_rate: u32,
     trace_file: Option<&String>,
 ) -> Result<Nes> {
@@ -110,7 +110,7 @@ fn setup_new_nes(
     Ok(nes)
 }
 
-pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String) -> Result<()> {
+pub fn run_macros(args: &crate::Args, rom_dirs: &[PathBuf], library: &String) -> Result<()> {
     let shared_crc32 = Rc::new(RefCell::new(0u32));
 
     let mut nes = Nes::new(Model::Ntsc, DUMMY_AUDIO_SAMPLE_RATE, Instant::now());
@@ -128,7 +128,7 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
 
                 nes = setup_new_nes(
                     &next_macro.rom,
-                    &rom_dirs,
+                    rom_dirs,
                     DUMMY_AUDIO_SAMPLE_RATE,
                     args.trace.as_ref(),
                 )?;
@@ -163,6 +163,7 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
 
         if let Some(player) = &mut macro_player {
             if !player.playing() {
+                #[allow(clippy::collapsible_else_if)]
                 if player.all_checks_passed() {
                     if player.checks_for_failure() {
                         log::warn!("FAILED (as expected): {}", player.name());
@@ -188,9 +189,9 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &Vec<PathBuf>, library: &String)
     Ok(())
 }
 
-pub fn run_single_rom(args: &crate::Args, rom_dirs: &Vec<PathBuf>) -> Result<()> {
+pub fn run_single_rom(args: &crate::Args, rom_dirs: &[PathBuf]) -> Result<()> {
     let rom_path = match &args.rom {
-        Some(rom) => utils::find_rom(rom, &rom_dirs),
+        Some(rom) => utils::find_rom(rom, rom_dirs),
         None => None,
     };
     let rom_path = match rom_path {
@@ -203,7 +204,7 @@ pub fn run_single_rom(args: &crate::Args, rom_dirs: &Vec<PathBuf>) -> Result<()>
 
     let mut nes = setup_new_nes(
         rom_path,
-        &rom_dirs,
+        rom_dirs,
         DUMMY_AUDIO_SAMPLE_RATE,
         args.trace.as_ref(),
     )?;

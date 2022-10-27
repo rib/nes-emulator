@@ -86,9 +86,9 @@ impl FrameSequencer {
         // XXX: This seems to conflict with the observation below, but there are explicit tests for this
         // behaviour. e.g. apu_test/rom_singles/1-len_ctr.nes does two back-to-back writes of $80 to $4017
         // with a length counter of two and expects that the APU will be silenced.
-        if value & 0b1000_0000 != 0 {
-        } else {
-        }
+        //if value & 0b1000_0000 != 0 {
+        //} else {
+        //}
 
         // "If the write occurs during an APU cycle, the effects occur 3 CPU cycles after the $4017 write cycle,
         // and if the write occurs between APU cycles, the effects occurs 4 CPU cycles after the write cycle."
@@ -126,7 +126,7 @@ impl FrameSequencer {
 
         self.interrupt_enable = (value & 0b0100_0000) == 0;
         // "Interrupt inhibit flag. If set, the frame interrupt flag is cleared, otherwise it is unaffected"
-        if self.interrupt_enable == false {
+        if !self.interrupt_enable {
             self.interrupt_flagged = false;
         }
     }

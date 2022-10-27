@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::{
     cell::{Cell, RefCell},
-    path::PathBuf,
+    path::Path,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -15,7 +15,6 @@ use nes_emulator::{
     ppu::{DotBreakpointCallbackAction, DotBreakpointHandle},
 };
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacroWait {
@@ -95,7 +94,7 @@ pub struct Macro {
 
 pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(
     path: P,
-    filter: &Vec<String>,
+    filter: &[String],
 ) -> Result<Vec<Macro>> {
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(file);
@@ -140,17 +139,19 @@ pub fn register_frame_crc_hasher(nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) 
         }))
 }
 
-pub fn name_from_rom_path(path: &PathBuf, default_name: String) -> String {
+pub fn name_from_rom_path(path: &Path, default_name: String) -> String {
     let components: Vec<String> = path
         .iter()
         .map(|c| c.to_string_lossy().to_string())
         .collect();
 
-    if components.len() == 0 {
+    if components.is_empty() {
         return default_name;
     }
 
-    if &components[0] == &std::path::MAIN_SEPARATOR.to_string() {
+    // TODO: use std::path::MAIN_SEPARATOR_STR
+    // ref: https://github.com/rust-lang/rust/issues/94071
+    if components[0] == std::path::MAIN_SEPARATOR.to_string() {
         return default_name;
     }
 
@@ -172,6 +173,8 @@ pub fn name_from_rom_path(path: &PathBuf, default_name: String) -> String {
     }
 }
 
+type MacroCheckFailureCallback = Box<dyn FnMut(&mut Nes, &String, &HashSet<String>, String)>;
+
 pub struct MacroPlayer {
     recording: Macro,
     all_checks_passed: bool,
@@ -180,7 +183,7 @@ pub struct MacroPlayer {
     //waiting_for_dot: bool,
     wait_breakpoint: Option<DotBreakpointHandle>,
     wait_update_timestamp: Instant,
-    check_failure_callback: Option<Box<dyn FnMut(&mut Nes, &String, &HashSet<String>, String)>>,
+    check_failure_callback: Option<MacroCheckFailureCallback>,
 }
 impl MacroPlayer {
     pub fn new(recording: Macro, nes: &mut Nes, shared_crc32: Rc<RefCell<u32>>) -> Self {
@@ -199,7 +202,7 @@ impl MacroPlayer {
             })
             .collect();
 
-        nes.set_game_genie_codes(genie_codes.clone());
+        nes.set_game_genie_codes(genie_codes);
 
         Self {
             recording,
@@ -229,10 +232,7 @@ impl MacroPlayer {
         }
     }
 
-    pub fn set_check_failure_callback(
-        &mut self,
-        callback: Box<dyn FnMut(&mut Nes, &String, &HashSet<String>, String)>,
-    ) {
+    pub fn set_check_failure_callback(&mut self, callback: MacroCheckFailureCallback) {
         self.check_failure_callback = Some(callback);
     }
 

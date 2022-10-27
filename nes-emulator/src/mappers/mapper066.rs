@@ -11,14 +11,17 @@ use super::mirror_vram_address;
 
 /// iNES Mapper 066: AKA GxROM
 ///
-/// Boards	GNROM,MHROM
-/// PRG ROM capacity	128KiB (512KiB oversize)
-/// PRG ROM window	32KiB
-/// PRG RAM capacity	None
-/// CHR capacity	32KiB (128KiB oversize)
-/// CHR window	8KiB
-/// Nametable mirroring	Fixed H or V, controlled by solder pads
-/// Bus conflicts	Yes
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | Boards | GNROM,MHROM |
+/// | PRG ROM capacity | 128KiB (512KiB oversize) |
+/// | PRG ROM window | 32KiB |
+/// | PRG RAM capacity | None |
+/// | CHR capacity | 32KiB (128KiB oversize) |
+/// | CHR window | 8KiB |
+/// | Nametable mirroring | Fixed H or V, controlled by solder pads |
+/// | Bus conflicts | Yes |
 ///
 /// # Example games:
 /// * Doraemon
@@ -28,16 +31,14 @@ use super::mirror_vram_address;
 /// * Super Mario Bros. + Duck Hunt (MHROM)
 ///
 /// # Board Types
-/// -------------------------------
 /// | Board |   PRG  |     CHR    |
 /// |-------|--------|------------|
-/// | GNROM	| 128 KB | 32 KB      |
-/// | MHROM	| 64 KB	 | 16 / 32 KB |
-/// -------------------------------
+/// | GNROM | 128 KB | 32 KB      |
+/// | MHROM | 64 KB  | 16 / 32 KB |
 ///
 /// # Banks
-/// CPU $8000-$FFFF: 32 KB switchable PRG ROM bank
-/// PPU $0000-$1FFF: 8 KB switchable CHR ROM bank
+/// - CPU $8000-$FFFF: 32 KB switchable PRG ROM bank
+/// - PPU $0000-$1FFF: 8 KB switchable CHR ROM bank
 ///
 #[derive(Clone)]
 pub struct Mapper66 {
@@ -109,7 +110,7 @@ impl Mapper66 {
                 //println!("PRG reading @ {off}/{off:x} (bank off = {}/{:x}) (address = {addr:04x})", self.prg_bank_offset, self.prg_bank_offset);
                 arr_read!(self.prg_rom, off)
             }
-            _ => return 0,
+            _ => 0,
         }
     }
 }
@@ -130,20 +131,16 @@ impl Mapper for Mapper66 {
     fn system_bus_write(&mut self, addr: u16, mut data: u8) {
         // Apply bus conflicts
         let conflicting_read = self.system_bus_read_direct(addr);
-        data = data & conflicting_read;
+        data &= conflicting_read;
 
-        match addr {
-            0x8000..=0xffff => {
-                // Bank Select
-                let prg_page_select =
-                    (((data & 0b1111_0000) >> 4) & self.prg_bank_select_mask) % self.n_prg_pages;
-                self.prg_bank_offset = PAGE_SIZE_32K * (prg_page_select as usize);
-                let chr_page_select =
-                    ((data & 0b1111) & self.chr_bank_select_mask) % self.n_chr_pages;
-                self.chr_bank_offset = PAGE_SIZE_8K * (chr_page_select as usize);
-                //log::debug!("Mapper066: Bank Select via {addr:4x} {data:08b}, prg page = {prg_page_select}, prg offset = {}/{:x}", self.prg_bank_offset, self.prg_bank_offset);
-            }
-            _ => {}
+        if let 0x8000..=0xffff = addr {
+            // Bank Select
+            let prg_page_select =
+                (((data & 0b1111_0000) >> 4) & self.prg_bank_select_mask) % self.n_prg_pages;
+            self.prg_bank_offset = PAGE_SIZE_32K * (prg_page_select as usize);
+            let chr_page_select = ((data & 0b1111) & self.chr_bank_select_mask) % self.n_chr_pages;
+            self.chr_bank_offset = PAGE_SIZE_8K * (chr_page_select as usize);
+            //log::debug!("Mapper066: Bank Select via {addr:4x} {data:08b}, prg page = {prg_page_select}, prg offset = {}/{:x}", self.prg_bank_offset, self.prg_bank_offset);
         }
     }
 

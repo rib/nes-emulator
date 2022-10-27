@@ -71,12 +71,9 @@ impl DebuggerView {
                                                 let (instruction, operand) =
                                                     nes.peek_instruction(pc);
 
-                                                ui.label(format!(
-                                                    "{}",
-                                                    instruction.disassemble(
-                                                        operand.raw_operand,
-                                                        operand.operand
-                                                    )
+                                                ui.label(instruction.disassemble(
+                                                    operand.raw_operand,
+                                                    operand.operand,
                                                 ));
                                             });
                                         });

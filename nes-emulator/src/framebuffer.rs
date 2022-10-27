@@ -146,7 +146,7 @@ impl FramebufferDataRental {
             PixelFormat::RGBA8888 => {
                 let stride = self.owner.width * 4;
                 let off = stride * y + x * 4;
-                self.data[off + 0] = color[0];
+                self.data[off] = color[0];
                 self.data[off + 1] = color[1];
                 self.data[off + 2] = color[2];
                 self.data[off + 3] = color[3];
@@ -154,7 +154,7 @@ impl FramebufferDataRental {
             PixelFormat::RGB888 => {
                 let stride = self.owner.width * 3;
                 let off = stride * y + x * 3;
-                self.data[off + 0] = color[0];
+                self.data[off] = color[0];
                 self.data[off + 1] = color[1];
                 self.data[off + 2] = color[2];
             }
@@ -262,7 +262,7 @@ impl FramebufferDataRental {
     }
 }
 
-impl<'a> Framebuffer {
+impl Framebuffer {
     /// Creates an empty, zero-sized, place-holder framebuffer
     pub fn empty() -> Self {
         Framebuffer::new(0, 0, PixelFormat::RGBA8888)
@@ -296,14 +296,10 @@ impl<'a> Framebuffer {
             guard.data.take()
         };
 
-        if let Some(data) = data {
-            Some(FramebufferDataRental {
-                owner: self.clone(),
-                data,
-            })
-        } else {
-            None
-        }
+        data.map(|data| FramebufferDataRental {
+            owner: self.clone(),
+            data,
+        })
     }
 
     fn return_rental_data(&mut self, rental_data: Vec<u8>) {

@@ -10,28 +10,31 @@ use super::mirror_vram_address;
 
 /// iNES Mapper 004: AKA MMC3
 ///
-/// PRG ROM capacity	512K
-/// PRG ROM window	8K + 8K + 16K fixed
-/// PRG RAM capacity	8K
-/// PRG RAM window	8K
-/// CHR capacity	256K
-/// CHR window	2Kx2 + 1Kx4
-/// Nametable mirroring	H or V, switchable, or 4 fixed
-/// Bus conflicts	No
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | PRG ROM capacity | 512K |
+/// | PRG ROM window | 8K + 8K + 16K fixed |
+/// | PRG RAM capacity | 8K |
+/// | PRG RAM window | 8K |
+/// | CHR capacity | 256K |
+/// | CHR window | 2Kx2 + 1Kx4 |
+/// | Nametable mirroring | H or V, switchable, or 4 fixed |
+/// | Bus conflicts | No |
 ///
 /// # Banks
 ///
-/// CPU $6000-$7FFF: 8 KB PRG RAM bank (optional)
-/// CPU $8000-$9FFF (or $C000-$DFFF): 8 KB switchable PRG ROM bank
-/// CPU $A000-$BFFF: 8 KB switchable PRG ROM bank
-/// CPU $C000-$DFFF (or $8000-$9FFF): 8 KB PRG ROM bank, fixed to the second-last bank
-/// CPU $E000-$FFFF: 8 KB PRG ROM bank, fixed to the last bank
-/// PPU $0000-$07FF (or $1000-$17FF): 2 KB switchable CHR bank
-/// PPU $0800-$0FFF (or $1800-$1FFF): 2 KB switchable CHR bank
-/// PPU $1000-$13FF (or $0000-$03FF): 1 KB switchable CHR bank
-/// PPU $1400-$17FF (or $0400-$07FF): 1 KB switchable CHR bank
-/// PPU $1800-$1BFF (or $0800-$0BFF): 1 KB switchable CHR bank
-/// PPU $1C00-$1FFF (or $0C00-$0FFF): 1 KB switchable CHR bank
+/// - CPU $6000-$7FFF: 8 KB PRG RAM bank (optional)
+/// - CPU $8000-$9FFF (or $C000-$DFFF): 8 KB switchable PRG ROM bank
+/// - CPU $A000-$BFFF: 8 KB switchable PRG ROM bank
+/// - CPU $C000-$DFFF (or $8000-$9FFF): 8 KB PRG ROM bank, fixed to the second-last bank
+/// - CPU $E000-$FFFF: 8 KB PRG ROM bank, fixed to the last bank
+/// - PPU $0000-$07FF (or $1000-$17FF): 2 KB switchable CHR bank
+/// - PPU $0800-$0FFF (or $1800-$1FFF): 2 KB switchable CHR bank
+/// - PPU $1000-$13FF (or $0000-$03FF): 1 KB switchable CHR bank
+/// - PPU $1400-$17FF (or $0400-$07FF): 1 KB switchable CHR bank
+/// - PPU $1800-$1BFF (or $0800-$0BFF): 1 KB switchable CHR bank
+/// - PPU $1C00-$1FFF (or $0C00-$0FFF): 1 KB switchable CHR bank
 ///
 #[derive(Clone)]
 pub struct Mapper4 {
@@ -171,7 +174,7 @@ impl Mapper4 {
     #[inline]
     fn chr_offset_from_address(&self, addr: u16) -> usize {
         match addr {
-            0x0000..=0x03ff => addr as usize - 0x0000 + self.chr_banks[0],
+            0x0000..=0x03ff => addr as usize + self.chr_banks[0],
             0x0400..=0x07ff => addr as usize - 0x0400 + self.chr_banks[1],
             0x0800..=0x0bff => addr as usize - 0x0800 + self.chr_banks[2],
             0x0c00..=0x0fff => addr as usize - 0x0c00 + self.chr_banks[3],
@@ -268,8 +271,8 @@ impl Mapper for Mapper4 {
                 if addr & 1 == 0 {
                     // Bank Select
                     self.register_select = (data & 0b111) as usize;
-                    let swap_prg_banks = if data & 0b0100_0000 == 0 { false } else { true };
-                    let swap_chr_banks = if data & 0b1000_0000 == 0 { false } else { true };
+                    let swap_prg_banks = data & 0b0100_0000 != 0;
+                    let swap_chr_banks = data & 0b1000_0000 != 0;
 
                     if self.swap_prg_banks != swap_prg_banks {
                         self.swap_prg_banks = swap_prg_banks;
@@ -411,10 +414,8 @@ impl Mapper for Mapper4 {
 
                 self.a12_low_clock = None;
             }
-        } else {
-            if self.a12_low_clock.is_none() {
-                self.a12_low_clock = Some(cpu_clock);
-            }
+        } else if self.a12_low_clock.is_none() {
+            self.a12_low_clock = Some(cpu_clock);
         }
     }
 

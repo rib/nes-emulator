@@ -265,9 +265,13 @@ impl IndexMut<usize> for Arr256 {
     }
 }
 impl Arr256 {
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior even if the resulting reference is not used.
     pub unsafe fn get_unchecked(&self, index: usize) -> &u8 {
         self.0.get_unchecked(index)
     }
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior even if the resulting reference is not used.
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut u8 {
         self.0.get_unchecked_mut(index)
     }
@@ -643,7 +647,9 @@ impl Ppu {
 
     /// Perform an unbuffered ppu bus read
     fn unbuffered_ppu_bus_read(&mut self, cartridge: &mut Cartridge, addr: u16) -> u8 {
-        let value = if let 0x3f00..=0x3fff = addr {
+        #[allow(clippy::let_and_return)]
+        //let value =
+        if let 0x3f00..=0x3fff = addr {
             self.palette_read(addr)
         } else {
             let value = cartridge.vram_read(addr);
@@ -656,13 +662,13 @@ impl Ppu {
             }
 
             value
-        };
+        }
 
         //println!("ppu bus read 0x{addr:04x} = 0x{value:02x}, h={}, v={}", self.dot, self.line);
         //if self.dot == 259 {
         //    panic!("unexpected PPU read");
         //}
-        value
+        //value
     }
 
     /// Peek what an unbuffered ppu bus read would fetch without any side effects
@@ -708,8 +714,7 @@ impl Ppu {
     }
 
     pub fn finish_peek_with_latch(&mut self, value: u8, undefined_bits: u8) -> u8 {
-        let read = (value & !undefined_bits) | (self.io_latch_value & undefined_bits);
-        read
+        (value & !undefined_bits) | (self.io_latch_value & undefined_bits)
     }
 
     /// Directly read OAM data from the current OAMADDR offset
@@ -1262,8 +1267,8 @@ impl Ppu {
     /// Query the current pattern state from the shift registers, for debugging
     pub fn peek_shift_register_patterns(&self) -> [u8; 16] {
         let mut patterns = [0u8; 16];
-        for i in 0..16 {
-            patterns[i] = self.select_bg_pattern_from_shift_registers(i);
+        for (i, entry) in patterns.iter_mut().enumerate() {
+            *entry = self.select_bg_pattern_from_shift_registers(i);
         }
         patterns
     }
@@ -1271,8 +1276,8 @@ impl Ppu {
     /// Query the current palette state from the shift registers, for debugging
     pub fn peek_shift_register_palettes(&self) -> [u8; 8] {
         let mut palettes = [0u8; 8];
-        for i in 0..8 {
-            palettes[i] = self.select_bg_palette_from_shift_registers(i);
+        for (i, entry) in palettes.iter_mut().enumerate() {
+            *entry = self.select_bg_palette_from_shift_registers(i);
         }
         palettes
     }
@@ -1462,14 +1467,15 @@ impl Ppu {
     fn select_bg_pattern_from_shift_registers(&self, fine_x: usize) -> u8 {
         let pattern0 = ((self.pattern_table0_shift << fine_x) & 0x8000) >> 15;
         let pattern1 = ((self.pattern_table1_shift << fine_x) & 0x8000) >> 14;
-        let bits = pattern1 as u8 | pattern0 as u8;
 
+        pattern1 as u8 | pattern0 as u8
         /*
+        let bits = pattern1 as u8 | pattern0 as u8;
         if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
             println!("selected pattern bits = {:08b}/{:02x}", bits, bits);
-        }*/
-
+        }
         bits
+        */
     }
 
     /// Counting from the left, with the most-significant, left bit being
@@ -1508,15 +1514,15 @@ impl Ppu {
 
     #[inline]
     fn select_bg_palette_from_shift_registers(&self, fine_x: usize) -> u8 {
+        Ppu::left_select_bits_from_lo_hi_u16(self.palette0_shift, self.palette1_shift, fine_x)
+        /*
         let bits =
             Ppu::left_select_bits_from_lo_hi_u16(self.palette0_shift, self.palette1_shift, fine_x);
-
-        /*
         if self.scroll_tile_x() == 0 && self.scroll_tile_y() == 29 && self.scroll_fine_y() == 0 {
             println!("selected palette bits = {:08b}/{:02x}", bits, bits);
-        }*/
-
+        }
         bits
+        */
     }
 
     /*
@@ -1675,7 +1681,7 @@ impl Ppu {
         let fine_y = self.scroll_fine_y() as u16 + 1;
         if fine_y == 8 {
             if coarse_y == 29 {
-                nametable_select_y = nametable_select_y ^ 0b0000_1000_0000_0000;
+                nametable_select_y ^= 0b0000_1000_0000_0000;
                 coarse_y = 0;
             } else if coarse_y == 31 {
                 coarse_y = 0;
@@ -1699,7 +1705,7 @@ impl Ppu {
     fn call_mux_hooks(&mut self, cartridge: &mut Cartridge, state: &MuxHookState) {
         let mut hooks = std::mem::take(&mut self.debug.mux_hooks);
         for hook in hooks.hooks.iter_mut() {
-            (hook.func)(self, cartridge, &state);
+            (hook.func)(self, cartridge, state);
         }
         std::mem::swap(&mut self.debug.mux_hooks, &mut hooks);
     }
@@ -1764,16 +1770,17 @@ impl Ppu {
             self.status.set(StatusFlags::SPRITE0_HIT, true);
         }
 
-        let sprite_priority =
-            sprite_pattern != 0 && (sprite_bg_priority == false || bg_pattern == 0);
+        let sprite_priority = sprite_pattern != 0 && (!sprite_bg_priority || bg_pattern == 0);
         let (palette_addr, pattern) = if sprite_priority {
             let sprite_palette = (sprite_pix & 0b1100) >> 2;
-            let addr = (0x3f10 | (sprite_palette as u16) << 2, sprite_pattern);
+            (0x3f10 | (sprite_palette as u16) << 2, sprite_pattern)
+
+            //let addr = (0x3f10 | (sprite_palette as u16) << 2, sprite_pattern);
             //if is_sprite_zero {
             //    println!("PX: line = {}, screen_x = {screen_x}, sprite pix = {sprite_pix:02x}", self.line);
             //    println!("Reading from sprite palette @ {:04x}", addr.0 + addr.1 as u16);
             //}
-            addr
+            //addr
         } else if bg_pattern != 0 {
             (0x3f00 | (bg_palette as u16) << 2, bg_pattern)
 
@@ -1789,7 +1796,7 @@ impl Ppu {
         let color = rgb_lut(palette_value);
 
         #[cfg(feature = "ppu-hooks")]
-        if self.debug.mux_hooks.hooks.len() > 0 {
+        if !self.debug.mux_hooks.hooks.is_empty() {
             // Copied code from above
             let sprite_palette = (sprite_pix & 0b1100) >> 2;
             let sprite_palette_addr = 0x3f10 | (sprite_palette as u16) << 2 | sprite_pattern as u16;
@@ -1849,10 +1856,7 @@ impl Ppu {
         //let bg_pattern_bits = 2u8; // HACK
 
         let sprite_pixel = self.sprite_line_front[screen_x];
-        let color =
-            self.background_priority_mux(bg_palette, bg_pattern, sprite_pixel, screen_x, cartridge);
-
-        color
+        self.background_priority_mux(bg_palette, bg_pattern, sprite_pixel, screen_x, cartridge)
     }
 
     fn compose_disabled_pixel(
@@ -1885,7 +1889,7 @@ impl Ppu {
         let palette_value = self.palette_read(palette_addr);
 
         #[cfg(feature = "ppu-hooks")]
-        if self.debug.mux_hooks.hooks.len() > 0 {
+        if !self.debug.mux_hooks.hooks.is_empty() {
             let state = MuxHookState {
                 rendering_enabled: false,
                 decision: if palette_addr != 0x3f00 {
@@ -1937,7 +1941,7 @@ impl Ppu {
         let fb_off = self.framebuffer_offset;
         debug_assert!(fb_off >= 0 && fb_off < FRAMEBUFFER_STRIDE * FRAME_HEIGHT as isize);
         unsafe {
-            *fb.offset(fb_off + 0) = color.r();
+            *fb.offset(fb_off) = color.r();
             *fb.offset(fb_off + 1) = color.g();
             *fb.offset(fb_off + 2) = color.b();
             *fb.offset(fb_off + 3) = 0xff;
@@ -1953,6 +1957,7 @@ impl Ppu {
         //println!("nt = {:x}, pt = {:x}", nametable_base_addr, pattern_table_addr);
 
         // Which nametable are we in
+        #[allow(clippy::collapsible_else_if)]
         let nametable_base_addr = if y < FRAME_HEIGHT {
             if x < FRAME_WIDTH {
                 0x2000
@@ -1982,9 +1987,9 @@ impl Ppu {
 
         let raw_attribute = cartridge.vram_peek(attribute_addr);
         let bg_palette_id = match (tile_x & 0x03 < 0x2, tile_y & 0x03 < 0x2) {
-            (true, true) => (raw_attribute >> 0) & 0x03,  // top left
-            (false, true) => (raw_attribute >> 2) & 0x03, // top right
-            (true, false) => (raw_attribute >> 4) & 0x03, // bottom left
+            (true, true) => raw_attribute & 0x03,          // top left
+            (false, true) => (raw_attribute >> 2) & 0x03,  // top right
+            (true, false) => (raw_attribute >> 4) & 0x03,  // bottom left
             (false, false) => (raw_attribute >> 6) & 0x03, // bottom right
         };
 
@@ -2031,12 +2036,9 @@ impl Ppu {
         */
         if let LineStatus::Visible | LineStatus::PreRender = self.line_status {
             if let 2..=257 | 322..=337 = self.dot {
-                match self.dot % 8 {
-                    1 => {
-                        // "The shifters are reloaded during ticks 9, 17, 25, ..., 257."
-                        self.reload_shift_registers();
-                    }
-                    _ => {}
+                if self.dot % 8 == 1 {
+                    // "The shifters are reloaded during ticks 9, 17, 25, ..., 257."
+                    self.reload_shift_registers();
                 }
             }
 
@@ -2213,12 +2215,10 @@ impl Ppu {
                 if self.dot == 0 {
                     // "It is also the case that if OAMADDR is not less than eight when rendering starts,
                     // the eight bytes starting at OAMADDR & 0xF8 are copied to the first eight bytes of OAM"
-                    if self.rendering_enabled {
-                        if self.oam_offset >= 8 {
-                            let off = (self.oam_offset & 0xf8) as usize;
-                            for i in 0..8 {
-                                self.write_oam_data(i, self.read_oam_data((off as u8) + i));
-                            }
+                    if self.rendering_enabled && self.oam_offset >= 8 {
+                        let off = (self.oam_offset & 0xf8) as usize;
+                        for i in 0..8 {
+                            self.write_oam_data(i, self.read_oam_data((off as u8) + i));
                         }
                     }
                 } else if self.dot == 1 {
@@ -2268,10 +2268,9 @@ impl Ppu {
 
         #[cfg(feature = "ppu-hooks")]
         {
-            if self.debug.dot_hooks[self.line as usize][self.dot as usize]
+            if !self.debug.dot_hooks[self.line as usize][self.dot as usize]
                 .hooks
-                .len()
-                != 0
+                .is_empty()
             {
                 let mut hooks = std::mem::take(
                     &mut self.debug.dot_hooks[self.line as usize][self.dot as usize],
@@ -2294,7 +2293,7 @@ impl Ppu {
 
         #[cfg(feature = "debugger")]
         {
-            if self.debug.breakpoints.len() > 0 {
+            if !self.debug.breakpoints.is_empty() {
                 let mut tmp = std::mem::take(&mut self.debug.breakpoints);
                 let mut remove = vec![];
                 for bp in tmp.iter_mut() {
@@ -2354,7 +2353,7 @@ impl Ppu {
 
         self.decay_io_latch();
 
-        return true;
+        true
     }
 
     #[inline(always)]

@@ -109,14 +109,14 @@ impl ControllerIO for StandardControllerState {
 
     fn press_button(&mut self, button: ControllerButton) {
         match button {
-            ControllerButton::A => self.button_presses = self.button_presses | 0x01u8,
-            ControllerButton::B => self.button_presses = self.button_presses | 0x02u8,
-            ControllerButton::Select => self.button_presses = self.button_presses | 0x04u8,
-            ControllerButton::Start => self.button_presses = self.button_presses | 0x08u8,
-            ControllerButton::Up => self.button_presses = self.button_presses | 0x10u8,
-            ControllerButton::Down => self.button_presses = self.button_presses | 0x20u8,
-            ControllerButton::Left => self.button_presses = self.button_presses | 0x40u8,
-            ControllerButton::Right => self.button_presses = self.button_presses | 0x80u8,
+            ControllerButton::A => self.button_presses |= 0x01u8,
+            ControllerButton::B => self.button_presses |= 0x02u8,
+            ControllerButton::Select => self.button_presses |= 0x04u8,
+            ControllerButton::Start => self.button_presses |= 0x08u8,
+            ControllerButton::Up => self.button_presses |= 0x10u8,
+            ControllerButton::Down => self.button_presses |= 0x20u8,
+            ControllerButton::Left => self.button_presses |= 0x40u8,
+            ControllerButton::Right => self.button_presses |= 0x80u8,
         }
         self.button_press_latches |= self.button_presses;
         //println!("Press Button:");
@@ -125,14 +125,14 @@ impl ControllerIO for StandardControllerState {
 
     fn release_button(&mut self, button: ControllerButton) {
         match button {
-            ControllerButton::A => self.button_presses = self.button_presses & (!0x01u8),
-            ControllerButton::B => self.button_presses = self.button_presses & (!0x02u8),
-            ControllerButton::Select => self.button_presses = self.button_presses & (!0x04u8),
-            ControllerButton::Start => self.button_presses = self.button_presses & (!0x08u8),
-            ControllerButton::Up => self.button_presses = self.button_presses & (!0x10u8),
-            ControllerButton::Down => self.button_presses = self.button_presses & (!0x20u8),
-            ControllerButton::Left => self.button_presses = self.button_presses & (!0x40u8),
-            ControllerButton::Right => self.button_presses = self.button_presses & (!0x80u8),
+            ControllerButton::A => self.button_presses &= !0x01u8,
+            ControllerButton::B => self.button_presses &= !0x02u8,
+            ControllerButton::Select => self.button_presses &= !0x04u8,
+            ControllerButton::Start => self.button_presses &= !0x08u8,
+            ControllerButton::Up => self.button_presses &= !0x10u8,
+            ControllerButton::Down => self.button_presses &= !0x20u8,
+            ControllerButton::Left => self.button_presses &= !0x40u8,
+            ControllerButton::Right => self.button_presses &= !0x80u8,
         }
     }
 
@@ -182,7 +182,7 @@ impl ControllerIO for StandardControllerState {
 
         self.poll_mode = value & 1 != 0;
 
-        if self.poll_mode == false && prev == true {
+        if !self.poll_mode && prev {
             self.controller_shift = self.button_press_latches;
             //println!("Updated controller shift register:");
             //debug_print_buttons_pressed(self.controller_shift);

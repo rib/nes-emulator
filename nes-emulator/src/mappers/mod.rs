@@ -29,7 +29,7 @@ pub trait Mapper {
 
 #[inline]
 pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
-    debug_assert!(addr >= 0x2000 && addr < 0x4000);
+    debug_assert!((0x2000..0x4000).contains(&addr));
 
     //let save = addr;
 
@@ -64,14 +64,16 @@ pub fn mirror_vram_address(mut addr: u16, mode: NameTableMirror) -> usize {
                     addr
                 } // Top right
                 2048..=3071 => {
-                    let off = addr - 2048;
+                    addr - 2048
+                    //let off = addr - 2048;
                     //println!("mirroring 0x{save:x} to 'A' (0-1024) = {off}");
-                    off
+                    //off
                 } // Bottom left
                 3072..=4095 => {
-                    let off = addr - 3072 + 1024;
+                    addr - 3072 + 1024
+                    //let off = addr - 3072 + 1024;
                     //println!("mirroring 0x{save:x} to 'B' (1024..2048) = {off}");
-                    off
+                    //off
                 } // Bottom right
                 _ => unreachable!(),
             }
@@ -100,8 +102,7 @@ pub fn bank_select_mask(num_rom_pages: u8) -> u8 {
         let max_index = num_rom_pages - 1;
         let l = max_index.leading_zeros();
         let shift = 8 - l;
-        let mask = ((1u16 << shift) - 1) as u8;
-        mask
+        ((1u16 << shift) - 1) as u8
     } else {
         0
     }

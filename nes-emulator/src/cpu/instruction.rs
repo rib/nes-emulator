@@ -1,4 +1,4 @@
-use super::cpu::*;
+use super::core::*;
 use crate::system::System;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -513,6 +513,7 @@ impl Instruction {
         }
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         match self.mode {
             AddressingMode::Implied => 1,
@@ -609,8 +610,7 @@ impl Cpu {
     fn pc_fetch_u16(&mut self, system: &mut System) -> u16 {
         let lower = self.pc_fetch_u8(system);
         let upper = self.pc_fetch_u8(system);
-        let data = u16::from(lower) | (u16::from(upper) << 8);
-        data
+        u16::from(lower) | (u16::from(upper) << 8)
     }
 
     pub fn pc_peek_instruction(&self, system: &mut System) -> Instruction {
@@ -648,7 +648,7 @@ impl Cpu {
                 let in_operand = self.pc_fetch_u8(system) as u16;
                 FetchedOperand {
                     raw_operand: in_operand,
-                    operand: u16::from(in_operand),
+                    operand: in_operand,
                     oops_cyc: 0,
                 }
             }
@@ -849,8 +849,7 @@ impl Cpu {
     fn system_peek_u16(system: &mut System, addr: u16) -> u16 {
         let lower = system.peek(addr);
         let upper = system.peek(addr.wrapping_add(1));
-        let data = u16::from(lower) | (u16::from(upper) << 8);
-        data
+        u16::from(lower) | (u16::from(upper) << 8)
     }
 
     pub fn peek_operand(
@@ -860,7 +859,7 @@ impl Cpu {
         mode: AddressingMode,
         oops_handling: OopsHandling,
     ) -> FetchedOperand {
-        let operand = match mode {
+        match mode {
             AddressingMode::Implied => FetchedOperand {
                 raw_operand: 0,
                 operand: 0,
@@ -1027,9 +1026,7 @@ impl Cpu {
                     oops_cyc,
                 }
             }
-        };
-
-        operand
+        }
     }
 
     /// Fetch address operand and dereference that to read the value at that address
@@ -1084,7 +1081,7 @@ impl Cpu {
 
         #[cfg(feature = "debugger")]
         {
-            if self.debug.breakpoints.len() > 0 {
+            if !self.debug.breakpoints.is_empty() {
                 let mut tmp = std::mem::take(&mut self.debug.breakpoints);
                 let mut remove = vec![];
                 for bp in tmp.iter_mut() {
@@ -1943,7 +1940,7 @@ impl Cpu {
             }
             Opcode::TSX => {
                 self.nop_pc_fetch_u8(system); // discard operand
-                let result = (self.sp & 0xff) as u8;
+                let result = self.sp;
 
                 let is_zero = result == 0;
                 let is_negative = (result & 0x80) == 0x80;
@@ -2531,7 +2528,7 @@ impl Cpu {
                 }
             }
 
-            debug_assert_eq!(self.instruction_polled_interrupts, true);
+            debug_assert!(self.instruction_polled_interrupts);
         }
 
         if let Some(interrupt_type) = self.interrupt_handler_pending {

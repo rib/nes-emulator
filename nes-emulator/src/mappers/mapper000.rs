@@ -67,7 +67,7 @@ impl Mapper for Mapper0 {
         match addr {
             0x6000..=0x7fff => {
                 // PRG RAM, 8k window (2k or 4k physical ram for FamilyBasic)
-                if self.prg_ram.len() > 0 {
+                if !self.prg_ram.is_empty() {
                     let offset = (addr - 0x6000) as usize % self.prg_ram.len();
                     (arr_read!(self.prg_ram, offset), 0)
                 } else {

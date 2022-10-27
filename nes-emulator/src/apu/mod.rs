@@ -1,7 +1,7 @@
 use crate::apu::channel::frame_sequencer::FrameSequencer;
 
-pub mod apu;
 pub mod channel;
+pub mod core;
 pub mod mixer;
 
 pub trait AudioOutput {

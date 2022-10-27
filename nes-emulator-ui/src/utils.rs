@@ -32,7 +32,7 @@ pub fn create_nes_from_binary(
     Ok(nes)
 }
 
-pub fn canonicalize_rom_dirs(rom_dirs: &Vec<String>) -> Vec<PathBuf> {
+pub fn canonicalize_rom_dirs(rom_dirs: &[String]) -> Vec<PathBuf> {
     rom_dirs
         .iter()
         .map(|s| PathBuf::from_str(s).unwrap())
@@ -52,7 +52,7 @@ pub fn canonicalize_rom_dirs(rom_dirs: &Vec<String>) -> Vec<PathBuf> {
 /// Finds the shortest path for the given rom, relative to the given rom directories
 ///
 /// Assumes rom_dirs have already been filtered with [`utils::canonicalize_rom_dirs`]
-pub fn find_shortest_rom_path(rom: &PathBuf, rom_dirs: &Vec<PathBuf>) -> Result<PathBuf> {
+pub fn find_shortest_rom_path(rom: &Path, rom_dirs: &[PathBuf]) -> Result<PathBuf> {
     let rom = rom.canonicalize()?;
     let mut best = rom.clone();
     let mut best_len = best.to_string_lossy().len();
@@ -71,7 +71,7 @@ pub fn find_shortest_rom_path(rom: &PathBuf, rom_dirs: &Vec<PathBuf>) -> Result<
     Ok(best)
 }
 
-pub fn find_rom<P: AsRef<std::path::Path>>(path: P, rom_dirs: &Vec<PathBuf>) -> Option<PathBuf> {
+pub fn find_rom<P: AsRef<std::path::Path>>(path: P, rom_dirs: &[PathBuf]) -> Option<PathBuf> {
     let path = path.as_ref();
     if path.exists() {
         return Some(path.into());

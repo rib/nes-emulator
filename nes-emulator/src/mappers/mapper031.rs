@@ -54,8 +54,8 @@ impl Mapper31 {
             vram: [0u8; 2048],
             prg_rom,
             prg_ram: vec![0u8; 2 * PAGE_SIZE_16K],
-            chr_ram: vec![0u8; 1 * PAGE_SIZE_8K],
-            prg_bank_offsets: prg_bank_offsets,
+            chr_ram: vec![0u8; PAGE_SIZE_8K],
+            prg_bank_offsets,
             nsf_bios,
         }
     }
@@ -119,7 +119,7 @@ impl Mapper for Mapper31 {
                 let ram_offset = (addr - 0x6000) as usize;
                 self.prg_ram[ram_offset] = data;
             }
-            0x5000..=0x5fff => {
+            0x5ff8..=0x5fff => {
                 let bank = addr & 0b111;
                 self.prg_bank_offsets[bank as usize] = data;
             }
