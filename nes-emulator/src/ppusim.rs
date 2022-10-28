@@ -16,6 +16,7 @@ use crate::constants::{PAGE_SIZE_16K, PAGE_SIZE_8K};
 use crate::framebuffer::{Framebuffer, FramebufferDataRental, PixelFormat};
 use crate::system::Model;
 
+#[allow(clippy::all)]
 mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
@@ -605,6 +606,7 @@ impl PpuSim {
         // the address, with the octal latch providing the lower eight bits
         // (VRAM addresses are 14 bits long). During this cycle, the value is
         // read from or written to the lower eight address pins.
+        #[allow(clippy::suspicious_else_formatting)]
         if address_latch_enable == TriState::One {
             self.address_bus_lo_latch = self.address_bus_lo;
             self.address_bus_lo_latch_pclk = TriState::from(self.wires.PCLK);
