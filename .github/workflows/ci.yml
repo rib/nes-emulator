@@ -96,9 +96,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --profile=realtime -- -d roms/nes-test-roms -m tests/tests.json -p all -q > results.txt
+          args: --profile=realtime -- -d roms/nes-test-roms -m tests/tests.json -p all -q --results results.json
       - uses: actions/upload-artifact@v2
         if: success() || failure() # run this step even if previous step failed
         with:
           name: test-results
-          path: results.txt
+          path: results.json
