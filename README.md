@@ -120,6 +120,39 @@ OPTIONS:
     -V, --version                   Print version information
 ```
 
+# Key Bindings
+
+| Key       | Action       |
+|-----------|--------------|
+| Esc       | Pause/Resume |
+| Ctrl-R    | Reset        |
+| Ctrl-T    | Power Cycle  |
+| Enter     | Start        |
+| Space     | Select       |
+| W         | Up           |
+| A         | Left         |
+| S         | Down         |
+| D         | Right        |
+| Left      | A            |
+| Right     | B            |
+
+# Tools
+
+## Memory View
+![Memory View](assets/images/memory-viewer.png)
+
+## Macro Recorder
+![Macro Recorder](assets/images/macro-recorder.png)
+
+## Nametable View
+![Nametable View](assets/images/nametable-view.png)
+
+## Sprites View
+![Sprites View](assets/images/sprite-view.png)
+
+## APU View
+![APU View](assets/images/apu-view.png)
+
 # Links:
 
 - https://www.nesdev.com
