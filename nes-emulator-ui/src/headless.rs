@@ -110,6 +110,11 @@ fn setup_new_nes(
     Ok(nes)
 }
 
+#[derive(serde::Serialize)]
+struct MacroResult {
+    name: String,
+}
+
 pub fn run_macros(args: &crate::Args, rom_dirs: &[PathBuf], library: &String) -> Result<()> {
     let shared_crc32 = Rc::new(RefCell::new(0u32));
 
@@ -120,6 +125,8 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &[PathBuf], library: &String) ->
 
     let mut macro_queue = macros::read_macro_library_from_file(library, &args.play_macros)?;
     macro_queue.reverse(); // We'll be playing by popping off the end
+
+    let mut results = vec![];
 
     loop {
         if macro_player.is_none() {
@@ -166,17 +173,33 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &[PathBuf], library: &String) ->
                 #[allow(clippy::collapsible_else_if)]
                 if player.all_checks_passed() {
                     if player.checks_for_failure() {
+                        results.push(serde_json::json!({
+                            "name": player.name(),
+                            "result": "EXPECTED_FAILURE"
+                        }));
                         log::warn!("FAILED (as expected): {}", player.name());
                         println!("FAILED (as expected): {}", player.name());
                     } else {
+                        results.push(serde_json::json!({
+                            "name": player.name(),
+                            "result": "PASSED"
+                        }));
                         log::debug!("PASSED: {}", player.name());
                         println!("PASSED: {}", player.name());
                     }
                 } else {
                     if player.checks_for_failure() {
+                        results.push(serde_json::json!({
+                            "name": player.name(),
+                            "result": "UNKNOWN"
+                        }));
                         log::warn!("UNKNOWN (didn't hit expected failure): {}", player.name());
                         println!("UNKNOWN (didn't hit expected failure): {}", player.name());
                     } else {
+                        results.push(serde_json::json!({
+                            "name": player.name(),
+                            "result": "FAILED"
+                        }));
                         log::error!("FAILED: {}", player.name());
                         println!("FAILED: {}", player.name());
                     }
@@ -184,6 +207,13 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &[PathBuf], library: &String) ->
                 macro_player = None;
             }
         }
+    }
+
+    if let Some(results_json) = &args.results_json {
+        std::fs::write(
+            results_json,
+            serde_json::to_string_pretty(&results).unwrap(),
+        )?;
     }
 
     Ok(())

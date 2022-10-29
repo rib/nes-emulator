@@ -56,6 +56,12 @@ pub struct Args {
     play_macros: Vec<String>,
 
     #[clap(
+        long = "results",
+        help = "Write the results of running macros to the given file in JSON format"
+    )]
+    results_json: Option<String>,
+
+    #[clap(
         short = 'd',
         long = "rom-dir",
         help = "Add a directory to find macro roms that are specified with a relative path"
