@@ -27,7 +27,6 @@ log = "0.4"
 bytemuck = "1.9"
 bitflags = "1"
 bitvec = "1.0.1"
-select-rustc = "0.1.2"
 anyhow = "1"
 
 [dev-dependencies]
