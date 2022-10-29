@@ -8,6 +8,28 @@ use crate::mappers::Mapper;
 
 use super::mirror_vram_address;
 
+/// iNes mapper 000, aka NROM
+///
+/// # Boards
+/// NROM, HROM, RROM, RTROM, SROM, STROM
+///
+/// # Properties
+/// |                     |                        |
+/// |---------------------|------------------------|
+/// | PRG ROM size | 16 KiB for NROM-128, 32 KiB for NROM-256 (DIP-28 standard pinout) |
+/// | PRG ROM bank size | Not bankswitched |
+/// | PRG RAM | 2 or 4 KiB, not bankswitched, only in Family Basic (but most emulators provide 8) |
+/// | CHR capacity | 8 KiB ROM (DIP-28 standard pinout) but most emulators support RAM |
+/// | CHR bank size | Not bankswitched, see CNROM |
+/// | Nametable mirroring | Solder pads select vertical or horizontal mirroring |
+/// | Subject to bus conflicts | Yes, but irrelevant |
+///
+/// # Banks
+///
+/// All Banks are fixed:
+/// - CPU $6000-$7FFF: Family Basic only: PRG RAM, mirrored as necessary to fill entire 8 KiB window, write protectable with an external switch
+/// - CPU $8000-$BFFF: First 16 KB of ROM.
+/// - CPU $C000-$FFFF: Last 16 KB of ROM (NROM-256) or mirror of $8000-$BFFF (NROM-128).
 #[derive(Clone)]
 pub struct Mapper0 {
     pub vram_mirror: NameTableMirror,

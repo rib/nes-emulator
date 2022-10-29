@@ -28,6 +28,9 @@ enum Mapper1ChrMode {
 
 /// iNes mapper 001, aka MMC1
 ///
+/// # Boards
+/// MMC1, SKROM, SLROM, SNROM, others
+///
 /// # Properties
 /// |                     |                        |
 /// |---------------------|------------------------|
