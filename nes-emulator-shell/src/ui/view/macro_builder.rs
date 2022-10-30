@@ -200,6 +200,7 @@ impl MacroBuilderView {
         }
     }*/
 
+    #[cfg(not(target_os = "android"))]
     fn open_macros_library_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("json", &["json"])
@@ -237,6 +238,7 @@ impl MacroBuilderView {
         }
     }
 
+    #[cfg(not(target_os = "android"))]
     fn save_macros_library_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("json", &["json"])
@@ -408,17 +410,21 @@ impl MacroBuilderView {
                                     self.create_new_library();
                                 }
 
+                                #[cfg(not(target_os = "android"))]
                                 if ui.button("Open").clicked() {
                                     ui.close_menu();
                                     self.open_macros_library_dialog();
                                 }
 
+                                #[cfg(not(target_os = "android"))]
                                 ui.add_enabled_ui(self.library_path.is_some(), |ui| {
                                     if ui.button("Save").clicked() {
                                         ui.close_menu();
                                         self.save();
                                     }
                                 });
+
+                                #[cfg(not(target_os = "android"))]
                                 ui.add_enabled_ui(!self.library.is_empty(), |ui| {
                                     if ui.button("Save As...").clicked() {
                                         ui.close_menu();
@@ -536,6 +542,8 @@ impl MacroBuilderView {
                             ui.horizontal(|ui| {
 
                                 ui.add(TextEdit::singleline(&mut current_macro.rom).hint_text("ROM Path"));
+
+                                #[cfg(not(target_os = "android"))]
                                 if ui.button("📁").clicked() {
                                     if let Some(path) = EmulatorUi::pick_rom_dialog() {
                                         if let Ok(relative) = utils::find_shortest_rom_path(&path, &self.rom_dirs) {

@@ -1,12 +1,8 @@
 [package]
-name = "nes-emulator-ui"
+name = "nes-emulator-shell"
 version = "0.1.0"
 authors = ["Robert Bragg <robert@sixbynine.org>"]
 edition = "2021"
-
-[[bin]]
-path = "src/main.rs"
-name = "nes_emulator"
 
 [features]
 default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder", "trace-events" ]
@@ -23,7 +19,6 @@ macro-builder = [ "nes-emulator/ppu-hooks" ]
 
 [dependencies]
 log = "0.4"
-env_logger = "0.9"
 winit = "0.27"
 wgpu = "0.13"
 pollster = "0.2"
@@ -37,7 +32,6 @@ ring-channel = "0.11"
 anyhow = "1"
 image = "0.23"
 wav_io = "0.1.8"
-rfd = "0.8"
 clap = { version = "3.2.6", features = ["derive", "cargo"] }
 serde = { version = "1", features = [ "derive" ] }
 serde_json = "1"
@@ -47,3 +41,5 @@ crc32fast = "1"
 nes-emulator = { path = "../nes-emulator", default-features = false, features = ["unsafe-opt"] }
 bitflags = "1"
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = "0.8"

@@ -1,0 +1,28 @@
+[package]
+name = "nes-emulator-android"
+version = "0.1.0"
+authors = ["Robert Bragg <robert@sixbynine.org>"]
+edition = "2021"
+
+[lib]
+name="main"
+crate_type=["cdylib"]
+
+[features]
+default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder", "trace-events" ]
+unsafe-opt = [ "nes-emulator-shell/unsafe-opt" ]
+nsf-player = [ "nes-emulator-shell/nsf-player" ]
+ppu-simulator = [ "nes-emulator-shell/ppu-simulator" ]
+
+cpu-trace = [ "nes-emulator-shell/cpu-trace" ]
+cpu-debugger = [ "nes-emulator-shell/cpu-debugger" ]
+trace-events = [ "nes-emulator-shell/trace-events" ]
+
+sprite-view = [ "nes-emulator-shell/sprite-view" ]
+macro-builder = [ "nes-emulator-shell/macro-builder" ]
+
+[dependencies]
+log = "0.4"
+winit = { version = "0.27", features = [ "android-game-activity" ] }
+android_logger = "0.11.0"
+nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt"] }

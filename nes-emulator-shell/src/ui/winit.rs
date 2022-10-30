@@ -57,9 +57,7 @@ fn create_window<T>(
     window
 }
 
-pub fn ui_winit_main(args: Args) -> Result<()> {
-    let event_loop: winit::event_loop::EventLoop<Event> =
-        EventLoopBuilder::with_user_event().build();
+pub fn ui_main(args: Args, event_loop: winit::event_loop::EventLoop<Event>) -> Result<()> {
 
     let ctx = egui::Context::default();
 
@@ -94,7 +92,7 @@ pub fn ui_winit_main(args: Args) -> Result<()> {
 
     fonts.font_data.insert(
         "controller_emoji".to_owned(),
-        egui::FontData::from_static(include_bytes!("../../assets/fonts/controller-emoji.ttf")),
+        egui::FontData::from_static(include_bytes!("../../../assets/fonts/controller-emoji.ttf")),
     );
     fonts
         .families

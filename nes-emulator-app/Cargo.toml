@@ -1,0 +1,40 @@
+[package]
+name = "nes-emulator-app"
+version = "0.1.0"
+authors = ["Robert Bragg <robert@sixbynine.org>"]
+edition = "2021"
+
+[[bin]]
+path = "src/main.rs"
+name = "nes_emulator"
+
+[features]
+default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder", "trace-events" ]
+unsafe-opt = [ "nes-emulator-shell/unsafe-opt" ]
+nsf-player = [ "nes-emulator-shell/nsf-player" ]
+ppu-simulator = [ "nes-emulator-shell/ppu-simulator" ]
+
+cpu-trace = [ "nes-emulator-shell/cpu-trace" ]
+cpu-debugger = [ "nes-emulator-shell/cpu-debugger" ]
+trace-events = [ "nes-emulator-shell/trace-events" ]
+
+sprite-view = [ "nes-emulator-shell/sprite-view" ]
+macro-builder = [ "nes-emulator-shell/macro-builder" ]
+
+[dependencies]
+clap = { version = "3.2.6", features = ["derive", "cargo"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.9"
+winit = "0.27"
+nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt"] }
+
+[patch.crates-io]
+
+# This branch of Winit has an updated Android backend based on android-activity
+# Note: The winit branches are current misnamed:
+# - "android-activity" is based on Winit 0.27 (required for Egui compatibility)
+# - "android-activity-0.27" is based on Winit master
+# The -0.27 branch is currently associated with a pull request so we'll just
+# stick with these names for now
+winit = { git = "https://github.com/rib/winit", branch = "android-activity" }

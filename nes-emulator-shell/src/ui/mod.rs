@@ -16,7 +16,7 @@ use log::{debug, error};
 
 use anyhow::Result;
 
-use winit::{
+use ::winit::{
     event::{ModifiersState, VirtualKeyCode, WindowEvent},
     event_loop::EventLoopProxy,
 };
@@ -42,12 +42,15 @@ use crate::{
     benchmark::BenchmarkState,
     macros::{self, Macro, MacroPlayer},
     utils,
-    view::{
+    ui::view::{
         apu::ApuView, debugger::DebuggerView, macro_builder::MacroBuilderView, memory::MemView,
         nametable::NametablesView, sprites::SpritesView, trace_events::TraceEventsView,
     },
     Args,
 };
+
+pub mod winit;
+mod view;
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
@@ -80,13 +83,13 @@ pub enum ViewRequest {
 #[derive(Clone)]
 pub struct ViewRequestSender {
     tx: mpsc::Sender<ViewRequest>,
-    proxy: EventLoopProxy<crate::ui_winit::Event>,
+    proxy: EventLoopProxy<crate::ui::winit::Event>,
 }
 
 impl ViewRequestSender {
     pub fn send(&self, req: ViewRequest) {
         let _ = self.tx.send(req);
-        let _ = self.proxy.send_event(crate::ui_winit::Event::RequestRedraw);
+        let _ = self.proxy.send_event(crate::ui::winit::Event::RequestRedraw);
     }
 }
 
@@ -350,7 +353,7 @@ impl EmulatorUi {
     pub fn new(
         args: &Args,
         ctx: &egui::Context,
-        event_loop_proxy: EventLoopProxy<crate::ui_winit::Event>,
+        event_loop_proxy: EventLoopProxy<crate::ui::winit::Event>,
     ) -> Result<Self> {
         let mut notices = VecDeque::new();
 
@@ -592,6 +595,7 @@ impl EmulatorUi {
         self.macro_builder_view.disconnect_nes(&mut self.nes);
     }
 
+    #[cfg(not(target_os = "android"))]
     pub(crate) fn pick_rom_dialog() -> Option<PathBuf> {
         rfd::FileDialog::new()
             .add_filter("nes", &["nes"])
@@ -599,6 +603,7 @@ impl EmulatorUi {
             .pick_file()
     }
 
+    #[cfg(not(target_os = "android"))]
     fn open_dialog(&mut self, _ctx: &egui::Context) {
         if let Some(path) = EmulatorUi::pick_rom_dialog() {
             self.open_binary(path);
@@ -929,6 +934,7 @@ impl EmulatorUi {
 
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    #[cfg(not(target_os = "android"))]
                     if ui.button("Open").clicked() {
                         ui.close_menu();
                         self.open_dialog(ui.ctx());
@@ -1116,14 +1122,14 @@ impl EmulatorUi {
         self.set_paused(false);
     }
 
-    pub fn handle_window_event(&mut self, event: winit::event::WindowEvent) {
+    pub fn handle_window_event(&mut self, event: ::winit::event::WindowEvent) {
         match event {
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers;
             }
             WindowEvent::KeyboardInput { input, .. } => {
                 if let Some(keycode) = input.virtual_keycode {
-                    if input.state == winit::event::ElementState::Released {
+                    if input.state == ::winit::event::ElementState::Released {
                         match keycode {
                             VirtualKeyCode::Escape => {
                                 self.set_paused(!self.paused());
@@ -1154,7 +1160,7 @@ impl EmulatorUi {
                         _ => None,
                     };
                     if let Some(button) = button {
-                        if input.state == winit::event::ElementState::Pressed {
+                        if input.state == ::winit::event::ElementState::Pressed {
                             // run the macro builder hook first so it can see if the input is redundant
                             #[cfg(feature = "macro-builder")]
                             self.macro_builder_view.controller_input_hook(

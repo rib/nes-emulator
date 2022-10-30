@@ -1744,29 +1744,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "nes-emulator-android"
+name = "nes-emulator-app"
 version = "0.1.0"
 dependencies = [
  "android_logger",
  "log",
- "nes-emulator-shell",
+ "nes-emulator-ui",
  "winit",
 ]
 
 [[package]]
-name = "nes-emulator-app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "log",
- "nes-emulator-shell",
- "winit",
-]
-
-[[package]]
-name = "nes-emulator-shell"
+name = "nes-emulator-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1779,6 +1767,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "egui_extras",
+ "env_logger",
  "hex-literal",
  "image",
  "log",

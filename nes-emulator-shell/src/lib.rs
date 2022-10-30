@@ -7,90 +7,77 @@ use clap::Parser;
 
 use anyhow::Result;
 
+pub mod headless;
+pub mod ui;
 mod benchmark;
-mod headless;
 mod macros;
-mod ui;
-mod ui_winit;
 mod utils;
-mod view;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[clap(version, about, long_about = None)]
 pub struct Args {
-    rom: Option<String>,
+    pub rom: Option<String>,
 
     #[clap(
         short = 't',
         long = "trace",
         help = "Record a trace of CPU instructions executed"
     )]
-    trace: Option<String>,
+    pub trace: Option<String>,
 
     #[clap(
         short = 'r',
         long = "relative-time",
         help = "Step emulator by relative time intervals, not necessarily keeping up with real time"
     )]
-    relative_time: bool,
+    pub relative_time: bool,
 
     #[clap(
         short = 'q',
         long = "headless",
         help = "Disables any IO and all synchronization (i.e. emulates frames as quickly as possible; good for benchmarking and running tests)"
     )]
-    headless: bool,
+    pub headless: bool,
 
     #[clap(
         short = 'm',
         long = "macros",
         help = "Load the macros in the given library"
     )]
-    macros: Option<String>,
+    pub macros: Option<String>,
 
     #[clap(
         short = 'p',
         long = "play",
         help = "Play a single macro or \"all\" to execute all loaded macros"
     )]
-    play_macros: Vec<String>,
+    pub play_macros: Vec<String>,
 
     #[clap(
         long = "results",
         help = "Write the results of running macros to the given file in JSON format"
     )]
-    results_json: Option<String>,
+    pub results_json: Option<String>,
 
     #[clap(
         short = 'd',
         long = "rom-dir",
         help = "Add a directory to find macro roms that are specified with a relative path"
     )]
-    rom_dir: Vec<String>,
+    pub rom_dir: Vec<String>,
 
     #[clap(short = 'g', long = "genie", help = "Game Genie Code")]
-    genie_codes: Vec<String>,
+    pub genie_codes: Vec<String>,
 }
 
-fn dispatch_main() -> Result<()> {
-    let args = Args::parse();
-
+pub fn dispatch_main(args: Args, event_loop: Option<::winit::event_loop::EventLoop<crate::ui::winit::Event>>) -> Result<()> {
     if args.headless {
         headless::headless_main(args)?;
     } else {
-        ui_winit::ui_winit_main(args)?;
+        crate::ui::winit::ui_main(args, event_loop.unwrap())?;
     }
 
     Ok(())
 }
 
-fn main() -> Result<()> {
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Debug) // Default Log Level
-        .filter(Some("naga"), log::LevelFilter::Warn)
-        .filter(Some("wgpu"), log::LevelFilter::Warn)
-        .parse_default_env()
-        .init();
 
-    dispatch_main()
-}
