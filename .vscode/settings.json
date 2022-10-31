@@ -7,7 +7,7 @@
         "memory": "cpp"
     },
     "rust-analyzer.cargo.features": [
-        "ppu-sim"
+        //"ppu-sim"
 
     ],
 

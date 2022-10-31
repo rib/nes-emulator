@@ -20,14 +20,13 @@ macro-builder = [ "nes-emulator/ppu-hooks" ]
 [dependencies]
 log = "0.4"
 winit = "0.27"
-wgpu = "0.13"
+wgpu = "0.14"
 pollster = "0.2"
 egui = "0.19"
 egui_extras = "0.19"
-egui-wgpu = { version = "0.19", features = [ "winit" ] }
-egui-winit = { version = "0.19", default-features = false, features = [ "clipboard" ] }
+eframe = { version = "0.19", features = [ "wgpu" ] }
 bytemuck = "1.9"
-cpal = "0.13"
+cpal = "0.14"
 ring-channel = "0.11"
 anyhow = "1"
 image = "0.23"

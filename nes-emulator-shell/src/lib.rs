@@ -70,11 +70,11 @@ pub struct Args {
     pub genie_codes: Vec<String>,
 }
 
-pub fn dispatch_main(args: Args, event_loop: Option<::winit::event_loop::EventLoop<crate::ui::winit::Event>>) -> Result<()> {
+pub fn dispatch_main(args: Args, options: Option<eframe::NativeOptions>) -> Result<()> {
     if args.headless {
         headless::headless_main(args)?;
     } else {
-        crate::ui::winit::ui_main(args, event_loop.unwrap())?;
+        crate::ui::eframe::ui_main(args, options.unwrap())?;
     }
 
     Ok(())

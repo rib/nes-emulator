@@ -15,13 +15,11 @@ fn main() -> Result<()> {
 
     let args = nes_shell::Args::parse();
 
-    let event_loop = if !args.headless {
-        let event_loop: winit::event_loop::EventLoop<nes_shell::ui::winit::Event> =
-            winit::event_loop::EventLoopBuilder::with_user_event().build();
-        Some(event_loop)
+    let options = if !args.headless {
+        Some(eframe::NativeOptions::default())
     } else {
         None
     };
 
-    nes_shell::dispatch_main(args, event_loop)
+    nes_shell::dispatch_main(args, options)
 }

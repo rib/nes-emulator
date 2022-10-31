@@ -1,7 +1,6 @@
 //use clap::Parser;
 
 use nes_emulator_shell as nes_shell;
-use nes_shell::{Args, dispatch_main};
 
 use ::winit::platform::android::activity::AndroidApp;
 
@@ -19,17 +18,20 @@ fn android_main(app: AndroidApp) {
     );
     //android_logger::init_once(android_logger::Config::default().with_min_level(log::Level::Info));
 
-    let args = Args::default();
+    log::debug!("NES Emulator: main()");
+    let args = nes_shell::Args::default();
 
-    let event_loop = if !args.headless {
-        let event_loop: ::winit::event_loop::EventLoop<nes_shell::ui::winit::Event> =
-            ::winit::event_loop::EventLoopBuilder::with_user_event()
-                .with_android_app(app)
-                .build();
-        Some(event_loop)
+    let options = if !args.headless {
+        let options = eframe::NativeOptions {
+            event_loop_builder: Some(Box::new(move |builder| {
+                builder.with_android_app(app);
+            })),
+            ..eframe::NativeOptions::default()
+        };
+        Some(options)
     } else {
         None
     };
 
-    dispatch_main(args, event_loop);
+    nes_shell::dispatch_main(args, options).unwrap();
 }

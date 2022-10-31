@@ -16,12 +16,7 @@ use log::{debug, error};
 
 use anyhow::Result;
 
-use ::winit::{
-    event::{ModifiersState, VirtualKeyCode, WindowEvent},
-    event_loop::EventLoopProxy,
-};
-
-use egui::{self, Color32, ImageData, RichText, TextureHandle, Ui};
+use egui::{self, Color32, ImageData, RichText, TextureHandle, Ui, Event, Key};
 use egui::{epaint::ImageDelta, ColorImage};
 
 use cpal::traits::StreamTrait;
@@ -49,7 +44,7 @@ use crate::{
     Args,
 };
 
-pub mod winit;
+pub mod eframe;
 mod view;
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
@@ -83,13 +78,13 @@ pub enum ViewRequest {
 #[derive(Clone)]
 pub struct ViewRequestSender {
     tx: mpsc::Sender<ViewRequest>,
-    proxy: EventLoopProxy<crate::ui::winit::Event>,
+    egui_ctx: egui::Context,
 }
 
 impl ViewRequestSender {
     pub fn send(&self, req: ViewRequest) {
         let _ = self.tx.send(req);
-        let _ = self.proxy.send_event(crate::ui::winit::Event::RequestRedraw);
+        self.egui_ctx.request_repaint();
     }
 }
 
@@ -290,7 +285,7 @@ fn make_audio_stream<T: Sample + Send + Debug + 'static>(
 pub struct EmulatorUi {
     real_time: bool,
 
-    modifiers: ModifiersState,
+    //modifiers: ModifiersState,
 
     notices: VecDeque<Notice>,
 
@@ -349,11 +344,22 @@ pub struct EmulatorUi {
     stats: BenchmarkState,
 }
 
+impl ::eframe::App for EmulatorUi {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut ::eframe::Frame) {
+        self.handle_input(ctx);
+        self.update();
+        self.draw(ctx);
+
+        if !self.paused {
+            ctx.request_repaint();
+        }
+    }
+}
+
 impl EmulatorUi {
     pub fn new(
-        args: &Args,
+        args: Args,
         ctx: &egui::Context,
-        event_loop_proxy: EventLoopProxy<crate::ui::winit::Event>,
     ) -> Result<Self> {
         let mut notices = VecDeque::new();
 
@@ -436,14 +442,14 @@ impl EmulatorUi {
         let (tx, rx) = mpsc::channel();
         let view_request_sender = ViewRequestSender {
             tx,
-            proxy: event_loop_proxy,
+            egui_ctx: ctx.clone(),
         };
 
         let paused = false;
 
         let mut emulator = Self {
             real_time: !args.relative_time,
-            modifiers: Default::default(),
+            //modifiers: Default::default(),
             notices,
             audio_device,
             audio_sample_rate,
@@ -480,7 +486,7 @@ impl EmulatorUi {
             #[cfg(feature = "macro-builder")]
             macro_builder_view: MacroBuilderView::new(
                 ctx,
-                args,
+                &args,
                 rom_dirs.clone(),
                 loaded_rom.clone(),
                 view_request_sender.clone(),
@@ -890,6 +896,65 @@ impl EmulatorUi {
         //self.framebuffers[self.front_framebuffer].clone()
     }
 
+    pub fn handle_input(&mut self, ctx: &egui::Context) {
+
+        for event in ctx.input().raw.events.iter() {
+            if let Event::Key { key, modifiers, pressed } = event {
+                if !pressed {
+                    match key {
+                        Key::Escape => {
+                            self.set_paused(!self.paused());
+                        }
+                        Key::R if modifiers.ctrl => {
+                            self.nes.reset();
+                        }
+                        Key::T if modifiers.ctrl => {
+                            self.nes.power_cycle(Instant::now());
+                        }
+                        Key::S if modifiers.ctrl => {
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view.save();
+                        }
+                        _ => {}
+                    }
+                }
+
+                let button = match key {
+                    Key::Enter => Some(ControllerButton::Start),
+                    Key::Space => Some(ControllerButton::Select),
+                    Key::A => Some(ControllerButton::Left),
+                    Key::D => Some(ControllerButton::Right),
+                    Key::W => Some(ControllerButton::Up),
+                    Key::S => Some(ControllerButton::Down),
+                    Key::ArrowRight => Some(ControllerButton::A),
+                    Key::ArrowLeft => Some(ControllerButton::B),
+                    _ => None,
+                };
+                if let Some(button) = button {
+                    if *pressed {
+                        // run the macro builder hook first so it can see if the input is redundant
+                        #[cfg(feature = "macro-builder")]
+                        self.macro_builder_view.controller_input_hook(
+                            &mut self.nes,
+                            button,
+                            true,
+                        );
+                        self.nes.system_mut().port1.press_button(button);
+                    } else {
+                        // run the macro builder hook first so it can see if the input is redundant
+                        #[cfg(feature = "macro-builder")]
+                        self.macro_builder_view.controller_input_hook(
+                            &mut self.nes,
+                            button,
+                            false,
+                        );
+                        self.nes.system_mut().port1.release_button(button);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn draw(&mut self, ctx: &egui::Context) -> Status {
         let mut status = Status::Ok;
 
@@ -1120,69 +1185,5 @@ impl EmulatorUi {
     pub fn step_instruction_out(&mut self) {
         self.temp_debug_breakpoint = self.nes.add_tmp_step_out_breakpoint();
         self.set_paused(false);
-    }
-
-    pub fn handle_window_event(&mut self, event: ::winit::event::WindowEvent) {
-        match event {
-            WindowEvent::ModifiersChanged(modifiers) => {
-                self.modifiers = modifiers;
-            }
-            WindowEvent::KeyboardInput { input, .. } => {
-                if let Some(keycode) = input.virtual_keycode {
-                    if input.state == ::winit::event::ElementState::Released {
-                        match keycode {
-                            VirtualKeyCode::Escape => {
-                                self.set_paused(!self.paused());
-                            }
-                            VirtualKeyCode::R if self.modifiers.contains(ModifiersState::CTRL) => {
-                                self.nes.reset();
-                            }
-                            VirtualKeyCode::T if self.modifiers.contains(ModifiersState::CTRL) => {
-                                self.nes.power_cycle(Instant::now());
-                            }
-                            VirtualKeyCode::S if self.modifiers.contains(ModifiersState::CTRL) => {
-                                #[cfg(feature = "macro-builder")]
-                                self.macro_builder_view.save();
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    let button = match keycode {
-                        VirtualKeyCode::Return => Some(ControllerButton::Start),
-                        VirtualKeyCode::Space => Some(ControllerButton::Select),
-                        VirtualKeyCode::A => Some(ControllerButton::Left),
-                        VirtualKeyCode::D => Some(ControllerButton::Right),
-                        VirtualKeyCode::W => Some(ControllerButton::Up),
-                        VirtualKeyCode::S => Some(ControllerButton::Down),
-                        VirtualKeyCode::Right => Some(ControllerButton::A),
-                        VirtualKeyCode::Left => Some(ControllerButton::B),
-                        _ => None,
-                    };
-                    if let Some(button) = button {
-                        if input.state == ::winit::event::ElementState::Pressed {
-                            // run the macro builder hook first so it can see if the input is redundant
-                            #[cfg(feature = "macro-builder")]
-                            self.macro_builder_view.controller_input_hook(
-                                &mut self.nes,
-                                button,
-                                true,
-                            );
-                            self.nes.system_mut().port1.press_button(button);
-                        } else {
-                            // run the macro builder hook first so it can see if the input is redundant
-                            #[cfg(feature = "macro-builder")]
-                            self.macro_builder_view.controller_input_hook(
-                                &mut self.nes,
-                                button,
-                                false,
-                            );
-                            self.nes.system_mut().port1.release_button(button);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
     }
 }
