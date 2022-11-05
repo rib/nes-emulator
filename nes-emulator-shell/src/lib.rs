@@ -13,6 +13,12 @@ mod benchmark;
 mod macros;
 mod utils;
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) type RomIdentifier = String;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type RomIdentifier = std::path::PathBuf;
+
+
 #[derive(Parser, Debug, Default)]
 #[clap(version, about, long_about = None)]
 pub struct Args {
@@ -70,6 +76,7 @@ pub struct Args {
     pub genie_codes: Vec<String>,
 }
 
+/*
 pub fn dispatch_main(args: Args, options: Option<eframe::NativeOptions>) -> Result<()> {
     if args.headless {
         headless::headless_main(args)?;
@@ -79,5 +86,5 @@ pub fn dispatch_main(args: Args, options: Option<eframe::NativeOptions>) -> Resu
 
     Ok(())
 }
-
+*/
 

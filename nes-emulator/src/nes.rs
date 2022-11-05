@@ -1,5 +1,4 @@
-use std::time::Duration;
-use std::time::Instant;
+use instant::{Instant, Duration};
 
 use anyhow::Result;
 

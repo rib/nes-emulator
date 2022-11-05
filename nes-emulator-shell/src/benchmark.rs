@@ -1,5 +1,5 @@
 use nes_emulator::nes::Nes;
-use std::time::{Duration, Instant};
+use instant::{Duration, Instant};
 
 pub struct BenchmarkState {
     nes_cpu_clock_hz: u64,

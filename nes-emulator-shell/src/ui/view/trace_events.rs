@@ -723,15 +723,15 @@ impl TraceEventsView {
         _dot: u16,
         rect: Rect,
     ) {
-        let mut _highlight = false;
+        let mut highlight = false;
         if dot_view.system_bus_io.is_some() {
-            _highlight = true;
+            highlight = true;
         }
         if self.show_dma_io
             && (dot_view.flags.contains(DotViewFlags::DMA_READ)
                 || dot_view.flags.contains(DotViewFlags::DMA_WRITE))
         {
-            _highlight = true;
+            highlight = true;
         }
 
         if self.show_nmi_interrupts
@@ -740,7 +740,7 @@ impl TraceEventsView {
                 || dot_view.flags.contains(DotViewFlags::NMI_DETECT_PHI1)
                 || dot_view.flags.contains(DotViewFlags::NMI_POLL))
         {
-            _highlight = true;
+            highlight = true;
         }
 
         if self.show_irq_interrupts
@@ -750,7 +750,7 @@ impl TraceEventsView {
                 || dot_view.flags.contains(DotViewFlags::IRQ_DETECT_PHI1)
                 || dot_view.flags.contains(DotViewFlags::IRQ_POLL))
         {
-            _highlight = true;
+            highlight = true;
         }
         {
             //let pad_x = rect.width() / 5.0f32;
@@ -759,13 +759,10 @@ impl TraceEventsView {
             //    Rect::from_min_max(rect.min + vec2(pad_x, pad_y), rect.max - vec2(pad_x, pad_y));
             //painter.add(egui::Shape::Rect(epaint::RectShape::filled(inset, epaint::Rounding::none(), egui::Color32::LIGHT_GREEN)));
         }
-        /*
         if highlight {
             painter.add(egui::Shape::Rect(epaint::RectShape::filled(rect, epaint::Rounding::none(), egui::Color32::YELLOW)));
         }
-        */
-        //if self.show_apu_output != ApuOutput::None {
-        {
+        if self.show_apu_output != ApuOutput::None {
             let half_width = rect.width() / 2.0f32;
             let full_output_rect = Rect::from_min_max(rect.min + vec2(half_width, 0.0), rect.max);
             let full_height = rect.height();

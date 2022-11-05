@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::{
     cell::RefCell,
@@ -9,8 +10,9 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::mpsc,
-    time::{Duration, Instant},
 };
+
+use instant::{Instant, Duration};
 
 use log::{debug, error};
 
@@ -33,6 +35,7 @@ use nes_emulator::{
     cpu::core::BreakpointHandle, hook::HookHandle, nes::*, port::ControllerButton, system::Model,
 };
 
+use crate::RomIdentifier;
 use crate::{
     benchmark::BenchmarkState,
     macros::{self, Macro, MacroPlayer},
@@ -68,7 +71,8 @@ struct Notice {
 pub enum ViewRequest {
     ShowUserNotice(log::Level, String),
     RunMacro(Macro),
-    LoadRom(String),
+    LoadRom(RomIdentifier),
+    LoadRomBinary((Vec<u8>, RomIdentifier)),
 
     InstructionStepOver,
     InstructionStepIn,
@@ -88,16 +92,17 @@ impl ViewRequestSender {
     }
 }
 
-fn load_nes(
+#[cfg(not(target_arch = "wasm32"))]
+fn load_nes_from_path(
     path: Option<impl AsRef<Path>>,
     rom_dirs: &[PathBuf],
     audio_sample_rate: u32,
     start_timestamp: Instant,
     notices: &mut VecDeque<Notice>,
-) -> (Nes, Option<PathBuf>) {
+) -> (Nes, Option<RomIdentifier>) {
     if let Some(path) = path {
-        if let Some(ref path) = utils::find_rom(path, rom_dirs) {
-            match utils::create_nes_from_binary(path, audio_sample_rate, start_timestamp) {
+        if let Some(ref path) = utils::search_rom_dirs(path, rom_dirs) {
+            match utils::create_nes_from_binary_path(path, audio_sample_rate, start_timestamp) {
                 Ok(nes) => return (nes, Some(path.clone())),
                 Err(err) => {
                     notices.push_back(Notice {
@@ -112,6 +117,30 @@ fn load_nes(
     (
         Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp),
         None,
+    )
+}
+
+fn load_nes_from_rom(
+    rom: Option<(&[u8], RomIdentifier)>,
+    audio_sample_rate: u32,
+    start_timestamp: Instant,
+    notices: &mut VecDeque<Notice>,
+) -> (Nes, Option<RomIdentifier>) {
+    if let Some((rom, rom_name)) = rom {
+        match utils::create_nes_from_binary(rom, audio_sample_rate, start_timestamp) {
+            Ok(nes) => { return (nes, Some(rom_name)); }
+            Err(err) => {
+                notices.push_back(Notice {
+                    level: log::Level::Error,
+                    text: format!("{}", err),
+                    timestamp: Instant::now(),
+                });
+            }
+        }
+    }
+    (
+        Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp),
+        None
     )
 }
 
@@ -301,9 +330,10 @@ pub struct EmulatorUi {
     crc_hook_handle: Option<HookHandle>,
 
     rom_dirs: Vec<PathBuf>,
+    preloaded_rom_library: HashMap<RomIdentifier, Vec<u8>>,
 
     nes: Nes,
-    loaded_rom: Option<PathBuf>,
+    loaded_rom: Option<RomIdentifier>,
 
     tracing: bool,
     trace_writer: Option<Rc<RefCell<BufWriter<File>>>>,
@@ -361,6 +391,9 @@ impl EmulatorUi {
         args: Args,
         ctx: &egui::Context,
     ) -> Result<Self> {
+
+        log::debug!("EmulatorUi::new");
+
         let mut notices = VecDeque::new();
 
         let audio_host = cpal::default_host();
@@ -384,18 +417,32 @@ impl EmulatorUi {
         }
         .unwrap();
 
-        let rom_dirs = utils::canonicalize_rom_dirs(&args.rom_dir);
-        let rom_path = match &args.rom {
-            Some(rom) => utils::find_rom(rom, &rom_dirs),
-            None => None,
+        #[cfg(not(target_arch = "wasm32"))]
+        let (mut nes, rom_dirs, loaded_rom) = {
+            let rom_dirs = utils::canonicalize_rom_dirs(&args.rom_dir);
+            let rom_path = match &args.rom {
+                Some(rom) => utils::search_rom_dirs(rom, &rom_dirs),
+                None => None,
+            };
+            let (mut nes, loaded_rom) = load_nes_from_path(
+                rom_path.as_ref(),
+                &rom_dirs,
+                audio_sample_rate,
+                Instant::now(),
+                &mut notices,
+            );
+            (nes, rom_dirs, loaded_rom)
         };
-        let (mut nes, loaded_rom) = load_nes(
-            rom_path.as_ref(),
-            &rom_dirs,
-            audio_sample_rate,
-            Instant::now(),
-            &mut notices,
-        );
+        #[cfg(target_arch = "wasm32")]
+        let (mut nes, rom_dirs, loaded_rom) = {
+            let (mut nes, loaded_rom) = load_nes_from_rom(
+                None,
+                audio_sample_rate,
+                Instant::now(),
+                &mut notices,
+            );
+            (nes, vec![], loaded_rom)
+        };
 
         let genie_codes: Result<Vec<GameGenieCode>> = args
             .genie_codes
@@ -507,6 +554,7 @@ impl EmulatorUi {
             view_requests_rx: rx,
 
             rom_dirs,
+            preloaded_rom_library: HashMap::new(),
             loaded_rom,
 
             stats,
@@ -550,7 +598,7 @@ impl EmulatorUi {
             }
         }
 
-        let start_timestamp = std::time::Instant::now();
+        let start_timestamp = Instant::now();
         self.nes.power_cycle(start_timestamp);
         if let Err(err) = self.audio_stream.play() {
             self.notices.push_back(Notice {
@@ -576,9 +624,20 @@ impl EmulatorUi {
     }
     */
 
-    pub fn open_binary(&mut self, path: impl AsRef<Path>) {
+    pub fn disconnect_nes(&mut self) {
+        if let Some(handle) = self.crc_hook_handle {
+            self.nes.ppu_mut().remove_mux_hook(handle);
+            self.crc_hook_handle = None;
+        }
+
+        #[cfg(feature = "macro-builder")]
+        self.macro_builder_view.disconnect_nes(&mut self.nes);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn poweron_nes_from_path(&mut self, path: impl AsRef<Path>) {
         self.disconnect_nes();
-        let (nes, loaded_rom) = load_nes(
+        let (nes, loaded_rom) = load_nes_from_path(
             Some(path),
             &self.rom_dirs,
             self.audio_sample_rate,
@@ -591,17 +650,21 @@ impl EmulatorUi {
         self.power_on_new_nes();
     }
 
-    pub fn disconnect_nes(&mut self) {
-        if let Some(handle) = self.crc_hook_handle {
-            self.nes.ppu_mut().remove_mux_hook(handle);
-            self.crc_hook_handle = None;
-        }
+    pub fn poweron_nes_from_rom(&mut self, rom: &[u8], name: RomIdentifier) {
+        self.disconnect_nes();
+        let (nes, loaded_rom) = load_nes_from_rom(
+            Some((rom, name)),
+            self.audio_sample_rate,
+            Instant::now(),
+            &mut self.notices,
+        );
+        self.nes = nes;
+        self.loaded_rom = loaded_rom;
 
-        #[cfg(feature = "macro-builder")]
-        self.macro_builder_view.disconnect_nes(&mut self.nes);
+        self.power_on_new_nes();
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     pub(crate) fn pick_rom_dialog() -> Option<PathBuf> {
         rfd::FileDialog::new()
             .add_filter("nes", &["nes"])
@@ -609,12 +672,37 @@ impl EmulatorUi {
             .pick_file()
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     fn open_dialog(&mut self, _ctx: &egui::Context) {
         if let Some(path) = EmulatorUi::pick_rom_dialog() {
-            self.open_binary(path);
+            self.poweron_nes_from_path(path);
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) async fn web_pick_rom_dialog() -> Option<(Vec<u8>, RomIdentifier)> {
+        if let Some(handle) = rfd::AsyncFileDialog::new()
+            .add_filter("nes", &["nes"])
+            .add_filter("nsf", &["nsf"])
+            .pick_file()
+            .await
+        {
+            let rom = handle.read().await;
+            let name = handle.file_name();
+            Some((rom, name))
+        } else {
+            None
+        }
+    }
+
+    /*
+    #[cfg(target_arch = "wasm32")]
+    async fn web_open_dialog(&mut self, _ctx: &egui::Context) {
+        if let Some((rom, id)) = Self::web_pick_rom_dialog().await
+        {
+            self.poweron_nes_from_rom(rom, id);
+        }
+    }*/
 
     fn save_image(&mut self) {
         let front = self.front_buffer();
@@ -683,27 +771,46 @@ impl EmulatorUi {
                     self.macro_queue.clear();
                     self.macro_queue.push(recording);
                 }
-                ViewRequest::LoadRom(path) => {
-                    if let Some(rom) = utils::find_rom(path, &self.rom_dirs) {
-                        self.open_binary(rom);
-                        self.set_paused(false);
-
-                        // TODO: have a generic way of notifying all views
-                        #[cfg(feature = "macro-builder")]
-                        self.macro_builder_view
-                            .load_rom_request_finished(&mut self.nes, true);
-                    } else {
-                        self.notices.push_back(Notice {
-                            level: log::Level::Error,
-                            text: "Failed to find ROM for macro".to_string(),
-                            timestamp: Instant::now(),
-                        });
-
-                        // TODO: have a generic way of notifying all views
-                        #[cfg(feature = "macro-builder")]
-                        self.macro_builder_view
-                            .load_rom_request_finished(&mut self.nes, false);
-                    }
+                ViewRequest::LoadRom(id) => {
+                    #[cfg(target_arch = "wasm32")]
+                    let success = {
+                        let rom = self.preloaded_rom_library.get(&id).map(|rom| rom.clone());
+                        if let Some(rom) = rom {
+                            self.poweron_nes_from_rom(&rom, id.clone());
+                            self.set_paused(false);
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let success = {
+                        if let Some(rom) = utils::search_rom_dirs(id, &self.rom_dirs) {
+                            self.poweron_nes_from_path(rom);
+                            self.set_paused(false);
+                            true
+                        } else {
+                            self.notices.push_back(Notice {
+                                level: log::Level::Error,
+                                text: "Failed to find ROM for macro".to_string(),
+                                timestamp: Instant::now(),
+                            });
+                            false
+                        }
+                    };
+                    // TODO: have a generic way of notifying all views
+                    #[cfg(feature = "macro-builder")]
+                    self.macro_builder_view
+                        .load_rom_request_finished(&mut self.nes, success);
+                }
+                ViewRequest::LoadRomBinary((rom, id)) => {
+                    self.preloaded_rom_library.insert(id.clone(), rom.clone());
+                    self.poweron_nes_from_rom(&rom, id);
+                    self.set_paused(false);
+                    // TODO: have a generic way of notifying all views
+                    #[cfg(feature = "macro-builder")]
+                    self.macro_builder_view
+                        .load_rom_request_finished(&mut self.nes, true);
                 }
                 ViewRequest::InstructionStepIn => self.step_instruction_in(),
                 ViewRequest::InstructionStepOut => self.step_instruction_out(),
@@ -711,10 +818,11 @@ impl EmulatorUi {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.macro_player.is_none() {
             if let Some(next_macro) = self.macro_queue.pop() {
-                if let Some(rom) = utils::find_rom(&next_macro.rom, &self.rom_dirs) {
-                    self.open_binary(rom);
+                if let Some(rom) = utils::search_rom_dirs(&next_macro.rom, &self.rom_dirs) {
+                    self.poweron_nes_from_path(rom);
 
                     if self.crc_hook_handle.is_none() {
                         self.crc_hook_handle = Some(macros::register_frame_crc_hasher(
@@ -849,7 +957,7 @@ impl EmulatorUi {
                       //    break 'progress;
                       //}
                 }
-                //let delta = std::time::Instant::now() - start;
+                //let delta = Instant::now() - start;
                 //if delta > Duration::from_millis(buffer_time_millis) {
                 for s in self.nes.apu_mut().sample_buffer.iter() {
                     let _ = self.audio_tx.send(*s);
@@ -999,10 +1107,24 @@ impl EmulatorUi {
 
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    //#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
                     #[cfg(not(target_os = "android"))]
                     if ui.button("Open").clicked() {
                         ui.close_menu();
-                        self.open_dialog(ui.ctx());
+
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let sender = self.view_request_sender.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                if let Some((rom, id)) = Self::web_pick_rom_dialog().await {
+                                    sender.send(ViewRequest::LoadRomBinary((rom, id)))
+                                }
+                            });
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            self.open_dialog(ui.ctx());
+                        }
                     }
                     ui.separator();
                     if ui.button("Exit").clicked() {

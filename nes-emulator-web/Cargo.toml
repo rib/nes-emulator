@@ -1,5 +1,5 @@
 [package]
-name = "nes-emulator-app"
+name = "nes-emulator-web"
 version = "0.1.0"
 authors = ["Robert Bragg <robert@sixbynine.org>"]
 edition = "2021"
@@ -25,15 +25,9 @@ macro-builder = [ "nes-emulator-shell/macro-builder" ]
 clap = { version = "3.2.6", features = ["derive", "cargo"] }
 anyhow = "1"
 log = "0.4"
-egui = "0.19"
-nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-eframe = { version = "0.19", features = [ "wgpu" ] }
-env_logger = "0.9"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-eframe = { version = "0.19", features = [ "persistence" ] }
-console_error_panic_hook = "0.1.6"
 wasm-logger = "0.2"
 tracing-wasm = "0.2"
+egui = "0.19"
+eframe = { version = "0.19", features = [ "persistence" ] }
+console_error_panic_hook = "0.1.6"
+nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt", "wasm"] }

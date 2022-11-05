@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 use eframe::egui;
+#[cfg(not(target_arch = "wasm32"))]
 use eframe::{NativeOptions, Renderer};
 
 use crate::ui;
@@ -9,10 +10,12 @@ use crate::Args;
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
 
-pub fn ui_main(args: Args, mut options: NativeOptions) -> Result<()> {
+// TODO: just move the font loading into EmulatorUi::new()
+fn app_creator(args: Args) -> eframe::AppCreator {
+    log::debug!("app_creator (build)");
+    Box::new(|cc| {
 
-    options.renderer = Renderer::Wgpu;
-    eframe::run_native("NES Emulator", options, Box::new(|cc| {
+        log::debug!("AppCreator call");
         let mut fonts = egui::FontDefinitions::default();
 
         fonts.font_data.insert(
@@ -40,7 +43,33 @@ pub fn ui_main(args: Args, mut options: NativeOptions) -> Result<()> {
 
         let emulator = ui::EmulatorUi::new(args, &cc.egui_ctx).expect("Failed to initialize Emulator UI");
         Box::new(emulator)
-    }));
+    })
+}
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn native_ui_main(
+    args: Args,
+    mut options: NativeOptions,
+) -> Result<()> {
+    options.renderer = Renderer::Wgpu;
+    eframe::run_native(
+        "NES Emulator",
+        options,
+        app_creator(args));
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn web_ui_main(
+    args: Args,
+    canvas_id: &str,
+) -> Result<()> {
+    log::debug!("web_ui_main");
+    let web_options = eframe::WebOptions::default();
+    eframe::start_web(
+        canvas_id,
+        web_options,
+        app_creator(args),
+    ).expect("failed to start eframe");
     Ok(())
 }

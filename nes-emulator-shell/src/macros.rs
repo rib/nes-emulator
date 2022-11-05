@@ -1,10 +1,12 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::{
     cell::{Cell, RefCell},
     path::Path,
     rc::Rc,
-    time::{Duration, Instant},
 };
+use instant::{Duration, Instant};
 
 use anyhow::Result;
 use nes_emulator::{
@@ -15,6 +17,8 @@ use nes_emulator::{
     ppu::{DotBreakpointCallbackAction, DotBreakpointHandle},
 };
 use serde::{Deserialize, Serialize};
+
+use crate::RomIdentifier;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacroWait {
@@ -90,6 +94,25 @@ pub struct Macro {
     pub tags: HashSet<String>,
 
     pub commands: Vec<MacroCommand>,
+}
+
+impl Macro {
+    pub fn rom_id(&self) -> Option<RomIdentifier> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Some(self.rom.clone())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            match PathBuf::from_str(&self.rom) {
+                Ok(path) => Some(path),
+                Err(err) => {
+                    log::error!("No valid rom ID associated with macro {}", self.name);
+                    None
+                }
+            }
+        }
+    }
 }
 
 pub fn read_macro_library_from_file<P: AsRef<std::path::Path>>(

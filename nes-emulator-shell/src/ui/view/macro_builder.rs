@@ -9,7 +9,7 @@ use nes_emulator::{genie::GameGenieCode, hook::HookHandle, nes::Nes, port::Contr
 use crate::{
     macros::{self, InputEvent, Macro, MacroCommand, MacroPlayer, MacroWait},
     ui::{EmulatorUi, ViewRequest, ViewRequestSender},
-    utils, Args,
+    utils, Args, RomIdentifier,
 };
 
 struct MacroBuilderHookState {
@@ -22,7 +22,7 @@ pub struct MacroBuilderView {
     view_request_sender: ViewRequestSender,
 
     rom_dirs: Vec<PathBuf>,
-    default_rom: Option<PathBuf>,
+    default_rom: Option<RomIdentifier>,
 
     library: Vec<Macro>,
     library_path: Option<PathBuf>,
@@ -53,7 +53,7 @@ impl MacroBuilderView {
         _ctx: &egui::Context,
         args: &Args,
         rom_dirs: Vec<PathBuf>,
-        default_rom: Option<PathBuf>,
+        default_rom: Option<RomIdentifier>,
         view_request_sender: ViewRequestSender,
         paused: bool,
     ) -> Self {
@@ -98,7 +98,7 @@ impl MacroBuilderView {
     /// check the framebuffer.
     ///
     /// This will also be called when the view becomes visible
-    pub fn power_on_new_nes_hook(&mut self, nes: &mut Nes, loaded_rom: Option<&PathBuf>) {
+    pub fn power_on_new_nes_hook(&mut self, nes: &mut Nes, loaded_rom: Option<&RomIdentifier>) {
         if loaded_rom.is_some() {
             self.default_rom = loaded_rom.cloned();
         }
@@ -200,7 +200,7 @@ impl MacroBuilderView {
         }
     }*/
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     fn open_macros_library_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("json", &["json"])
@@ -238,7 +238,7 @@ impl MacroBuilderView {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     fn save_macros_library_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("json", &["json"])
@@ -301,9 +301,11 @@ impl MacroBuilderView {
             debug_assert!(self.can_append);
         }
 
-        self.view_request_sender
-            .send(ViewRequest::LoadRom(current_macro.rom.clone()));
-        self.recording_pending = true;
+        if let Some(rom_id) = current_macro.rom_id() {
+            self.view_request_sender
+                .send(ViewRequest::LoadRom(rom_id));
+            self.recording_pending = true;
+        }
     }
 
     fn stop_recording(&mut self) {
@@ -410,13 +412,13 @@ impl MacroBuilderView {
                                     self.create_new_library();
                                 }
 
-                                #[cfg(not(target_os = "android"))]
+                                #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
                                 if ui.button("Open").clicked() {
                                     ui.close_menu();
                                     self.open_macros_library_dialog();
                                 }
 
-                                #[cfg(not(target_os = "android"))]
+                                #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
                                 ui.add_enabled_ui(self.library_path.is_some(), |ui| {
                                     if ui.button("Save").clicked() {
                                         ui.close_menu();
@@ -424,7 +426,7 @@ impl MacroBuilderView {
                                     }
                                 });
 
-                                #[cfg(not(target_os = "android"))]
+                                #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
                                 ui.add_enabled_ui(!self.library.is_empty(), |ui| {
                                     if ui.button("Save As...").clicked() {
                                         ui.close_menu();
@@ -508,15 +510,25 @@ impl MacroBuilderView {
                                     });
                                     self.current_macro = self.library.len() - 1;
                                     let default_name = format!("Macro {}", self.library.len() - 1);
-                                    if let Some(rom) = &self.default_rom {
-                                        if let Ok(relative) = utils::find_shortest_rom_path(rom, &self.rom_dirs) {
-                                            self.library[self.current_macro].rom = relative.to_string_lossy().to_string();
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    {
+                                        if let Some(rom) = &self.default_rom {
+                                            if let Ok(relative) = utils::find_shortest_rom_path(rom, &self.rom_dirs) {
+                                                self.library[self.current_macro].rom = relative.to_string_lossy().to_string();
+                                            } else {
+                                                self.library[self.current_macro].rom = rom.to_string_lossy().to_string();
+                                            }
+                                            self.library[self.current_macro].name = macros::name_from_rom_path(rom, default_name);
                                         } else {
-                                            self.library[self.current_macro].rom = rom.to_string_lossy().to_string();
+                                            self.library[self.current_macro].name = default_name;
                                         }
-                                        self.library[self.current_macro].name = macros::name_from_rom_path(rom, default_name);
-                                    } else {
+                                    }
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
                                         self.library[self.current_macro].name = default_name;
+                                        if let Some(rom) = &self.default_rom {
+                                            self.library[self.current_macro].rom = rom.clone();
+                                        }
                                     }
                                 }
 
@@ -543,7 +555,7 @@ impl MacroBuilderView {
 
                                 ui.add(TextEdit::singleline(&mut current_macro.rom).hint_text("ROM Path"));
 
-                                #[cfg(not(target_os = "android"))]
+                                #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
                                 if ui.button("📁").clicked() {
                                     if let Some(path) = EmulatorUi::pick_rom_dialog() {
                                         if let Ok(relative) = utils::find_shortest_rom_path(&path, &self.rom_dirs) {

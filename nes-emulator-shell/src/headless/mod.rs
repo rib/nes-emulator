@@ -4,8 +4,9 @@ use std::{
     io::{BufWriter, Write},
     path::{Path, PathBuf},
     rc::Rc,
-    time::{Duration, Instant},
 };
+
+use instant::{Duration, Instant};
 
 use anyhow::Result;
 use nes_emulator::{
@@ -81,7 +82,7 @@ fn setup_new_nes(
     audio_sample_rate: u32,
     trace_file: Option<&String>,
 ) -> Result<Nes> {
-    let rom_path = match utils::find_rom(&rom_path, rom_dirs) {
+    let rom_path = match utils::search_rom_dirs(&rom_path, rom_dirs) {
         Some(rom) => rom,
         None => {
             eprintln!("Failed to find ROM {}", rom_path.as_ref().to_string_lossy());
@@ -89,7 +90,7 @@ fn setup_new_nes(
         }
     };
 
-    let mut nes = utils::create_nes_from_binary(rom_path, audio_sample_rate, Instant::now())?;
+    let mut nes = utils::create_nes_from_binary_path(rom_path, audio_sample_rate, Instant::now())?;
 
     if let Some(trace) = trace_file {
         if trace == "-" {
@@ -221,7 +222,7 @@ pub fn run_macros(args: &crate::Args, rom_dirs: &[PathBuf], library: &String) ->
 
 pub fn run_single_rom(args: &crate::Args, rom_dirs: &[PathBuf]) -> Result<()> {
     let rom_path = match &args.rom {
-        Some(rom) => utils::find_rom(rom, rom_dirs),
+        Some(rom) => utils::search_rom_dirs(rom, rom_dirs),
         None => None,
     };
     let rom_path = match rom_path {
