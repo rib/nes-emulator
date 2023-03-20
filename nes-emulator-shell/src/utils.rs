@@ -31,7 +31,7 @@ pub fn create_nes_from_binary(
     audio_sample_rate: u32,
     start_timestamp: Instant,
 ) -> Result<Nes> {
-    let cartridge = Cartridge::from_binary(&rom)?;
+    let cartridge = Cartridge::from_binary(rom)?;
     let model = match cartridge.tv_system() {
         nes_emulator::cartridge::TVSystemCompatibility::Pal => Model::Pal,
         _ => Model::Ntsc,
@@ -99,7 +99,7 @@ pub fn search_rom_dirs<P: AsRef<std::path::Path>>(
         return Some(path.into());
     } else {
         for parent in rom_dirs.iter() {
-            let abs = parent.join(&path);
+            let abs = parent.join(path);
             if abs.exists() {
                 return Some(abs);
             }

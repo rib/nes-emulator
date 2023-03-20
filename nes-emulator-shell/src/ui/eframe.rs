@@ -51,7 +51,7 @@ fn app_creator(args: Args) -> eframe::AppCreator {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn native_ui_main(args: Args, mut options: NativeOptions) -> Result<()> {
     options.renderer = Renderer::Wgpu;
-    eframe::run_native("NES Emulator", options, app_creator(args));
+    eframe::run_native("NES Emulator", options, app_creator(args)).unwrap();
     Ok(())
 }
 

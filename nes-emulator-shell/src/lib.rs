@@ -5,8 +5,6 @@
 
 use clap::Parser;
 
-use anyhow::Result;
-
 mod benchmark;
 pub mod headless;
 mod macros;

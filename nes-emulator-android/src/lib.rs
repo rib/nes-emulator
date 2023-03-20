@@ -24,17 +24,12 @@ fn android_main(app: AndroidApp) {
     log::debug!("NES Emulator: main()");
     let args = nes_shell::Args::default();
 
-    let options = if !args.headless {
-        let options = eframe::NativeOptions {
-            event_loop_builder: Some(Box::new(move |builder| {
-                builder.with_android_app(app);
-            })),
-            ..eframe::NativeOptions::default()
-        };
-        Some(options)
-    } else {
-        None
+    let options = eframe::NativeOptions {
+        event_loop_builder: Some(Box::new(move |builder| {
+            builder.with_android_app(app);
+        })),
+        ..eframe::NativeOptions::default()
     };
 
-    nes_shell::dispatch_main(args, options).unwrap();
+    nes_shell::ui::eframe::native_ui_main(args, options).expect("Failure running UI main");
 }

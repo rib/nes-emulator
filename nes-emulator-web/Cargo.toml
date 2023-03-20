@@ -27,7 +27,7 @@ anyhow = "1"
 log = "0.4"
 wasm-logger = "0.2"
 tracing-wasm = "0.2"
-egui = "0.19"
-eframe = { version = "0.19", features = [ "persistence" ] }
+egui = "0.21"
+eframe = { version = "0.21", features = [ "persistence" ] }
 console_error_panic_hook = "0.1.6"
 nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt", "wasm"] }

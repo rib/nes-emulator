@@ -106,7 +106,7 @@ impl Macro {
         {
             match PathBuf::from_str(&self.rom) {
                 Ok(path) => Some(path),
-                Err(err) => {
+                Err(_) => {
                     log::error!("No valid rom ID associated with macro {}", self.name);
                     None
                 }

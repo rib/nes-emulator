@@ -59,6 +59,7 @@ pub struct DmcDmaRequest {
     pub address: u16,
 }
 
+#[cfg(feature = "io-stats")]
 #[derive(Default, Clone, Copy)]
 pub struct IoStatsRecord {
     reads: u64,

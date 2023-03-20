@@ -143,7 +143,7 @@ impl SpritesView {
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
-                let panels_width = ui.fonts().pixels_per_point() * 100.0;
+                let panels_width = ui.fonts(|f| f.pixels_per_point() * 100.0);
 
                 egui::SidePanel::left("sprites_options_panel")
                     .resizable(false)
