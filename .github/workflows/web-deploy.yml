@@ -12,9 +12,6 @@ permissions:
 jobs:
   web-build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: nes-emulator-web
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -27,16 +24,12 @@ jobs:
           toolchain: stable
           target: wasm32-unknown-unknown
           override: true
-      - name: Build Emulator
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --manifest-path nes-emulator-web/Cargo.toml
       - name: Rust Cache # cache the rust build artefacts
         uses: Swatinem/rust-cache@v1
       - name: Download and install Trunk binary
         run: wget -qO- https://github.com/thedodd/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
       - name: Build # build
+        working-directory: nes-emulator-web
         # "${GITHUB_REPOSITORY#*/}" evaluates into the name of the repository
         # using --public-url something will allow trunk to modify all the href paths like from favicon.ico to repo_name/favicon.ico .
         # this is necessary for github pages where the site is deployed to username.github.io/repo_name and all files must be requested
@@ -51,7 +44,7 @@ jobs:
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: dist
+          folder: nes-emulator-web/dist
           # this option will not maintain any history of your previous pages deployment
           # set to false if you want all page build to be committed to your gh-pages branch history
           single-commit: true
