@@ -26,16 +26,18 @@ jobs:
           override: true
 
       - name: build pwd
+        working-directory: nes-emulator-web
         run: pwd
       - name: build ls
+        working-directory: nes-emulator-web
         run: ls
-      - uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      #- uses: actions/cache@v2
+      #  with:
+      #    path: |
+      #      ~/.cargo/registry
+      #      ~/.cargo/git
+      #      target
+      #    key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       #- name: Rust Cache # cache the rust build artefacts
       #  uses: Swatinem/rust-cache@v1
       - name: Download and install Trunk binary
