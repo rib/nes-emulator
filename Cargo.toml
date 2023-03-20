@@ -12,6 +12,8 @@ exclude = [
     "nes-emulator",
 ]
 
+default-members = [ "nes-emulator-app" ]
+
 [profile.dev]
 opt-level = 0
 
