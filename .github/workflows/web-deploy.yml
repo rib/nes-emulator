@@ -59,7 +59,7 @@ jobs:
       - name: Deploy
         #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
         if: github.ref == 'refs/heads/web-main'
-        uses: action/upload-pages-artifact@main
+        uses: actions/upload-pages-artifact@main
         #uses: JamesIves/github-pages-deploy-action@v4
         with:
           path: nes-emulator-web/dist
