@@ -51,17 +51,14 @@ jobs:
         # relatively as eframe_template/favicon.ico. if we skip public-url option, the href paths will instead request username.github.io/favicon.ico which
         # will obviously return error 404 not found.
         run: ./trunk build --release --public-url "${GITHUB_REPOSITORY#*/}"
-  deploy:
-    runs-on: ubuntu-latest
-    needs: [web-build]
-    #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
-    if: github.ref == 'refs/heads/web-main'
-    steps:
-      - name: deploy pwd
-        run: pwd
-      - name: deploy ls
-        run: ls
+      #- name: Archive production artifacts
+      #  uses: actions/upload-artifact@v3
+      #  with:
+      #    name: dist
+      #    path: dist
       - name: Deploy
+        #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
+        if: github.ref == 'refs/heads/web-main'
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: nes-emulator-web/dist
