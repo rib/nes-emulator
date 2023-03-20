@@ -4,7 +4,6 @@ on: [pull_request]
 
 env:
   RUST_BACKTRACE: 1
-  RUST_VERSION: 1.64
 
 jobs:
   # Check code formatting.
