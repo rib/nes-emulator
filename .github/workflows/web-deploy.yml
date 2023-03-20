@@ -24,8 +24,20 @@ jobs:
           toolchain: stable
           target: wasm32-unknown-unknown
           override: true
-      - name: Rust Cache # cache the rust build artefacts
-        uses: Swatinem/rust-cache@v1
+
+      - name: build pwd
+        run: pwd
+      - name: build ls
+        run: ls
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      #- name: Rust Cache # cache the rust build artefacts
+      #  uses: Swatinem/rust-cache@v1
       - name: Download and install Trunk binary
         working-directory: nes-emulator-web
         run: wget -qO- https://github.com/thedodd/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
@@ -43,6 +55,10 @@ jobs:
     #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
     if: github.ref == 'refs/heads/web-main'
     steps:
+      - name: deploy pwd
+        run: pwd
+      - name: deploy ls
+        run: ls
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
         with:
