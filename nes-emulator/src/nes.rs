@@ -1,4 +1,4 @@
-use instant::{Instant, Duration};
+use instant::{Duration, Instant};
 
 use anyhow::Result;
 

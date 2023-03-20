@@ -302,8 +302,7 @@ impl MacroBuilderView {
         }
 
         if let Some(rom_id) = current_macro.rom_id() {
-            self.view_request_sender
-                .send(ViewRequest::LoadRom(rom_id));
+            self.view_request_sender.send(ViewRequest::LoadRom(rom_id));
             self.recording_pending = true;
         }
     }

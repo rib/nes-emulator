@@ -1,5 +1,5 @@
-use nes_emulator::nes::Nes;
 use instant::{Duration, Instant};
+use nes_emulator::nes::Nes;
 
 pub struct BenchmarkState {
     nes_cpu_clock_hz: u64,

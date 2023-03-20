@@ -12,13 +12,13 @@ use std::{
     sync::mpsc,
 };
 
-use instant::{Instant, Duration};
+use instant::{Duration, Instant};
 
 use log::{debug, error};
 
 use anyhow::Result;
 
-use egui::{self, Color32, ImageData, RichText, TextureHandle, Ui, Event, Key};
+use egui::{self, Color32, Event, ImageData, Key, RichText, TextureHandle, Ui};
 use egui::{epaint::ImageDelta, ColorImage};
 
 use cpal::traits::StreamTrait;
@@ -39,12 +39,11 @@ use crate::RomIdentifier;
 use crate::{
     benchmark::BenchmarkState,
     macros::{self, Macro, MacroPlayer},
-    utils,
     ui::view::{
         apu::ApuView, debugger::DebuggerView, macro_builder::MacroBuilderView, memory::MemView,
         nametable::NametablesView, sprites::SpritesView, trace_events::TraceEventsView,
     },
-    Args,
+    utils, Args,
 };
 
 pub mod eframe;
@@ -128,7 +127,9 @@ fn load_nes_from_rom(
 ) -> (Nes, Option<RomIdentifier>) {
     if let Some((rom, rom_name)) = rom {
         match utils::create_nes_from_binary(rom, audio_sample_rate, start_timestamp) {
-            Ok(nes) => { return (nes, Some(rom_name)); }
+            Ok(nes) => {
+                return (nes, Some(rom_name));
+            }
             Err(err) => {
                 notices.push_back(Notice {
                     level: log::Level::Error,
@@ -140,7 +141,7 @@ fn load_nes_from_rom(
     }
     (
         Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp),
-        None
+        None,
     )
 }
 
@@ -315,7 +316,6 @@ pub struct EmulatorUi {
     real_time: bool,
 
     //modifiers: ModifiersState,
-
     notices: VecDeque<Notice>,
 
     audio_device: cpal::Device,
@@ -387,11 +387,7 @@ impl ::eframe::App for EmulatorUi {
 }
 
 impl EmulatorUi {
-    pub fn new(
-        args: Args,
-        ctx: &egui::Context,
-    ) -> Result<Self> {
-
+    pub fn new(args: Args, ctx: &egui::Context) -> Result<Self> {
         log::debug!("EmulatorUi::new");
 
         let mut notices = VecDeque::new();
@@ -435,12 +431,8 @@ impl EmulatorUi {
         };
         #[cfg(target_arch = "wasm32")]
         let (mut nes, rom_dirs, loaded_rom) = {
-            let (mut nes, loaded_rom) = load_nes_from_rom(
-                None,
-                audio_sample_rate,
-                Instant::now(),
-                &mut notices,
-            );
+            let (mut nes, loaded_rom) =
+                load_nes_from_rom(None, audio_sample_rate, Instant::now(), &mut notices);
             (nes, vec![], loaded_rom)
         };
 
@@ -1005,9 +997,13 @@ impl EmulatorUi {
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {
-
         for event in ctx.input().raw.events.iter() {
-            if let Event::Key { key, modifiers, pressed } = event {
+            if let Event::Key {
+                key,
+                modifiers,
+                pressed,
+            } = event
+            {
                 if !pressed {
                     match key {
                         Key::Escape => {
@@ -1042,20 +1038,14 @@ impl EmulatorUi {
                     if *pressed {
                         // run the macro builder hook first so it can see if the input is redundant
                         #[cfg(feature = "macro-builder")]
-                        self.macro_builder_view.controller_input_hook(
-                            &mut self.nes,
-                            button,
-                            true,
-                        );
+                        self.macro_builder_view
+                            .controller_input_hook(&mut self.nes, button, true);
                         self.nes.system_mut().port1.press_button(button);
                     } else {
                         // run the macro builder hook first so it can see if the input is redundant
                         #[cfg(feature = "macro-builder")]
-                        self.macro_builder_view.controller_input_hook(
-                            &mut self.nes,
-                            button,
-                            false,
-                        );
+                        self.macro_builder_view
+                            .controller_input_hook(&mut self.nes, button, false);
                         self.nes.system_mut().port1.release_button(button);
                     }
                 }

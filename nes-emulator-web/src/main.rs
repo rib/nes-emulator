@@ -1,5 +1,3 @@
-
-
 use clap::Parser;
 
 use nes_emulator_shell as nes_shell;

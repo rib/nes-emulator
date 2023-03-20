@@ -1,3 +1,4 @@
+use instant::{Duration, Instant};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -6,7 +7,6 @@ use std::{
     path::Path,
     rc::Rc,
 };
-use instant::{Duration, Instant};
 
 use anyhow::Result;
 use nes_emulator::{

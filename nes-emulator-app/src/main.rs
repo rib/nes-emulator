@@ -1,5 +1,3 @@
-
-
 use anyhow::Result;
 use clap::Parser;
 
@@ -24,7 +22,6 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
 
 // when compiling to web using trunk.
 #[cfg(target_arch = "wasm32")]

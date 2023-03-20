@@ -760,7 +760,11 @@ impl TraceEventsView {
             //painter.add(egui::Shape::Rect(epaint::RectShape::filled(inset, epaint::Rounding::none(), egui::Color32::LIGHT_GREEN)));
         }
         if highlight {
-            painter.add(egui::Shape::Rect(epaint::RectShape::filled(rect, epaint::Rounding::none(), egui::Color32::YELLOW)));
+            painter.add(egui::Shape::Rect(epaint::RectShape::filled(
+                rect,
+                epaint::Rounding::none(),
+                egui::Color32::YELLOW,
+            )));
         }
         if self.show_apu_output != ApuOutput::None {
             let half_width = rect.width() / 2.0f32;
