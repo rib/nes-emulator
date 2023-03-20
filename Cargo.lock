@@ -1098,6 +1098,7 @@ checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 [[package]]
 name = "ecolor"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1106,6 +1107,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.21.3"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "bytemuck",
  "directories-next",
@@ -1134,6 +1136,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "accesskit",
  "ahash 0.8.1",
@@ -1147,6 +1150,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "bytemuck",
  "epaint",
@@ -1159,6 +1163,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.21.1"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "accesskit_winit",
  "arboard",
@@ -1174,6 +1179,7 @@ dependencies = [
 [[package]]
 name = "egui_extras"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "egui",
  "serde",
@@ -1182,6 +1188,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1201,6 +1208,7 @@ checksum = "90e5c1c8368803113bf0c9584fc495a58b86dc8a29edbf8fe877d21d9507e797"
 [[package]]
 name = "emath"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1254,6 +1262,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.21.0"
+source = "git+https://github.com/rib/egui?branch=no-android-activity-dep#0dff46623b7102b25bc0baf591fb4d8c079227ee"
 dependencies = [
  "ab_glyph",
  "ahash 0.8.1",
