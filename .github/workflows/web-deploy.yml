@@ -12,6 +12,9 @@ permissions:
 jobs:
   web-build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nes-emulator-web
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
