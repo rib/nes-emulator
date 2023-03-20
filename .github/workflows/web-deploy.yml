@@ -59,9 +59,11 @@ jobs:
       - name: Deploy
         #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
         if: github.ref == 'refs/heads/web-main'
-        uses: JamesIves/github-pages-deploy-action@v4
+        uses: action/upload-pages-artifact
+        #uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: nes-emulator-web/dist
+          path: nes-emulator-web/dist
+          #folder: nes-emulator-web/dist
           # this option will not maintain any history of your previous pages deployment
           # set to false if you want all page build to be committed to your gh-pages branch history
-          single-commit: true
+          #single-commit: true
