@@ -40,7 +40,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: [web-build]
-    if: github.ref == 'refs/heads/main'
+    #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
+    if: github.ref == 'refs/heads/web-main'
     steps:
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
