@@ -101,7 +101,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path nes-emulator-app/Cargo.toml
+          args: --release --manifest-path nes-emulator-app/Cargo.toml
       - name: Unit tests
         uses: actions-rs/cargo@v1
         with:
