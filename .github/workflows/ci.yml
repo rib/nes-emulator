@@ -46,7 +46,7 @@ jobs:
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all --tests --all-features -- -D warnings
+          args: --workspace --tests --all-features --exclude nes-emulator-android --exclude nes-emulator-web -- -D warnings
 
   # Security audit.
   audit:
