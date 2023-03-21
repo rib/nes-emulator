@@ -56,6 +56,11 @@ jobs:
       #  uses: actions/upload-pages-artifact@main
       #  with:
       #    path: nes-emulator-web/dist
+      - uses: actions/download-artifact@v3
+        with:
+          name: test-results
+      - name: Convert Results to HTML
+        run: ./tests/results-to-html.py results.json > nes-emulator-web/dist/tests.html
       - name: Deploy
         #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
         if: github.ref == 'refs/heads/web-main'
