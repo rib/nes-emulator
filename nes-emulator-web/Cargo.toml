@@ -31,3 +31,4 @@ egui = "0.21"
 eframe = { version = "0.21", features = [ "persistence" ] }
 console_error_panic_hook = "0.1.6"
 nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt", "wasm"] }
+wasm-bindgen-futures = "0.4"

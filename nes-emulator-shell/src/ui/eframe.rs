@@ -56,9 +56,9 @@ pub fn native_ui_main(args: Args, mut options: NativeOptions) -> Result<()> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn web_ui_main(args: Args, canvas_id: &str) -> Result<()> {
+pub async fn web_ui_main(args: Args, canvas_id: &str) -> Result<()> {
     log::debug!("web_ui_main");
     let web_options = eframe::WebOptions::default();
-    eframe::start_web(canvas_id, web_options, app_creator(args)).expect("failed to start eframe");
+    eframe::start_web(canvas_id, web_options, app_creator(args)).await.unwrap();
     Ok(())
 }

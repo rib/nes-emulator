@@ -2276,6 +2276,7 @@ dependencies = [
  "log",
  "nes-emulator-shell",
  "tracing-wasm",
+ "wasm-bindgen-futures",
  "wasm-logger",
 ]
 
