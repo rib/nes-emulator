@@ -4,9 +4,6 @@ version = "0.1.0"
 authors = ["Robert Bragg <robert@sixbynine.org>"]
 edition = "2021"
 
-[build]
-target = "aarch64-linux-android"
-
 [lib]
 name="main"
 crate_type=["cdylib"]

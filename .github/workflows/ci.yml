@@ -42,11 +42,26 @@ jobs:
           components: clippy
           profile: minimal
           override: true
-      - name: Run clippy
+      - name: Install Rust targets
+        run: >
+          rustup target add
+          aarch64-linux-android
+          wasm32-unknown-unknown
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+      - name: Run clippy (Common)
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --workspace --tests --all-features --exclude nes-emulator-android --exclude nes-emulator-web -- -D warnings
+      - name: Run clippy (Web)
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --package nes-emulator-web --tests --all-features --target wasm32-unknown-unknown -- -D warnings
+      - name: Run clippy (Android) # actions-rs/clippy-check doesn't support cargo ndk
+        working-directory: nes-emulator-android
+        run: ndk -t arm64-v8a check --package nes-emulator-android
 
   # Security audit.
   audit:
