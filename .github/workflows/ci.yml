@@ -58,7 +58,7 @@ jobs:
         run: cargo install cargo-ndk
       - name: Run clippy (Android) # actions-rs/clippy-check doesn't support cargo ndk
         working-directory: nes-emulator-android
-        run: ndk -t arm64-v8a check --package nes-emulator-android
+        run: cargo ndk -t arm64-v8a check --package nes-emulator-android
 
   # Security audit.
   audit:
