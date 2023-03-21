@@ -9,11 +9,13 @@ use nes_emulator::{genie::GameGenieCode, hook::HookHandle, nes::Nes, port::Contr
 use crate::{
     macros::{self, InputEvent, Macro, MacroCommand, MacroPlayer, MacroWait},
     ui::{ViewRequest, ViewRequestSender},
-    utils, Args, RomIdentifier,
+    Args, RomIdentifier,
 };
 
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use crate::ui::EmulatorUi;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::utils;
 
 struct MacroBuilderHookState {
     crc32: u32,

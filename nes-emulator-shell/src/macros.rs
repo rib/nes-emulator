@@ -1,14 +1,5 @@
-use instant::{Duration, Instant};
-use std::collections::HashSet;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::{
-    cell::{Cell, RefCell},
-    path::Path,
-    rc::Rc,
-};
-
 use anyhow::Result;
+use instant::{Duration, Instant};
 use nes_emulator::{
     genie::GameGenieCode,
     hook::HookHandle,
@@ -17,6 +8,14 @@ use nes_emulator::{
     ppu::{DotBreakpointCallbackAction, DotBreakpointHandle},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::{
+    cell::{Cell, RefCell},
+    path::Path,
+    rc::Rc,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use std::{path::PathBuf, str::FromStr};
 
 use crate::RomIdentifier;
 

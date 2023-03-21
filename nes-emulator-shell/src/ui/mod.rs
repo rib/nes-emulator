@@ -1,15 +1,8 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::{
-    cell::RefCell,
-    collections::VecDeque,
-    fmt::Debug,
-    fs::File,
-    io::BufWriter,
-    num::NonZeroUsize,
-    path::{Path, PathBuf},
-    rc::Rc,
-    sync::mpsc,
+    cell::RefCell, collections::VecDeque, fmt::Debug, fs::File, io::BufWriter, num::NonZeroUsize,
+    path::PathBuf, rc::Rc, sync::mpsc,
 };
 
 use instant::{Duration, Instant};
@@ -48,6 +41,9 @@ use crate::{
 
 pub mod eframe;
 mod view;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ::std::path::Path;
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
@@ -431,7 +427,7 @@ impl EmulatorUi {
         };
         #[cfg(target_arch = "wasm32")]
         let (mut nes, rom_dirs, loaded_rom) = {
-            let (mut nes, loaded_rom) =
+            let (nes, loaded_rom) =
                 load_nes_from_rom(None, audio_sample_rate, Instant::now(), &mut notices);
             (nes, vec![], loaded_rom)
         };
@@ -766,9 +762,9 @@ impl EmulatorUi {
                 ViewRequest::LoadRom(id) => {
                     #[cfg(target_arch = "wasm32")]
                     let success = {
-                        let rom = self.preloaded_rom_library.get(&id).map(|rom| rom.clone());
+                        let rom = self.preloaded_rom_library.get(&id).cloned();
                         if let Some(rom) = rom {
-                            self.poweron_nes_from_rom(&rom, id.clone());
+                            self.poweron_nes_from_rom(&rom, id);
                             self.set_paused(false);
                             true
                         } else {
