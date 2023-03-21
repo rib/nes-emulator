@@ -47,8 +47,6 @@ jobs:
           rustup target add
           aarch64-linux-android
           wasm32-unknown-unknown
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
       - name: Run clippy (Common)
         uses: actions-rs/clippy-check@v1
         with:
@@ -59,6 +57,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --package nes-emulator-web --tests --all-features --target wasm32-unknown-unknown -- -D warnings
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
       - name: Run clippy (Android) # actions-rs/clippy-check doesn't support cargo ndk
         working-directory: nes-emulator-android
         run: ndk -t arm64-v8a check --package nes-emulator-android
