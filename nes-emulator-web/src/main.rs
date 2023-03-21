@@ -3,7 +3,6 @@ use clap::Parser;
 
 use nes_emulator_shell as nes_shell;
 
-
 fn main() {
     // Make sure panics are logged using `console.error`.
     console_error_panic_hook::set_once();
@@ -16,6 +15,8 @@ fn main() {
     let args = nes_shell::Args::parse();
 
     wasm_bindgen_futures::spawn_local(async {
-        nes_shell::ui::eframe::web_ui_main(args, "nes_emulator_canvas").await.expect("Failed to run web main");
+        nes_shell::ui::eframe::web_ui_main(args, "nes_emulator_canvas")
+            .await
+            .expect("Failed to run web main");
     });
 }
