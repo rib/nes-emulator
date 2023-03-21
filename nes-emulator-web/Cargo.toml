@@ -12,7 +12,9 @@ name = "nes_emulator"
 default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder", "trace-events" ]
 unsafe-opt = [ "nes-emulator-shell/unsafe-opt" ]
 nsf-player = [ "nes-emulator-shell/nsf-player" ]
-ppu-simulator = [ "nes-emulator-shell/ppu-simulator" ]
+
+# Compiling the PPU simulator would require the wasm32-unknown-emscripten target
+#ppu-simulator = [ "nes-emulator-shell/ppu-simulator" ]
 
 cpu-trace = [ "nes-emulator-shell/cpu-trace" ]
 cpu-debugger = [ "nes-emulator-shell/cpu-debugger" ]
