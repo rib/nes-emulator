@@ -47,16 +47,13 @@ jobs:
           rustup target add
           aarch64-linux-android
           wasm32-unknown-unknown
+
+      # actions-rs/clippy-check is basically unmaintained causes lots of warnings about
+      # using deprecated features so we just run clippy manually
       - name: Run clippy (Common)
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --workspace --tests --all-features --exclude nes-emulator-android --exclude nes-emulator-web -- -D warnings
+        run: cargo clippy --workspace --tests --all-features --exclude nes-emulator-android --exclude nes-emulator-web -- -D warnings
       - name: Run clippy (Web)
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --package nes-emulator-web --tests --all-features --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy --package nes-emulator-web --tests --all-features --target wasm32-unknown-unknown -- -D warnings
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
       - name: Run clippy (Android) # actions-rs/clippy-check doesn't support cargo ndk
