@@ -1,5 +1,5 @@
-use nes_emulator::nes::Nes;
 use instant::{Duration, Instant};
+use nes_emulator::nes::Nes;
 
 pub struct BenchmarkState {
     nes_cpu_clock_hz: u64,
@@ -114,7 +114,7 @@ impl BenchmarkState {
             self.last_stats_update_timestamp = now;
             self.last_stats_update_frame_no = self.frame_count;
             self.last_stats_update_cpu_clock = cpu_clock;
-            self.profiled_aggregate_fps = aggregate_fps as f32;
+            self.profiled_aggregate_fps = aggregate_fps;
             self.profiled_aggregate_clocks_per_second = aggregate_cps;
         }
     }

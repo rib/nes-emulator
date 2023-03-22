@@ -12,7 +12,9 @@ name = "nes_emulator"
 default = [ "unsafe-opt", "nsf-player", "cpu-trace", "cpu-debugger", "sprite-view", "macro-builder", "trace-events" ]
 unsafe-opt = [ "nes-emulator-shell/unsafe-opt" ]
 nsf-player = [ "nes-emulator-shell/nsf-player" ]
-ppu-simulator = [ "nes-emulator-shell/ppu-simulator" ]
+
+# Compiling the PPU simulator would require the wasm32-unknown-emscripten target
+#ppu-simulator = [ "nes-emulator-shell/ppu-simulator" ]
 
 cpu-trace = [ "nes-emulator-shell/cpu-trace" ]
 cpu-debugger = [ "nes-emulator-shell/cpu-debugger" ]
@@ -27,7 +29,8 @@ anyhow = "1"
 log = "0.4"
 wasm-logger = "0.2"
 tracing-wasm = "0.2"
-egui = "0.19"
-eframe = { version = "0.19", features = [ "persistence" ] }
+egui = "0.21"
+eframe = { version = "0.21", features = [ "persistence" ] }
 console_error_panic_hook = "0.1.6"
 nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt", "wasm"] }
+wasm-bindgen-futures = "0.4"

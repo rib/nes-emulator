@@ -1,0 +1,87 @@
+name: Web Deployment
+
+on:
+  pull_request:
+    branches: ['main', 'web-*']
+  push:
+    branches: ['main', 'web-*']
+
+permissions:
+  contents: write # for committing to gh-pages branch.
+
+jobs:
+  web-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: true
+      - name: Install rust
+        uses: actions-rs/toolchain@v1 # get rust toolchain for wasm
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Install Wasm32 target
+        run: >
+          rustup target add
+          wasm32-unknown-unknown
+      #- uses: actions/cache@v2
+      #  with:
+      #    path: |
+      #      ~/.cargo/registry
+      #      ~/.cargo/git
+      #      target
+      #    key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      #- name: Rust Cache # cache the rust build artefacts
+      #  uses: Swatinem/rust-cache@v1
+      - name: Download and install Trunk binary
+        run: cargo install trunk
+      #- name: Download and install Trunk binary
+      #  working-directory: nes-emulator-web
+      #  run: wget -qO- https://github.com/thedodd/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
+      - name: Build # build
+        working-directory: nes-emulator-web
+        # "${GITHUB_REPOSITORY#*/}" evaluates into the name of the repository
+        # using --public-url something will allow trunk to modify all the href paths like from favicon.ico to repo_name/favicon.ico .
+        # this is necessary for github pages where the site is deployed to username.github.io/repo_name and all files must be requested
+        # relatively as eframe_template/favicon.ico. if we skip public-url option, the href paths will instead request username.github.io/favicon.ico which
+        # will obviously return error 404 not found.
+        #
+        # XXX: Build was failing because GITHUB_REPOSITORY wasn't set - not worth investigating
+        run: trunk build --release --public-url "https://rib.github.io/nes-emulator/"
+      #- name: Deploy
+      #  #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
+      #  if: github.ref == 'refs/heads/web-main'
+      #  uses: actions/upload-pages-artifact@main
+      #  with:
+      #    path: nes-emulator-web/dist
+
+      - name: Build Emulator
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --manifest-path nes-emulator-app/Cargo.toml
+
+      - name: Emulator ROM Tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: -- -d roms/nes-test-roms -m tests/tests.json -p all -q --results results.json
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Convert Results to HTML
+        run: python tests/results-to-html.py tests/tests.json results.json -o nes-emulator-web/dist/tests.html
+
+      - name: Deploy
+        #if: contains(fromJson('["refs/heads/main", "refs/heads/web-main"]'), github.ref)
+        if: github.ref == 'refs/heads/web-main'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: nes-emulator-web/dist
+          # this option will not maintain any history of your previous pages deployment
+          # set to false if you want all page build to be committed to your gh-pages branch history
+          single-commit: true

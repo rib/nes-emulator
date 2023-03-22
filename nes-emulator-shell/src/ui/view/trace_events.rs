@@ -760,7 +760,11 @@ impl TraceEventsView {
             //painter.add(egui::Shape::Rect(epaint::RectShape::filled(inset, epaint::Rounding::none(), egui::Color32::LIGHT_GREEN)));
         }
         if highlight {
-            painter.add(egui::Shape::Rect(epaint::RectShape::filled(rect, epaint::Rounding::none(), egui::Color32::YELLOW)));
+            painter.add(egui::Shape::Rect(epaint::RectShape::filled(
+                rect,
+                epaint::Rounding::none(),
+                egui::Color32::YELLOW,
+            )));
         }
         if self.show_apu_output != ApuOutput::None {
             let half_width = rect.width() / 2.0f32;
@@ -800,7 +804,7 @@ impl TraceEventsView {
         );
 
         if ui.rect_contains_pointer(response.rect) {
-            let scroll_delta = ui.ctx().input().zoom_delta();
+            let scroll_delta = ui.ctx().input(|i| i.zoom_delta());
             if scroll_delta > 1.0 {
                 self.zoom_in();
             } else if scroll_delta < 1.0 {
@@ -818,8 +822,8 @@ impl TraceEventsView {
         let allocation_pos = response.rect.left_top();
         let allocation_width = response.rect.width();
         let allocation_height = response.rect.height();
-        let alloc_scale_x = allocation_width / logical_width as f32;
-        let alloc_scale_y = allocation_height / logical_height as f32;
+        let alloc_scale_x = allocation_width / logical_width;
+        let alloc_scale_y = allocation_height / logical_height;
 
         let allocation_x_to_nes_px = TRACE_EVENTS_DOT_WIDTH as f32 / allocation_width;
         let allocation_y_to_nes_px = TRACE_EVENTS_DOT_HEIGHT as f32 / allocation_height;
@@ -1004,7 +1008,7 @@ impl TraceEventsView {
                     .process_main_events_line(
                         nes,
                         cull_line,
-                        &dot_horizontal_cull,
+                        dot_horizontal_cull,
                         show_current_events,
                         &ppu_to_cpu_mapper,
                         ppu_line_start_index,
@@ -1033,7 +1037,7 @@ impl TraceEventsView {
                     .process_secondary_apu_events_line(
                         nes,
                         cull_line,
-                        &dot_horizontal_cull,
+                        dot_horizontal_cull,
                         show_current_events,
                         apu_line_start_index,
                         line_start_cpu_clk,
@@ -1182,7 +1186,7 @@ impl TraceEventsView {
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
-                let panels_width = ui.fonts().pixels_per_point() * 100.0;
+                let panels_width = ui.fonts(|f| f.pixels_per_point() * 100.0);
 
                 egui::SidePanel::left("trace_events_options_panel")
                     .resizable(false)

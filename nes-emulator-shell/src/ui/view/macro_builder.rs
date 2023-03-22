@@ -3,14 +3,19 @@ use std::{
 };
 
 use egui::{Align, Layout, TextEdit, Vec2};
-use egui_extras::{Size, TableBuilder};
+use egui_extras::{Column, TableBuilder};
 use nes_emulator::{genie::GameGenieCode, hook::HookHandle, nes::Nes, port::ControllerButton};
 
 use crate::{
     macros::{self, InputEvent, Macro, MacroCommand, MacroPlayer, MacroWait},
-    ui::{EmulatorUi, ViewRequest, ViewRequestSender},
-    utils, Args, RomIdentifier,
+    ui::{ViewRequest, ViewRequestSender},
+    Args, RomIdentifier,
 };
+
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+use crate::ui::EmulatorUi;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::utils;
 
 struct MacroBuilderHookState {
     crc32: u32,
@@ -302,8 +307,7 @@ impl MacroBuilderView {
         }
 
         if let Some(rom_id) = current_macro.rom_id() {
-            self.view_request_sender
-                .send(ViewRequest::LoadRom(rom_id));
+            self.view_request_sender.send(ViewRequest::LoadRom(rom_id));
             self.recording_pending = true;
         }
     }
@@ -438,22 +442,22 @@ impl MacroBuilderView {
                     });
                 });
 
-                let panel_width = ui.fonts().pixels_per_point() * 150.0;
+                let panel_width = ui.fonts(|f| f.pixels_per_point() * 150.0);
 
                 egui::TopBottomPanel::bottom("macro_builder_footer").frame(egui::Frame::none()).show_inside(ui, |ui| {
 
                     ui.horizontal(|ui| {
 
-                        let height = ui.fonts().pixels_per_point() * 10.0;
-                        let labels_width = ui.fonts().pixels_per_point() * 100.0;
+                        let height = ui.fonts(|f| f.pixels_per_point() * 10.0);
+                        let labels_width = ui.fonts(|f| f.pixels_per_point() * 100.0);
 
                         ui.allocate_ui(Vec2::new(labels_width, height), |ui| {
                             ui.set_min_width(labels_width);
                             let frame = nes.ppu_mut().frame;
-                            let label = egui::Label::new(&format!("Frame: {frame}")).sense(egui::Sense::click());
+                            let label = egui::Label::new(format!("Frame: {frame}")).sense(egui::Sense::click());
                             ui.add(label).context_menu(|ui| {
                                 if ui.button("Copy").clicked() {
-                                    ui.output().copied_text = format!("{frame}");
+                                    ui.output_mut(|o| o.copied_text = format!("{frame}"));
                                     ui.close_menu();
                                 }
                             });
@@ -462,10 +466,10 @@ impl MacroBuilderView {
                         ui.allocate_ui(Vec2::new(labels_width, height), |ui| {
                             ui.set_min_width(labels_width);
                             let cycle = nes.cpu_clock();
-                            let label = egui::Label::new(&format!("CPU Cycle: {cycle}")).sense(egui::Sense::click());
+                            let label = egui::Label::new(format!("CPU Cycle: {cycle}")).sense(egui::Sense::click());
                             ui.add(label).context_menu(|ui| {
                                 if ui.button("Copy").clicked() {
-                                    ui.output().copied_text = format!("{cycle}");
+                                    ui.output_mut(|o| o.copied_text = format!("{cycle}"));
                                     ui.close_menu();
                                 }
                             });
@@ -474,10 +478,10 @@ impl MacroBuilderView {
                         ui.allocate_ui(Vec2::new(labels_width, height), |ui| {
                             ui.set_min_width(labels_width);
                             let dot = nes.ppu_mut().dot;
-                            let label = egui::Label::new(&format!("Line Dot: {dot}")).sense(egui::Sense::click());
+                            let label = egui::Label::new(format!("Line Dot: {dot}")).sense(egui::Sense::click());
                             ui.add(label).context_menu(|ui| {
                                 if ui.button("Copy").clicked() {
-                                    ui.output().copied_text = format!("{dot}");
+                                    ui.output_mut(|o| o.copied_text = format!("{dot}"));
                                     ui.close_menu();
                                 }
                             });
@@ -487,10 +491,10 @@ impl MacroBuilderView {
                             ui.set_min_width(labels_width);
                             let crc = self.hook_state.borrow().crc32;
                             let crc_text = format!("{crc:08x}");
-                            let label = egui::Label::new(&format!("Frame CRC: {crc_text}")).sense(egui::Sense::click());
+                            let label = egui::Label::new(format!("Frame CRC: {crc_text}")).sense(egui::Sense::click());
                             ui.add(label).context_menu(|ui| {
                                 if ui.button("Copy").clicked() {
-                                    ui.output().copied_text = crc_text;
+                                    ui.output_mut(|o| o.copied_text = crc_text);
                                     ui.close_menu();
                                 }
                             });
@@ -754,8 +758,8 @@ impl MacroBuilderView {
                             let mut to_delete = vec![];
 
                             TableBuilder::new(ui)
-                                .column(Size::exact(300.0))
-                                .column(Size::exact(15.0)) // delete icon
+                                .column(Column::exact(300.0))
+                                .column(Column::exact(15.0)) // delete icon
                                 .body(|body| {
                                     body.rows(15.0, current_macro.commands.len(), |row_index, mut row| {
                                         row.col(|ui| {

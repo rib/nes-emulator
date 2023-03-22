@@ -1,24 +1,17 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::{
-    cell::RefCell,
-    collections::VecDeque,
-    fmt::Debug,
-    fs::File,
-    io::BufWriter,
-    num::NonZeroUsize,
-    path::{Path, PathBuf},
-    rc::Rc,
-    sync::mpsc,
+    cell::RefCell, collections::VecDeque, fmt::Debug, fs::File, io::BufWriter, num::NonZeroUsize,
+    path::PathBuf, rc::Rc, sync::mpsc,
 };
 
-use instant::{Instant, Duration};
+use instant::{Duration, Instant};
 
 use log::{debug, error};
 
 use anyhow::Result;
 
-use egui::{self, Color32, ImageData, RichText, TextureHandle, Ui, Event, Key};
+use egui::{self, Color32, Event, ImageData, Key, RichText, TextureHandle, TextureOptions, Ui};
 use egui::{epaint::ImageDelta, ColorImage};
 
 use cpal::traits::StreamTrait;
@@ -39,16 +32,18 @@ use crate::RomIdentifier;
 use crate::{
     benchmark::BenchmarkState,
     macros::{self, Macro, MacroPlayer},
-    utils,
     ui::view::{
         apu::ApuView, debugger::DebuggerView, macro_builder::MacroBuilderView, memory::MemView,
         nametable::NametablesView, sprites::SpritesView, trace_events::TraceEventsView,
     },
-    Args,
+    utils, Args,
 };
 
 pub mod eframe;
 mod view;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ::std::path::Path;
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
@@ -128,7 +123,9 @@ fn load_nes_from_rom(
 ) -> (Nes, Option<RomIdentifier>) {
     if let Some((rom, rom_name)) = rom {
         match utils::create_nes_from_binary(rom, audio_sample_rate, start_timestamp) {
-            Ok(nes) => { return (nes, Some(rom_name)); }
+            Ok(nes) => {
+                return (nes, Some(rom_name));
+            }
             Err(err) => {
                 notices.push_back(Notice {
                     level: log::Level::Error,
@@ -140,7 +137,7 @@ fn load_nes_from_rom(
     }
     (
         Nes::new(Model::Ntsc, audio_sample_rate, start_timestamp),
-        None
+        None,
     )
 }
 
@@ -154,7 +151,7 @@ pub fn blank_texture_for_framebuffer(
         pixels: vec![Color32::default(); info.width() * info.height()],
     };
     let blank = ImageData::Color(blank);
-    ctx.load_texture(name, blank, egui::TextureFilter::Nearest)
+    ctx.load_texture(name, blank, TextureOptions::NEAREST)
 }
 
 pub fn full_framebuffer_image_delta(fb: &FramebufferDataRental) -> ImageDelta {
@@ -172,7 +169,7 @@ pub fn full_framebuffer_image_delta(fb: &FramebufferDataRental) -> ImageDelta {
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
                     .collect(),
             }),
-            egui::TextureFilter::Nearest,
+            TextureOptions::NEAREST,
         ),
         PixelFormat::RGB888 => ImageDelta::full(
             ImageData::Color(ColorImage {
@@ -183,7 +180,7 @@ pub fn full_framebuffer_image_delta(fb: &FramebufferDataRental) -> ImageDelta {
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 0xff))
                     .collect(),
             }),
-            egui::TextureFilter::Nearest,
+            TextureOptions::NEAREST,
         ),
         PixelFormat::GREY8 => ImageDelta::full(
             ImageData::Color(ColorImage {
@@ -194,7 +191,7 @@ pub fn full_framebuffer_image_delta(fb: &FramebufferDataRental) -> ImageDelta {
                     .map(|p| Color32::from_rgba_premultiplied(*p, *p, *p, 0xff))
                     .collect(),
             }),
-            egui::TextureFilter::Nearest,
+            TextureOptions::NEAREST,
         ),
     }
 }
@@ -255,7 +252,7 @@ fn read_audio_samples<T: Sample + Send + Debug>(
     output: &mut [T],
     _info: &OutputCallbackInfo,
 ) {
-    for frame in output.chunks_mut(nchannels * DEBUG_CLOCK_DIV as usize) {
+    for frame in output.chunks_mut(nchannels * DEBUG_CLOCK_DIV) {
         let value: T = match rx.try_recv() {
             Err(TryRecvError::Empty) => {
                 //warn!("Audio underflow!");
@@ -315,7 +312,6 @@ pub struct EmulatorUi {
     real_time: bool,
 
     //modifiers: ModifiersState,
-
     notices: VecDeque<Notice>,
 
     audio_device: cpal::Device,
@@ -387,11 +383,7 @@ impl ::eframe::App for EmulatorUi {
 }
 
 impl EmulatorUi {
-    pub fn new(
-        args: Args,
-        ctx: &egui::Context,
-    ) -> Result<Self> {
-
+    pub fn new(args: Args, ctx: &egui::Context) -> Result<Self> {
         log::debug!("EmulatorUi::new");
 
         let mut notices = VecDeque::new();
@@ -424,7 +416,7 @@ impl EmulatorUi {
                 Some(rom) => utils::search_rom_dirs(rom, &rom_dirs),
                 None => None,
             };
-            let (mut nes, loaded_rom) = load_nes_from_path(
+            let (nes, loaded_rom) = load_nes_from_path(
                 rom_path.as_ref(),
                 &rom_dirs,
                 audio_sample_rate,
@@ -435,12 +427,8 @@ impl EmulatorUi {
         };
         #[cfg(target_arch = "wasm32")]
         let (mut nes, rom_dirs, loaded_rom) = {
-            let (mut nes, loaded_rom) = load_nes_from_rom(
-                None,
-                audio_sample_rate,
-                Instant::now(),
-                &mut notices,
-            );
+            let (nes, loaded_rom) =
+                load_nes_from_rom(None, audio_sample_rate, Instant::now(), &mut notices);
             (nes, vec![], loaded_rom)
         };
 
@@ -468,7 +456,7 @@ impl EmulatorUi {
                 pixels: vec![Color32::default(); fb_width * fb_height],
             };
             let blank = ImageData::Color(blank);
-            ctx.load_texture("framebuffer", blank, egui::TextureFilter::Nearest)
+            ctx.load_texture("framebuffer", blank, TextureOptions::NEAREST)
         };
 
         let macro_queue = if let Some(library) = &args.macros {
@@ -774,9 +762,9 @@ impl EmulatorUi {
                 ViewRequest::LoadRom(id) => {
                     #[cfg(target_arch = "wasm32")]
                     let success = {
-                        let rom = self.preloaded_rom_library.get(&id).map(|rom| rom.clone());
+                        let rom = self.preloaded_rom_library.get(&id).cloned();
                         if let Some(rom) = rom {
-                            self.poweron_nes_from_rom(&rom, id.clone());
+                            self.poweron_nes_from_rom(&rom, id);
                             self.set_paused(false);
                             true
                         } else {
@@ -1005,62 +993,69 @@ impl EmulatorUi {
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {
-
-        for event in ctx.input().raw.events.iter() {
-            if let Event::Key { key, modifiers, pressed } = event {
-                if !pressed {
-                    match key {
-                        Key::Escape => {
-                            self.set_paused(!self.paused());
+        ctx.input(|i| {
+            for event in i.raw.events.iter() {
+                if let Event::Key {
+                    key,
+                    modifiers,
+                    pressed,
+                    repeat: _,
+                } = event
+                {
+                    if !pressed {
+                        match key {
+                            Key::Escape => {
+                                self.set_paused(!self.paused());
+                            }
+                            Key::R if modifiers.ctrl => {
+                                self.nes.reset();
+                            }
+                            Key::T if modifiers.ctrl => {
+                                self.nes.power_cycle(Instant::now());
+                            }
+                            Key::S if modifiers.ctrl => {
+                                #[cfg(feature = "macro-builder")]
+                                self.macro_builder_view.save();
+                            }
+                            _ => {}
                         }
-                        Key::R if modifiers.ctrl => {
-                            self.nes.reset();
-                        }
-                        Key::T if modifiers.ctrl => {
-                            self.nes.power_cycle(Instant::now());
-                        }
-                        Key::S if modifiers.ctrl => {
-                            #[cfg(feature = "macro-builder")]
-                            self.macro_builder_view.save();
-                        }
-                        _ => {}
                     }
-                }
 
-                let button = match key {
-                    Key::Enter => Some(ControllerButton::Start),
-                    Key::Space => Some(ControllerButton::Select),
-                    Key::A => Some(ControllerButton::Left),
-                    Key::D => Some(ControllerButton::Right),
-                    Key::W => Some(ControllerButton::Up),
-                    Key::S => Some(ControllerButton::Down),
-                    Key::ArrowRight => Some(ControllerButton::A),
-                    Key::ArrowLeft => Some(ControllerButton::B),
-                    _ => None,
-                };
-                if let Some(button) = button {
-                    if *pressed {
-                        // run the macro builder hook first so it can see if the input is redundant
-                        #[cfg(feature = "macro-builder")]
-                        self.macro_builder_view.controller_input_hook(
-                            &mut self.nes,
-                            button,
-                            true,
-                        );
-                        self.nes.system_mut().port1.press_button(button);
-                    } else {
-                        // run the macro builder hook first so it can see if the input is redundant
-                        #[cfg(feature = "macro-builder")]
-                        self.macro_builder_view.controller_input_hook(
-                            &mut self.nes,
-                            button,
-                            false,
-                        );
-                        self.nes.system_mut().port1.release_button(button);
+                    let button = match key {
+                        Key::Enter => Some(ControllerButton::Start),
+                        Key::Space => Some(ControllerButton::Select),
+                        Key::A => Some(ControllerButton::Left),
+                        Key::D => Some(ControllerButton::Right),
+                        Key::W => Some(ControllerButton::Up),
+                        Key::S => Some(ControllerButton::Down),
+                        Key::ArrowRight => Some(ControllerButton::A),
+                        Key::ArrowLeft => Some(ControllerButton::B),
+                        _ => None,
+                    };
+                    if let Some(button) = button {
+                        if *pressed {
+                            // run the macro builder hook first so it can see if the input is redundant
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view.controller_input_hook(
+                                &mut self.nes,
+                                button,
+                                true,
+                            );
+                            self.nes.system_mut().port1.press_button(button);
+                        } else {
+                            // run the macro builder hook first so it can see if the input is redundant
+                            #[cfg(feature = "macro-builder")]
+                            self.macro_builder_view.controller_input_hook(
+                                &mut self.nes,
+                                button,
+                                false,
+                            );
+                            self.nes.system_mut().port1.release_button(button);
+                        }
                     }
                 }
             }
-        }
+        });
     }
 
     pub fn draw(&mut self, ctx: &egui::Context) -> Status {
@@ -1083,7 +1078,7 @@ impl EmulatorUi {
                         .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
                         .collect(),
                 }),
-                egui::TextureFilter::Nearest,
+                TextureOptions::NEAREST,
             );
 
             ctx.tex_manager()

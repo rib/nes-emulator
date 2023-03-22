@@ -24,8 +24,8 @@ macro-builder = [ "nes-emulator-shell/macro-builder" ]
 [dependencies]
 log = "0.4"
 android_logger = "0.11.0"
-winit = { version = "0.27", features = [] }
-#winit = { version = "0.27", features = [ "android-game-activity" ] }
-egui = "0.19"
-eframe = { version = "0.19", features = [ "wgpu" ] }
+#winit = { version = "0.28", features = [] }
+winit = { version = "0.28", features = [ "android-game-activity" ] }
+egui = "0.21"
+eframe = { version = "0.21", features = [ "wgpu" ] }
 nes-emulator-shell = { path = "../nes-emulator-shell", default-features = false, features = ["unsafe-opt"] }

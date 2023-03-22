@@ -1,13 +1,12 @@
+use instant::Instant;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
-use instant::Instant;
 
 use anyhow::Result;
 
 use nes_emulator::{cartridge::Cartridge, nes::Nes, system::Model};
-
 
 // XXX: This isn't going to be a good way of creating unique filenames when built for
 // web/wasm since the timestamps don't have a standard/fixed origin
@@ -23,7 +22,7 @@ pub fn epoch_timestamp() -> u64 {
     #[cfg(target_arch = "wasm32")]
     {
         //instant::Instant::now().as_secs()
-        (instant::now()  / 1000.0) as u64
+        (instant::now() / 1000.0) as u64
     }
 }
 
@@ -32,7 +31,7 @@ pub fn create_nes_from_binary(
     audio_sample_rate: u32,
     start_timestamp: Instant,
 ) -> Result<Nes> {
-    let cartridge = Cartridge::from_binary(&rom)?;
+    let cartridge = Cartridge::from_binary(rom)?;
     let model = match cartridge.tv_system() {
         nes_emulator::cartridge::TVSystemCompatibility::Pal => Model::Pal,
         _ => Model::Ntsc,
@@ -91,13 +90,16 @@ pub fn find_shortest_rom_path(rom: &Path, rom_dirs: &[PathBuf]) -> Result<PathBu
     Ok(best)
 }
 
-pub fn search_rom_dirs<P: AsRef<std::path::Path>>(path: P, rom_dirs: &[PathBuf]) -> Option<PathBuf> {
+pub fn search_rom_dirs<P: AsRef<std::path::Path>>(
+    path: P,
+    rom_dirs: &[PathBuf],
+) -> Option<PathBuf> {
     let path = path.as_ref();
     if path.exists() {
         return Some(path.into());
     } else {
         for parent in rom_dirs.iter() {
-            let abs = parent.join(&path);
+            let abs = parent.join(path);
             if abs.exists() {
                 return Some(abs);
             }

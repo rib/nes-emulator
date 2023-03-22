@@ -5,19 +5,16 @@
 
 use clap::Parser;
 
-use anyhow::Result;
-
-pub mod headless;
-pub mod ui;
 mod benchmark;
+pub mod headless;
 mod macros;
+pub mod ui;
 mod utils;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) type RomIdentifier = String;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) type RomIdentifier = std::path::PathBuf;
-
 
 #[derive(Parser, Debug, Default)]
 #[clap(version, about, long_about = None)]
@@ -87,4 +84,3 @@ pub fn dispatch_main(args: Args, options: Option<eframe::NativeOptions>) -> Resu
     Ok(())
 }
 */
-

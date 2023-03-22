@@ -4,7 +4,6 @@ on: [pull_request]
 
 env:
   RUST_BACKTRACE: 1
-  RUST_VERSION: 1.64
 
 jobs:
   # Check code formatting.
@@ -43,11 +42,23 @@ jobs:
           components: clippy
           profile: minimal
           override: true
-      - name: Run clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all --tests --all-features -- -D warnings
+      - name: Install Rust targets
+        run: >
+          rustup target add
+          aarch64-linux-android
+          wasm32-unknown-unknown
+
+      # actions-rs/clippy-check is basically unmaintained causes lots of warnings about
+      # using deprecated features so we just run clippy manually
+      - name: Run clippy (Common)
+        run: cargo clippy --workspace --tests --all-features --exclude nes-emulator-android --exclude nes-emulator-web -- -D warnings
+      - name: Run clippy (Web)
+        run: cargo clippy --package nes-emulator-web --tests --all-features --target wasm32-unknown-unknown -- -D warnings
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+      - name: Run clippy (Android) # actions-rs/clippy-check doesn't support cargo ndk
+        working-directory: nes-emulator-android
+        run: cargo ndk -t arm64-v8a check --package nes-emulator-android
 
   # Security audit.
   audit:
@@ -87,7 +98,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path nes-emulator-ui/Cargo.toml
+          args: --release --manifest-path nes-emulator-app/Cargo.toml
       - name: Unit tests
         uses: actions-rs/cargo@v1
         with:

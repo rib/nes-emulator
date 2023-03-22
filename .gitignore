@@ -17,3 +17,6 @@
 **/BUILD
 
 /roms
+
+nes-emulator/Cargo.lock
+

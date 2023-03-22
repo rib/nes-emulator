@@ -14,13 +14,14 @@ const INITIAL_HEIGHT: u32 = 1080;
 fn app_creator(args: Args) -> eframe::AppCreator {
     log::debug!("app_creator (build)");
     Box::new(|cc| {
-
         log::debug!("AppCreator call");
         let mut fonts = egui::FontDefinitions::default();
 
         fonts.font_data.insert(
             "controller_emoji".to_owned(),
-            egui::FontData::from_static(include_bytes!("../../../assets/fonts/controller-emoji.ttf")),
+            egui::FontData::from_static(include_bytes!(
+                "../../../assets/fonts/controller-emoji.ttf"
+            )),
         );
         fonts
             .families
@@ -41,35 +42,25 @@ fn app_creator(args: Args) -> eframe::AppCreator {
 
         cc.egui_ctx.set_fonts(fonts);
 
-        let emulator = ui::EmulatorUi::new(args, &cc.egui_ctx).expect("Failed to initialize Emulator UI");
+        let emulator =
+            ui::EmulatorUi::new(args, &cc.egui_ctx).expect("Failed to initialize Emulator UI");
         Box::new(emulator)
     })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn native_ui_main(
-    args: Args,
-    mut options: NativeOptions,
-) -> Result<()> {
+pub fn native_ui_main(args: Args, mut options: NativeOptions) -> Result<()> {
     options.renderer = Renderer::Wgpu;
-    eframe::run_native(
-        "NES Emulator",
-        options,
-        app_creator(args));
+    eframe::run_native("NES Emulator", options, app_creator(args)).unwrap();
     Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn web_ui_main(
-    args: Args,
-    canvas_id: &str,
-) -> Result<()> {
+pub async fn web_ui_main(args: Args, canvas_id: &str) -> Result<()> {
     log::debug!("web_ui_main");
     let web_options = eframe::WebOptions::default();
-    eframe::start_web(
-        canvas_id,
-        web_options,
-        app_creator(args),
-    ).expect("failed to start eframe");
+    eframe::start_web(canvas_id, web_options, app_creator(args))
+        .await
+        .unwrap();
     Ok(())
 }

@@ -369,7 +369,9 @@
     "rom": "cpu_reset\\registers.nes",
     "notes": "",
     "genie_codes": [],
-    "tags": [],
+    "tags": [
+      "cpu"
+    ],
     "commands": [
       {
         "WaitForDot": {
@@ -589,6 +591,7 @@
     "notes": "",
     "genie_codes": [],
     "tags": [
+      "input",
       "dma",
       "cpu"
     ],
@@ -611,6 +614,7 @@
     "notes": "",
     "genie_codes": [],
     "tags": [
+      "input",
       "cpu",
       "dma"
     ],
@@ -632,7 +636,9 @@
     "rom": "read_joy3\\test_buttons.nes",
     "notes": "",
     "genie_codes": [],
-    "tags": [],
+    "tags": [
+      "input"
+    ],
     "commands": [
       {
         "WaitForDot": {
@@ -907,7 +913,9 @@
     "rom": "read_joy3\\thorough_test.nes",
     "notes": "",
     "genie_codes": [],
-    "tags": [],
+    "tags": [
+      "input"
+    ],
     "commands": [
       {
         "WaitForDot": {
@@ -1117,7 +1125,9 @@
     "rom": "sprite_hit_tests_2005.10.05\\03.corners.nes",
     "notes": "",
     "genie_codes": [],
-    "tags": [],
+    "tags": [
+      "ppu"
+    ],
     "commands": [
       {
         "WaitForDot": {
@@ -1517,7 +1527,6 @@
     "notes": "",
     "genie_codes": [],
     "tags": [
-      "input",
       "ppu"
     ],
     "commands": [

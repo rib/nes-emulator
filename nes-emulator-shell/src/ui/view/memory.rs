@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use egui_extras::{Size, TableBuilder};
+use egui_extras::{Column, TableBuilder};
 use nes_emulator::nes::Nes;
 
 #[derive(PartialEq, Eq)]
@@ -63,10 +63,10 @@ impl MemView {
                 let num_rows: usize = (1 << 16) / bytes_per_row;
                 let n_val_cols = bytes_per_row;
 
-                let addr_col_width = Size::exact(60.0);
-                let val_col_width = Size::exact(30.0);
-                let char_col_width = Size::exact(10.0);
-                let text_view_padding = Size::exact(100.0);
+                let addr_col_width = Column::exact(60.0);
+                let val_col_width = Column::exact(30.0);
+                let char_col_width = Column::exact(10.0);
+                let text_view_padding = Column::exact(100.0);
                 let row_height_sans_spacing = 30.0;
                 //let num_rows = 20;
                 let mut tb = TableBuilder::new(ui).column(addr_col_width);

@@ -1,4 +1,4 @@
-use egui::{epaint::ImageDelta, pos2, ColorImage, ImageData, TextureHandle, Ui};
+use egui::{epaint::ImageDelta, pos2, ColorImage, ImageData, TextureHandle, TextureOptions, Ui};
 use nes_emulator::{constants::*, nes::Nes};
 
 pub struct NametablesView {
@@ -27,11 +27,7 @@ impl NametablesView {
                 pixels: vec![egui::Color32::default(); fb_width * fb_height],
             };
             let blank = ImageData::Color(blank);
-            ctx.load_texture(
-                "nametables_framebuffer",
-                blank,
-                egui::TextureFilter::Nearest,
-            )
+            ctx.load_texture("nametables_framebuffer", blank, TextureOptions::NEAREST)
         };
 
         Self {
@@ -84,7 +80,7 @@ impl NametablesView {
                         .map(|p| egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], 255))
                         .collect(),
                 }),
-                egui::TextureFilter::Nearest,
+                TextureOptions::NEAREST,
             );
 
             ctx.tex_manager().write().set(self.texture.id(), copy);
@@ -96,7 +92,7 @@ impl NametablesView {
             .resizable(true)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
-                let panels_width = ui.fonts().pixels_per_point() * 100.0;
+                let panels_width = ui.fonts(|f| f.pixels_per_point() * 100.0);
 
                 egui::SidePanel::left("nametables_options_panel")
                     .resizable(false)
