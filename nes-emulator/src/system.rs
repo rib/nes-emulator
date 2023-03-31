@@ -32,6 +32,13 @@ impl Model {
             Model::Pal => PAL_CPU_CLOCK_HZ,
         }
     }
+
+    pub fn cpu_clocks_per_frame(&self) -> f32 {
+        match self {
+            Model::Ntsc => 29780.5,
+            Model::Pal => 33247.5,
+        }
+    }
 }
 
 bitflags! {
@@ -94,6 +101,8 @@ impl Clone for NoCloneDebugState {
 
 #[derive(Clone)]
 pub struct System {
+    pub model: Model,
+
     pub ppu: Ppu,
 
     pub apu: Apu,
@@ -133,13 +142,14 @@ impl System {
 
         #[allow(unused_mut)]
         let mut system = Self {
+            model,
             ppu,
             apu,
             dmc_dma_request: None,
             cartridge,
             wram: [0; WRAM_SIZE],
-            port1: Default::default(),
-            port2: Default::default(),
+            port1: Port::new(model),
+            port2: Port::new(model),
             open_bus_value: 0,
 
             genie_codes: vec![],
@@ -196,6 +206,15 @@ impl System {
         self.port1.power_cycle();
         self.port2.power_cycle();
 
+        // Pull out the bits we want to keep across the power cycle
+        //
+        // XXX: can we instead destructure to pull out what we want to keep,
+        // without needing all this explicit taking and swapping
+        //
+        // XXX: actually, instead of doing `*self = Self { .. }` we should
+        // probably just be specific about the things that need resetting
+        // instead (since we're keeping almost everything at this point!)
+        //
         let ppu = std::mem::take(&mut self.ppu);
         #[cfg(feature = "ppu-sim")]
         let ppu_sim_as_main = self.debug.ppu_sim_as_main;
@@ -205,8 +224,10 @@ impl System {
         let cartridge = std::mem::take(&mut self.cartridge);
         #[cfg(feature = "ppu-sim")]
         let ppu_sim_cartridge = std::mem::take(&mut self.debug.ppu_sim_cartridge);
-        let pad1 = std::mem::take(&mut self.port1);
-        let pad2 = std::mem::take(&mut self.port2);
+        let mut port1 = Port::new(self.model);
+        std::mem::swap(&mut port1, &mut self.port1);
+        let mut port2 = Port::new(self.model);
+        std::mem::swap(&mut port2, &mut self.port2);
         let genie_codes = std::mem::take(&mut self.genie_codes);
         let genie_codes_mask = std::mem::take(&mut self.genie_codes_mask);
 
@@ -214,13 +235,14 @@ impl System {
         let watch_points = std::mem::take(&mut self.debug.watch_points);
 
         *self = Self {
+            model: self.model,
             ppu,
             apu,
             dmc_dma_request: None,
             cartridge,
             wram: [0; WRAM_SIZE],
-            port1: pad1,
-            port2: pad2,
+            port1,
+            port2,
             open_bus_value: 0,
             genie_codes,
             genie_codes_mask,

@@ -141,6 +141,7 @@ impl SpritesView {
         egui::Window::new("Sprites")
             .default_width(900.0)
             .resizable(true)
+            .constrain(false)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
                 let panels_width = ui.fonts(|f| f.pixels_per_point() * 100.0);

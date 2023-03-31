@@ -36,6 +36,7 @@ impl MemView {
     pub fn draw(&mut self, nes: &mut Nes, ctx: &egui::Context) {
         egui::Window::new("Memory View")
             .resizable(true)
+            .constrain(false)
             .show(ctx, |ui| {
                 egui::SidePanel::left("memview_options_panel").show_inside(ui, |ui| {
                     egui::ComboBox::from_label("address_space")

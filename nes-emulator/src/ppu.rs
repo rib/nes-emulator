@@ -2427,6 +2427,27 @@ impl Ppu {
             self.debug.breakpoints.swap_remove(i);
         }
     }
+
+    /// Reads back a luminance value from the current front buffer.
+    ///
+    /// This luminance value can then be fed to any Zapper peripherals that
+    /// are plugged in.
+    ///
+    /// It will only read back from an 8 pixel high bar across the screen, where
+    /// the base of the bar corresponds to the current line being rendered.
+    ///
+    /// Will read back zero for:
+    /// - any scanline ahead of the current line
+    /// - a scanline that is more than 8 lines behind the current line
+    /// - or for an out-of-bounds screen coordinate
+    pub fn frontbuffer_luminance_at(&self, pos: [u8; 2]) -> u8 {
+        let x= pos[0] as usize;
+        let y = pos[1] as usize;
+        if x >= FRAME_WIDTH || y > self.line as _ || (self.line >= 8 && y <= self.line as usize - 8) {
+            return 0;
+        }
+        self.framebuffer.luminance_at(x, y)
+    }
 }
 
 /*

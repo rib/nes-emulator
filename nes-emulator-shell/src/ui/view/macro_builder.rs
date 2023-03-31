@@ -404,6 +404,7 @@ impl MacroBuilderView {
         egui::Window::new("Macro Builder")
             .default_width(900.0)
             .resizable(true)
+            .constrain(false)
             //.resize(|r| r.auto_sized())
             .show(ctx, |ui| {
 

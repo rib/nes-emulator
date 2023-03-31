@@ -20,6 +20,7 @@ use cpal::{
     OutputCallbackInfo, Sample, SampleFormat,
 };
 
+use nes_emulator::port::ControllerKind;
 use ring_channel::{ring_channel, RingReceiver, RingSender, TryRecvError};
 
 use nes_emulator::framebuffer::*;
@@ -44,6 +45,8 @@ mod view;
 
 #[cfg(not(target_arch = "wasm32"))]
 use ::std::path::Path;
+
+use self::view::inputs::InputsView;
 
 const BENCHMARK_STATS_PERIOD_SECS: u8 = 3;
 
@@ -348,12 +351,15 @@ pub struct EmulatorUi {
     queue_framebuffer_upload: bool,
     last_frame_time: Instant,
 
+    hover_pos: Option<[u8; 2]>,
+
     #[cfg(feature = "cpu-debugger")]
     debugger_view: DebuggerView,
 
     #[cfg(feature = "macro-builder")]
     macro_builder_view: MacroBuilderView,
 
+    inputs_view: InputsView,
     nametables_view: NametablesView,
 
     apu_view: ApuView,
@@ -505,6 +511,8 @@ impl EmulatorUi {
             paused,
             temp_debug_breakpoint: None,
 
+            hover_pos: None,
+
             fb_width,
             fb_height,
             //framebuffers: [framebuffer0, framebuffer1],
@@ -527,6 +535,8 @@ impl EmulatorUi {
                 view_request_sender.clone(),
                 paused,
             ),
+
+            inputs_view: InputsView::new(),
             nametables_view: NametablesView::new(ctx),
 
             apu_view: ApuView::new(),
@@ -889,6 +899,7 @@ impl EmulatorUi {
             };
 
             'progress: loop {
+
                 match self.nes.progress(target) {
                     ProgressStatus::FrameReady => {
                         self.stats.end_frame();
@@ -1163,6 +1174,7 @@ impl EmulatorUi {
             ui.label("Tools");
             ui.group(|ui| {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                    ui.toggle_value(&mut self.inputs_view.visible, "Inputs");
                     ui.toggle_value(&mut self.debugger_view.visible, "Debugger");
                     ui.toggle_value(&mut self.mem_view.visible, "Memory");
                     ui.toggle_value(&mut self.nametables_view.visible, "Nametables");
@@ -1213,10 +1225,46 @@ impl EmulatorUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add(egui::Image::new(
+            /*
+            let (response, painter) = ui.allocate_painter(
+                egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32),
+                egui::Sense::hover(),
+            );
+
+            let _img = egui::Image::new(
+                self.framebuffer_texture.id(),
+                egui::Vec2::new(self.fb_width as f32, self.fb_height as f32),
+            );
+            //let response = ui.add(egui::Image::new(self.nametables_texture.id(), egui::Vec2::new(width as f32, height as f32)));
+            // TODO(emilk): builder pattern for Mesh
+
+            let mut mesh = egui::Mesh::with_texture(self.framebuffer_texture.id());
+            mesh.add_rect_with_uv(
+                response.rect,
+                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+            painter.add(egui::Shape::mesh(mesh));
+            */
+
+            let response = ui.add(egui::Image::new(
                 self.framebuffer_texture.id(),
                 egui::Vec2::new((front.width() * 2) as f32, (front.height() * 2) as f32),
             ));
+
+            if let Some(hover_pos) = response.hover_pos() {
+                let img_pos = response.rect.left_top();
+                let img_width = response.rect.width();
+                //let _img_height = response.rect.height();
+                let img_to_nes_px = self.fb_width as f32 / img_width;
+                //let _nes_px_to_img = 1.0 / img_to_nes_px;
+
+                let x = ((hover_pos.x - img_pos.x) * img_to_nes_px) as usize;
+                let y = ((hover_pos.y - img_pos.y) * img_to_nes_px) as usize;
+                self.hover_pos = Some([x as u8, y as u8]);
+            } else {
+                self.hover_pos = None;
+            }
         });
 
         #[cfg(feature = "cpu-debugger")]
@@ -1224,6 +1272,10 @@ impl EmulatorUi {
             if self.debugger_view.visible {
                 self.debugger_view.draw(&mut self.nes, ctx);
             }
+        }
+
+        if self.inputs_view.visible {
+            self.inputs_view.draw(&mut self.nes, ctx);
         }
 
         if self.nametables_view.visible {

@@ -15,6 +15,7 @@ use crate::framebuffer::*;
 use crate::genie::GameGenieCode;
 #[cfg(feature = "trace")]
 use crate::hook::{HookHandle, HooksList};
+use crate::port::ControllerKind;
 use crate::ppu::*;
 use crate::system::*;
 
@@ -130,10 +131,9 @@ impl Nes {
     pub fn new(model: Model, audio_sample_rate: u32, start_timestamp: Instant) -> Nes {
         let cpu = Cpu::default();
         let system = System::new(model, audio_sample_rate, Cartridge::none());
-        let (cpu_clock_hz, cpu_clocks_per_frame) = match model {
-            Model::Ntsc => (NTSC_CPU_CLOCK_HZ, 29780.5),
-            Model::Pal => (PAL_CPU_CLOCK_HZ, 33247.5),
-        };
+        let cpu_clock_hz = model.cpu_clock_hz();
+        let cpu_clocks_per_frame = model.cpu_clocks_per_frame();
+
         let mut nes = Nes {
             model,
             cpu_clock_hz,
@@ -655,14 +655,27 @@ impl Nes {
             // we will simply resume caching up when `progress()` is re-called later.
             self.catch_up_ppu_drift();
 
+            if self.system.port1.kind() == ControllerKind::Zapper {
+                let luminance = self.system.port1.get_pos()
+                    .map_or(0, |pos| self.system.ppu.frontbuffer_luminance_at(pos));
+                self.system.port1.set_luminance_level(luminance);
+                self.system.port1.progress(self.cpu_clock())
+            }
+            if self.system.port2.kind() == ControllerKind::Zapper {
+                let luminance = self.system.port2.get_pos()
+                    .map_or(0, |pos| self.system.ppu.frontbuffer_luminance_at(pos));
+                self.system.port2.set_luminance_level(luminance);
+                self.system.port2.progress(self.cpu_clock())
+            }
+
             #[cfg(feature = "debugger")]
             if self.check_for_breakpoint() {
                 return ProgressStatus::Breakpoint;
             }
 
             if self.system.take_frame_ready() {
-                self.system.port1.update_button_press_latches();
-                self.system.port2.update_button_press_latches();
+                self.system.port1.finish_frame();
+                self.system.port2.finish_frame();
                 return ProgressStatus::FrameReady;
             }
 

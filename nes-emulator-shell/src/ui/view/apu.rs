@@ -82,6 +82,7 @@ impl ApuView {
     pub fn draw(&mut self, nes: &mut Nes, ctx: &egui::Context) {
         egui::Window::new("APU")
             .fixed_size(vec2(800.0, 300.0))
+            .constrain(false)
             //.resizable(true)
             .show(ctx, |ui| {
                 StripBuilder::new(ui)

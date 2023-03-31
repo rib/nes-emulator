@@ -32,6 +32,7 @@ impl DebuggerView {
         egui::Window::new("Debugger")
             .default_size(vec2(1024.0, 1024.0))
             .resizable(true)
+            .constrain(false)
             .show(ctx, |ui| {
                 egui::SidePanel::right("debugger_tools_panel").show_inside(ui, |ui| {
                     ui.vertical_centered_justified(|ui| {

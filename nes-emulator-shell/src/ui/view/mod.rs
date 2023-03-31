@@ -1,3 +1,4 @@
+pub mod inputs;
 pub mod apu;
 pub mod macro_builder;
 pub mod memory;

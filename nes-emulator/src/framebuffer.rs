@@ -165,6 +165,38 @@ impl FramebufferDataRental {
         }
     }
 
+    /// Reads back the corresponding pixel as a luminance / grey value
+    /// Any out-of-bounds pixels will read back as zero
+    pub fn luminance_at(&self, x: usize, y: usize) -> u8 {
+        if x >= self.owner.width || y >= self.owner.height {
+            return 0;
+        }
+        match self.owner.format {
+            PixelFormat::RGBA8888 => {
+                let stride = self.owner.width * 4;
+                let off = stride * y + x * 4;
+                let r = self.data[off];
+                let g = self.data[off + 1];
+                let b = self.data[off + 2];
+                let color = Color32::from_rgb(r, g, b);
+                color.to_grey()
+            }
+            PixelFormat::RGB888 => {
+                let stride = self.owner.width * 3;
+                let off = stride * y + x * 3;
+                let r = self.data[off];
+                let g = self.data[off + 1];
+                let b = self.data[off + 2];
+                let color = Color32::from_rgb(r, g, b);
+                color.to_grey()
+            }
+            PixelFormat::GREY8 => {
+                let off = self.owner.width * y + x;
+                self.data[off]
+            }
+        }
+    }
+
     pub fn clear(&mut self, mode: FramebufferClearMode) {
         match self.owner.format {
             PixelFormat::RGBA8888 => match mode {
